@@ -20,7 +20,7 @@ pub(crate) type Block = Array<u8, <aes::Aes128 as BlockSizeUser>::BlockSize>;
 
 /// Yields the secret plaintexts P[0], P[1], ... derived from key `k`
 /// per AN12304 §3.1.
-fn generate_plaintexts(k: impl Into<Block>) -> impl Iterator<Item = Block> {
+pub(crate) fn generate_plaintexts(k: impl Into<Block>) -> impl Iterator<Item = Block> {
     let mut h = k.into();
     Aes128::new(&h).encrypt_block_b2b(&Array::from([0x55; 16]), &mut h);
 
@@ -35,7 +35,7 @@ fn generate_plaintexts(k: impl Into<Block>) -> impl Iterator<Item = Block> {
 
 /// Yields the updated keys UK[0], UK[1], ... derived from key `k`
 /// per AN12304 §3.2.
-fn generate_updated_keys(k: impl Into<Block>) -> impl Iterator<Item = Block> {
+pub(crate) fn generate_updated_keys(k: impl Into<Block>) -> impl Iterator<Item = Block> {
     let mut h = k.into();
     Aes128::new(&h).encrypt_block_b2b(&Array::from([0xaa; 16]), &mut h);
 
@@ -149,6 +149,13 @@ impl Lrp {
             plaintexts,
             k_prime: k_prime.into(),
         }
+    }
+
+    /// Access to the underlying `k'` (updated key). Used by in-crate tests
+    /// to compare against known-good NXP worked examples.
+    #[cfg(test)]
+    pub(crate) fn k_prime(&self) -> &Block {
+        &self.k_prime
     }
 
     /// Load `counter` bytes into the nibble scratch buffer as a big-endian
@@ -325,6 +332,55 @@ impl Lrp {
         let n = self.lricb_decrypt_into(counter, ciphertext, pad, &mut out)?;
         out.truncate(n);
         Some(out)
+    }
+
+    /// In-place `LRICBEnc` without padding (AN12304 §3.3). `buf.len()` must
+    /// be a positive multiple of 16 — any ISO/IEC 9797‑1 Method 2 padding
+    /// must be applied by the caller. `counter` is advanced in place by one
+    /// per processed block, matching the NTAG 424 DNA `EncCtr` rule.
+    ///
+    /// Returns `None` on invalid `buf` length or unsupported counter length.
+    pub fn lricb_encrypt_in_place(&self, counter: &mut [u8], buf: &mut [u8]) -> Option<()> {
+        if buf.is_empty() || !buf.len().is_multiple_of(16) {
+            return None;
+        }
+        let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
+        let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
+
+        for chunk in buf.chunks_exact_mut(16) {
+            let pt_block = Block::try_from(&*chunk).unwrap();
+            let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
+            let mut ct_block = Block::default();
+            Aes128::new(&y).encrypt_block_b2b(&pt_block, &mut ct_block);
+            chunk.copy_from_slice(&ct_block);
+            inc(nibs);
+        }
+        Self::store_counter(nibs, counter);
+        Some(())
+    }
+
+    /// In-place `LRICBDec` without padding (AN12304 §3.3). `buf.len()` must
+    /// be a positive multiple of 16. `counter` is advanced in place by one
+    /// per processed block.
+    ///
+    /// Returns `None` on invalid `buf` length or unsupported counter length.
+    pub fn lricb_decrypt_in_place(&self, counter: &mut [u8], buf: &mut [u8]) -> Option<()> {
+        if buf.is_empty() || !buf.len().is_multiple_of(16) {
+            return None;
+        }
+        let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
+        let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
+
+        for chunk in buf.chunks_exact_mut(16) {
+            let ct_block = Block::try_from(&*chunk).unwrap();
+            let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
+            let mut pt_block = Block::default();
+            Aes128::new(&y).decrypt_block_b2b(&ct_block, &mut pt_block);
+            chunk.copy_from_slice(&pt_block);
+            inc(nibs);
+        }
+        Self::store_counter(nibs, counter);
+        Some(())
     }
 }
 
@@ -662,11 +718,40 @@ mod tests {
                 assert_eq!(got_ct, expected_ct, "encrypt vector {i}");
             }
             {
-                let mut counter = iv;
+                let mut counter = iv.clone();
                 let got_pt = lrp
                     .lricb_decrypt(&mut counter, &expected_ct, v.pad)
                     .unwrap_or_else(|| panic!("decrypt vector {i} returned None"));
                 assert_eq!(got_pt, pt, "decrypt vector {i}");
+            }
+
+            // In-place variants. They don't apply padding, so pre-pad the
+            // plaintext manually (ISO/IEC 9797-1 Method 2) for `pad=true`
+            // vectors. The decrypt output is the padded plaintext because
+            // the in-place decrypt doesn't strip padding either.
+            let padded_pt: Vec<u8> = if v.pad {
+                let mut p = pt.clone();
+                p.push(0x80);
+                while !p.len().is_multiple_of(16) {
+                    p.push(0);
+                }
+                p
+            } else {
+                pt.clone()
+            };
+            {
+                let mut buf = padded_pt.clone();
+                let mut counter = iv.clone();
+                lrp.lricb_encrypt_in_place(&mut counter, &mut buf)
+                    .unwrap_or_else(|| panic!("encrypt_in_place vector {i} returned None"));
+                assert_eq!(buf, expected_ct, "encrypt_in_place vector {i}");
+            }
+            {
+                let mut buf = expected_ct.clone();
+                let mut counter = iv;
+                lrp.lricb_decrypt_in_place(&mut counter, &mut buf)
+                    .unwrap_or_else(|| panic!("decrypt_in_place vector {i} returned None"));
+                assert_eq!(buf, padded_pt, "decrypt_in_place vector {i}");
             }
         }
     }
