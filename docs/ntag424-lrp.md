@@ -61,3 +61,20 @@ number of 16‑byte blocks processed (data + padding).
   `Vec<u8>`.
 - `generate_plaintexts` / `generate_updated_keys` — build the session key
   material from `SesAuthMasterKey` and the SDM master keys.
+
+## Originality signature (non‑LRP)
+
+Not an LRP primitive, but the only other piece of crypto exposed by
+`ntag424core::crypto`: originality verification lives in
+`ntag424core::crypto::originality` and implements AN12196 §7.2.
+
+- `Cmd.Read_Sig` (INS `3C`, C‑APDU `90 3C 00 00 01 00 00`) returns 56 raw
+  bytes of ECDSA on `secp224r1` (28‑byte `r ‖ s`, big‑endian).
+- The message is the 7‑byte UID used **directly** as the ECDSA integer
+  `z` — no hash is applied. The UID is zero‑extended on the left to the
+  28‑byte P‑224 field width before calling `verify_prehash`. AN12196 does
+  not state this; it was recovered from the Table 30 test vector.
+- `NXP_ORIGINALITY_PUBLIC_KEY_SEC1` is the shared NXP master public key
+  (same value across all NTAG 424 DNA tags). `verify_with_key` accepts a
+  caller‑supplied SEC1‑encoded key for post‑personalization scenarios
+  where a different key is used.
