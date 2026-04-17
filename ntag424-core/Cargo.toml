@@ -1,5 +1,5 @@
 [package]
-name = "ntag424core"
+name = "ntag424-core"
 version = "0.1.0"
 edition = "2024"
 
