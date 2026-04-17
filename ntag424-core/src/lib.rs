@@ -3,7 +3,8 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub mod lrp;
-
+pub mod crypto;
 pub mod session;
 mod transport;
+
+pub use transport::{Response, Transport};
