@@ -94,11 +94,10 @@ impl Version {
             .expect("slice with incorrect length")
     }
 
-    /// Calendar week of production decoded from BCD (NT4H2421Gx §10.7).
-    /// Bits 7-6 of the raw byte carry the DefaultFabKey flag and are masked off
-    /// before BCD decoding.
+    /// Calendar week of production decoded from BCD (NT4H2421Gx §10.5.2, Table 58).
+    /// Bit 7 of the raw byte is the DefaultFabKey flag; bits 6-0 are the BCD week.
     pub fn calendar_week_of_production(&self) -> u8 {
-        bcd_decode(self.part3[12] & 0b0011_1111)
+        bcd_decode(self.part3[12] & 0b0111_1111)
     }
 
     // pub fn default_fab_key(&self) -> bool {
