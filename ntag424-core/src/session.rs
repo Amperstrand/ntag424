@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::commands::{Version, get_version};
 use crate::crypto::originality::{self, OriginalityError, SIGNATURE_LEN};
+use crate::crypto::suite::SessionSuite;
 use crate::types::{ResponseCode, StatusWord, Uid};
 use crate::{PseudoApduCapable, Transport};
 
@@ -124,12 +125,12 @@ pub struct AwaitingAuthChallenge {
     key: [u8; 16],
 }
 
-pub struct Authenticated {
-    session_key: [u8; 16],
-    session_mac: [u8; 16],
+pub struct Authenticated<S: SessionSuite> {
+    suite: S,
     cmd_counter: u16,
-    /// Transaction identifier, incremented on each command.
+    /// Transaction identifier, constant for the lifetime of the authenticated
+    /// session.
     ///
-    /// Used to prevent replay attacks.
+    /// Used together with `cmd_counter` to prevent replay attacks.
     ti: [u8; 4],
 }
