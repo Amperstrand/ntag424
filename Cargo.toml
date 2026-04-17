@@ -1,0 +1,6 @@
+[workspace]
+members = ["ntag424core"]
+resolver = "3"
+
+[workspace.dependencies]
+pcsc = "2.9.0"
