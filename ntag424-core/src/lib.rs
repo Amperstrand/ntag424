@@ -1,6 +1,53 @@
-//! A transport-agnositc crate for communicating with NTAG 424 DNA NFC tags.
+//! A transport-agnostic crate for communicating with NTAG 424 DNA NFC tags.
 //!
-//! # Example
+//! # High level hardware overview
+//!
+//! The NTAG 424 DNA is a NFC tag that can perform AES-128 crypto operations for
+//! authentication and secure messaging. It has a file system with configurable access
+//! permissions through keys stored on chip.
+//!
+//! The tag stores three files:
+//!
+//! 1. The NFC _Capability Container_ (CC) file, which describes the tag's capabilities. This file
+//!    is mostly static.
+//! 2. A 256 byte long file containing data using the _NFC Data Exchange Format_ (NDEF).
+//!    This file can have dynamically computed data inserted by the tag.
+//! 3. A 128 byte long file, called _proprietary file_, containing raw data free for
+//!    the application to use.
+//!
+//! Furthermore, the tag stores a set of five[^1] application defined AES-128 keys,
+//! numbered 0 to 4, with the first key, key 0, being
+//! the _Application Master Key_. The master key is needed to change any of the keys or to configure the tag.
+//!
+//! For each file one can configure read and write permissions, either using
+//! a key or allowing free, unauthenticated access.
+//!
+//! **Default access permissions out of the factory**:
+//!
+//! | File        | Read    | Write      | ReadWrite  | Change Permissions |
+//! |-------------|---------|------------|------------|------------|
+//! | CC          | _Unauthenticated_   | Master Key | Master Key | Master Key |
+//! | NDEF        | _Unauthenticated_   | _Unauthenticated_      |  _Unauthenticated_     | Master Key |
+//! | Proprietary | Key 2   | Key 3      | Key 3      | Master Key |
+//!
+//! The stored AES keys are all constant zero out of the factory and should _all_ be replaced before deployment.
+//!
+//! ## _Secure Unique NFC_ (SUN)
+//!
+//! The NDEF file can define placeholders that are dynamically filled by the tag when read.
+//! Typically the NDEF encodes a URL with placeholders for the tag's unique identifier,
+//! and counter, usually encrypted and signed using one of the application keys.
+//!
+//! This allows the tag to provide a _Secure Unique NFC_ (SUN) identifier that can be
+//! used for cases where a identifier fulfilling cryptographic properties is needed,
+//! e.g. for anti-counterfeiting, authentication, or access control.
+//!
+//! By default the NDEF file is readable without authentication through standard NFC Type 4 commands
+//! allowing many NFC readers to read the SUN identifier without special support for the tag's cryptographic features.
+//! However, the NDEF file can also be configured to require authentication through one of the AES keys for reading.
+//!
+//! ## Example
+//!
 //! ```
 //! use ntag424_core::{Session, types::KeyNumber};
 //!
@@ -97,6 +144,8 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
 #![no_std]
 
 #[cfg(feature = "alloc")]
