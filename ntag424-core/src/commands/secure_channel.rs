@@ -15,10 +15,11 @@
 //!   [`verify_response_mac_and_advance`] directly, because only the
 //!   last response frame carries the cumulative `MACt`.
 //!
-//! `CommMode.FULL` is deliberately **not** implemented here yet — the
-//! caller is expected to drive encryption + padding explicitly through
-//! [`crate::crypto::suite::SessionSuite`] and hand the ciphertext to
-//! [`SecureChannel::send_mac`] / the two lower-level MAC primitives.
+//! `CommMode.FULL` commands use [`SecureChannel::encrypt_command`] to
+//! encrypt padded plaintext in place before handing the ciphertext to
+//! [`SecureChannel::send_mac`] / the lower-level MAC primitives. The
+//! caller is responsible for assembling and padding the plaintext; see
+//! [`crate::commands::change_key`] for a worked example.
 //!
 //! [`compute_cmd_mac`]: SecureChannel::compute_cmd_mac
 //! [`verify_response_mac_and_advance`]: SecureChannel::verify_response_mac_and_advance
@@ -90,6 +91,20 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         self.state.suite().mac(&buf[..len])
     }
 
+    /// Encrypt `buf` in place as a `CommMode.FULL` command payload
+    /// (§9.1.4 Command IV). Must be called **before**
+    /// [`Self::compute_cmd_mac`] because the MAC is computed over the
+    /// ciphertext. `buf.len()` must be a positive multiple of 16; the
+    /// caller is responsible for applying ISO/IEC 9797-1 Method 2
+    /// padding before calling this.
+    pub(crate) fn encrypt_command(&mut self, buf: &mut [u8]) {
+        let ti = *self.state.ti_bytes();
+        let cmd_ctr = self.state.counter();
+        self.state
+            .suite_mut()
+            .encrypt(Direction::Command, &ti, cmd_ctr, buf);
+    }
+
     /// Decrypt `buf` in place as a `CommMode.FULL` response payload
     /// (§9.1.4 Response IV). Must be called **after**
     /// [`Self::verify_response_mac_and_advance`] so the current
@@ -103,6 +118,13 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         self.state
             .suite_mut()
             .decrypt(Direction::Response, &ti, cmd_ctr, buf);
+    }
+
+    /// Advance `CmdCtr` without verifying a response MAC. Use only for
+    /// commands where the PICC sends no `MACt` (e.g. `ChangeKey` when
+    /// changing the currently authenticated key, §10.6.1).
+    pub(crate) fn advance_counter(&mut self) {
+        self.state.advance_counter();
     }
 
     /// Verify the 8-byte `MACt` trailing `body` — MAC input is

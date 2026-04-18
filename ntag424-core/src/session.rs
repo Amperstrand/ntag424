@@ -3,8 +3,8 @@ use core::error::Error;
 use thiserror::Error;
 
 use crate::commands::{
-    SecureChannel, authenticate_ev2_first_aes, get_card_uid, get_version, get_version_mac,
-    read_sig, read_sig_mac,
+    SecureChannel, authenticate_ev2_first_aes, change_key, get_card_uid, get_version,
+    get_version_mac, read_sig, read_sig_mac,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, SessionSuite};
@@ -118,6 +118,45 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ) -> Result<Version, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         get_version_mac(transport, &mut channel).await
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Change an application key (`ChangeKey`, INS `C4`, NT4H2421Gx §10.6.1)
+    /// in `CommMode.FULL`.
+    ///
+    /// Authentication with key 0 must be established before calling this.
+    ///
+    /// Two cases are distinguished by `key_no`:
+    ///
+    /// - **Case 1** (`key_no ≠ Key0`): The command cryptogram contains
+    ///   `NewKey ⊕ OldKey` together with `CRC32(NewKey)` (AN12196 §5.16.1).
+    ///   Pass the current PICC key as `old_key`. The PICC responds with a
+    ///   `MACt` that is verified before returning.
+    /// - **Case 2** (`key_no == Key0`): The command cryptogram contains only
+    ///   `NewKey` (AN12196 §5.16.2). `old_key` is ignored. The PICC responds
+    ///   with `91 00` (no `MACt`). The session keys remain in memory but are
+    ///   no longer valid after this call; discard the session.
+    ///
+    /// `CmdCtr` is advanced on success in both cases.
+    pub async fn change_key<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        new_key: &[u8; 16],
+        new_key_version: u8,
+        old_key: &[u8; 16],
+    ) -> Result<(), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_key(
+            transport,
+            &mut channel,
+            key_no,
+            new_key,
+            new_key_version,
+            old_key,
+        )
+        .await
     }
 }
 
