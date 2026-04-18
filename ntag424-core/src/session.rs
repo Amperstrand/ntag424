@@ -2,8 +2,11 @@ use core::error::Error;
 
 use thiserror::Error;
 
-use crate::commands::{SecureChannel, authenticate_ev2_first_aes, get_version, get_version_mac};
-use crate::crypto::originality::{self, OriginalityError, SIGNATURE_LEN};
+use crate::commands::{
+    SecureChannel, authenticate_ev2_first_aes, get_version, get_version_mac, read_sig,
+    read_sig_mac,
+};
+use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, SessionSuite};
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
 use crate::{PseudoApduCapable, Transport};
@@ -137,7 +140,8 @@ impl Session<Unauthenticated> {
         })
     }
 
-    /// Verify tag originality by its UID.
+    /// Verify tag originality by its UID, using `Read_Sig` in
+    /// `CommMode.Plain`.
     ///
     /// Issue `Read_Sig` (INS = 0x3C, NT4H2421Gx §10.12) and verify the
     /// 56-byte ECDSA originality signature against `uid` using the NXP
@@ -147,25 +151,24 @@ impl Session<Unauthenticated> {
         transport: &mut T,
         uid: &[u8; 7],
     ) -> Result<(), SessionError<T::Error>> {
-        // TODO: check in authenticated sessions
-        // DESFire-wrapped APDU: CLA=90 INS=3C P1=P2=00 Lc=01 Data=00 Le=00.
-        let response = transport
-            .transmit(&[0x90, 0x3C, 0x00, 0x00, 0x01, 0x00, 0x00])
-            .await?;
-        let code = ResponseCode::desfire(response.sw1, response.sw2);
-        if !matches!(
-            code.status(),
-            // The response code 90 91 is "documented by example" in table 30
-            // of AN12196, but nowhere else it seems, seems to be the "success" code.
-            ResponseStatus::Unknown(0x9190) | ResponseStatus::OperationOk
-        ) {
-            return Err(SessionError::ErrorResponse(code.status()));
-        }
-        let data = response.data.as_ref();
-        let sig: &[u8; SIGNATURE_LEN] = data
-            .try_into()
-            .map_err(|_| SessionError::UnexpectedLength { got: data.len() })?;
-        originality::verify(uid, sig).map_err(SessionError::OriginalityVerificationFailed)
+        let sig = read_sig(transport).await?;
+        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Verify tag originality by its UID, using `Read_Sig` in
+    /// `CommMode.MAC` (§9.1.9). Verifies the response `MACt` and
+    /// advances `CmdCtr` before running the ECDSA check against the
+    /// NXP master public key (AN12196 §7.2).
+    pub async fn verify_originality<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        uid: &[u8; 7],
+    ) -> Result<(), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let sig = read_sig_mac(transport, &mut channel).await?;
+        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
     }
 }
 

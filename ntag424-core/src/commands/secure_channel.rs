@@ -28,7 +28,7 @@ use core::error::Error;
 use core::fmt::Debug;
 
 use crate::Transport;
-use crate::crypto::suite::SessionSuite;
+use crate::crypto::suite::{Direction, SessionSuite};
 use crate::session::{Authenticated, SessionError};
 use crate::types::{ResponseCode, ResponseStatus};
 
@@ -88,6 +88,21 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
             data,
         );
         self.state.suite().mac(&buf[..len])
+    }
+
+    /// Decrypt `buf` in place as a `CommMode.FULL` response payload
+    /// (§9.1.4 Response IV). Must be called **after**
+    /// [`Self::verify_response_mac_and_advance`] so the current
+    /// `CmdCtr` already matches the one the PICC used to derive the
+    /// response IV. `buf.len()` must be a positive multiple of 16; the
+    /// caller is responsible for stripping any ISO/IEC 9797-1 Method 2
+    /// padding from the plaintext.
+    pub(crate) fn decrypt_response(&mut self, buf: &mut [u8]) {
+        let ti = *self.state.ti_bytes();
+        let cmd_ctr = self.state.counter();
+        self.state
+            .suite_mut()
+            .decrypt(Direction::Response, &ti, cmd_ctr, buf);
     }
 
     /// Verify the 8-byte `MACt` trailing `body` — MAC input is
