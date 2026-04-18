@@ -5,12 +5,14 @@ use thiserror::Error;
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
     change_master_key, get_card_uid, get_version, get_version_mac, iso_read_binary,
-    iso_select_ef_by_fid, read_sig, read_sig_mac, select_ndef_application, set_configuration,
+    iso_select_ef_by_fid, read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
+    select_ndef_application, set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
-    Configuration, File, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus, Uid, Version,
+    CommMode, Configuration, File, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus,
+    Uid, Version,
 };
 use crate::{PseudoApduCapable, Transport};
 
@@ -388,6 +390,74 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         let mut channel = SecureChannel::new(&mut self.state);
         let sig = read_sig_mac(transport, &mut channel).await?;
         originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Read `length` bytes from `file` starting at `offset`, using the
+    /// caller-supplied `mode` as the command's effective CommMode
+    /// (NT4H2421Gx §10.8.1 `ReadData`, INS `AD`).
+    ///
+    /// The effective CommMode is determined by the file's configuration
+    /// (§8.2.3.5, Table 13), with one override from §8.2.3.3: when the
+    /// only access condition granting the current session access to the
+    /// targeted right (`Read` / `ReadWrite` / `SDMFileRead`) is free
+    /// access (`Eh`), `CommMode.Plain` must be used even though the
+    /// session is authenticated. In that case the PICC expects a plain
+    /// APDU with no MAC trailer.
+    ///
+    /// The caller is responsible for picking `mode`. A convenience
+    /// wrapper that looks the mode up via `GetFileSettings` is not yet
+    /// implemented — once it is, it will call into this method.
+    ///
+    /// `length = 0` means "entire file from `offset`", capped at the
+    /// 256-byte short-`Le` response limit (§10.8.1 Table 78). When
+    /// `length != 0`, `buf.len()` must be at least `length`.
+    ///
+    /// Returns the number of bytes copied into `buf`. `CmdCtr` is
+    /// advanced on successful completion in **all three modes** —
+    /// §9.1.2 and §9.1.8 require that under active authentication every
+    /// command, including Plain ones, increments the counter, so that
+    /// insertion or deletion of Plain commands can be detected by the
+    /// next MAC/Full exchange.
+    ///
+    /// Counter behaviour on failure:
+    /// - Transport error or PICC-reported `ErrorResponse` (SW ≠ `91 00`):
+    ///   counter stays put (PICC rejected the command, so it didn't
+    ///   advance either).
+    /// - MAC verification failure: counter stays put (session is in
+    ///   practice unrecoverable; caller should re-authenticate).
+    /// - `UnexpectedLength` / malformed padding after a `91 00`: the
+    ///   PICC accepted the command and advanced; the counter is also
+    ///   advanced on the PCD side to stay in sync.
+    pub async fn read_with_mode<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        length: u32,
+        mode: CommMode,
+        buf: &mut [u8],
+    ) -> Result<usize, SessionError<T::Error>> {
+        match mode {
+            CommMode::Plain => {
+                let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
+                // §9.1.2 + §9.1.8: under active authentication the PICC
+                // advances CmdCtr for every accepted command regardless
+                // of CommMode — mirror that here or the next MAC/Full
+                // command will fail with IntegrityError.
+                self.state.advance_counter();
+                Ok(n)
+            }
+            CommMode::Mac => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                read_data_mac(transport, &mut channel, file.file_no(), offset, length, buf).await
+            }
+            CommMode::Full => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                read_data_full(transport, &mut channel, file.file_no(), offset, length, buf).await
+            }
+        }
     }
 }
 

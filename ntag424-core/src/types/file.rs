@@ -34,4 +34,18 @@ impl File {
             Self::Proprietary => 0xE105,
         }
     }
+
+    /// Returns the native DESFire file number (`01h`–`03h`) used in the
+    /// `CmdHeader` of native file commands such as `ReadData`
+    /// (NT4H2421Gx §8.2.1, §10.8.1 Table 78). The NTAG 424 DNA chip
+    /// exposes exactly three files and assigns them the same numeric
+    /// values as their ISO short FileIDs, but the two are conceptually
+    /// distinct.
+    pub fn file_no(self) -> u8 {
+        match self {
+            Self::CapabilityContainer => 0x01,
+            Self::Ndef => 0x02,
+            Self::Proprietary => 0x03,
+        }
+    }
 }

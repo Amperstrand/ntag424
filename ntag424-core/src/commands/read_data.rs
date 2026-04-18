@@ -1,0 +1,583 @@
+//! `ReadData` command — NT4H2421Gx §10.8.1.
+//!
+//! The command reads bytes from a StandardData file. Its CommMode is
+//! defined per file (§8.2.3.5, Table 13), so three framings are
+//! exposed here:
+//!
+//! - [`read_data_plain`] — no secure messaging. Used either without an
+//!   authenticated session at all, or, per §8.2.3.3, inside an
+//!   authenticated session when the only satisfied access condition is
+//!   the free-access one (`Eh`).
+//! - [`read_data_mac`] — `CommMode.MAC` (§9.1.9): command gets an
+//!   8-byte `MACt` trailer, response data is plain with a trailing
+//!   `MACt`.
+//! - [`read_data_full`] — `CommMode.FULL` (§9.1.10): command has no
+//!   data field so only the response is encrypted; response is
+//!   `E(SesAuthENCKey; RespData || ISO/IEC 9797-1 M2 padding) || MACt`.
+//!
+//! In all variants the command header is `FileNo(1) || Offset(3 LE) ||
+//! Length(3 LE)`; `length == 0` means "entire file from `offset`",
+//! capped at the 256-byte short-`Le` response limit (§10.8.1 Table 78).
+
+use crate::{
+    Transport,
+    commands::SecureChannel,
+    crypto::suite::SessionSuite,
+    session::SessionError,
+    types::{ResponseCode, ResponseStatus},
+};
+
+/// Response cap dictated by the short-`Le` field (§10.8.1 Table 78 /
+/// Table 79 — "up to 256 byte including secure messaging").
+const READ_DATA_RESP_CAP: usize = 256;
+
+/// AES / LRP block size, used for FULL-mode padding arithmetic.
+const BLOCK: usize = 16;
+
+/// `MACt` trailer length (§9.1.3).
+const MAC_LEN: usize = 8;
+
+/// Max addressable file offset/length: 24-bit field per §10.8.1 Table 78.
+const U24_MAX: u32 = 0x00FF_FFFF;
+
+/// Build the 7-byte command header `FileNo || Offset(3 LE) || Length(3 LE)`.
+///
+/// Panics if `file_no > 0x1F` (bits 7–5 are RFU per §10.8.1), or if
+/// either `offset` or `length` exceeds 24 bits.
+fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
+    assert!(
+        file_no <= 0x1F,
+        "read_data: file_no must fit 5 bits (got {file_no:#04x})",
+    );
+    assert!(
+        offset <= U24_MAX,
+        "read_data: offset must fit 24 bits (got {offset:#010x})",
+    );
+    assert!(
+        length <= U24_MAX,
+        "read_data: length must fit 24 bits (got {length:#010x})",
+    );
+    let o = offset.to_le_bytes();
+    let l = length.to_le_bytes();
+    [file_no, o[0], o[1], o[2], l[0], l[1], l[2]]
+}
+
+/// Size of the destination buffer the caller must provide, consistent
+/// with `length` (`0 == "whole file"` ⇒ use the full buffer).
+fn want_plain_bytes(length: u32, buf_len: usize) -> usize {
+    let requested = if length == 0 {
+        buf_len
+    } else {
+        length as usize
+    };
+    requested.min(READ_DATA_RESP_CAP)
+}
+
+/// `ReadData` (INS `AD`, §10.8.1) in `CommMode.Plain`.
+///
+/// Wire: `90 AD 00 00 07 FileNo Offset(3 LE) Length(3 LE) 00`.
+/// Does not require or touch any secure-messaging state — safe to use
+/// either unauthenticated or while authenticated when access was granted
+/// via a free (`Eh`) access condition (§8.2.3.3).
+///
+/// Returns the number of bytes copied into `buf`.
+pub(crate) async fn read_data_plain<T: Transport>(
+    transport: &mut T,
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf: &mut [u8],
+) -> Result<usize, SessionError<T::Error>> {
+    assert!(!buf.is_empty(), "read_data_plain: buf must be non-empty");
+    let want = want_plain_bytes(length, buf.len());
+    if length != 0 {
+        assert!(
+            buf.len() >= length as usize,
+            "read_data_plain: buf too small for requested length",
+        );
+    }
+
+    let header = build_header(file_no, offset, length);
+    let mut apdu = [0u8; 5 + 7 + 1];
+    apdu[..5].copy_from_slice(&[0x90, 0xAD, 0x00, 0x00, 0x07]);
+    apdu[5..12].copy_from_slice(&header);
+    // apdu[12] = 0x00 (Le).
+
+    let resp = transport.transmit(&apdu).await?;
+    let code = ResponseCode::desfire(resp.sw1, resp.sw2);
+    if !matches!(code.status(), ResponseStatus::OperationOk) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    // Truncate rather than error: once the PICC returned `91 00`, it has
+    // accepted the command and (under active auth) advanced `CmdCtr`.
+    // Returning an error here would desync the session. In practice
+    // `data.len() <= want` because we sized the request from `want`.
+    let data = resp.data.as_ref();
+    let n = data.len().min(want).min(buf.len());
+    buf[..n].copy_from_slice(&data[..n]);
+    Ok(n)
+}
+
+/// `ReadData` in `CommMode.MAC` (§9.1.9).
+///
+/// Wire: `90 AD 00 00 0F FileNo Offset(3 LE) Length(3 LE) MACt(8) 00`;
+/// response `<plain data> <MACt(8)>`. Verifies the trailing `MACt` and
+/// advances `CmdCtr` on success.
+pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf: &mut [u8],
+) -> Result<usize, SessionError<T::Error>> {
+    assert!(!buf.is_empty(), "read_data_mac: buf must be non-empty");
+    let want = want_plain_bytes(length, buf.len());
+    if length != 0 {
+        assert!(
+            buf.len() >= length as usize,
+            "read_data_mac: buf too small for requested length",
+        );
+    }
+
+    let header = build_header(file_no, offset, length);
+    let cmd_mac = channel.compute_cmd_mac(0xAD, &header, &[]);
+
+    let mut apdu = [0u8; 5 + 7 + MAC_LEN + 1];
+    apdu[..5].copy_from_slice(&[0x90, 0xAD, 0x00, 0x00, 0x0F]);
+    apdu[5..12].copy_from_slice(&header);
+    apdu[12..20].copy_from_slice(&cmd_mac);
+    // apdu[20] = 0x00 (Le).
+
+    let resp = transport.transmit(&apdu).await?;
+    let code = ResponseCode::desfire(resp.sw1, resp.sw2);
+    if !matches!(code.status(), ResponseStatus::OperationOk) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    let data = channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
+    if data.len() > want {
+        return Err(SessionError::UnexpectedLength { got: data.len() });
+    }
+    buf[..data.len()].copy_from_slice(data);
+    Ok(data.len())
+}
+
+/// `ReadData` in `CommMode.FULL` (§9.1.10).
+///
+/// Wire: same request as MAC mode (no `CmdData`, so nothing to encrypt
+/// on the command side). Response is
+/// `E(SesAuthENCKey; RespData || 80 00..00) || MACt(8)` with the
+/// response IV derived from `(TI, CmdCtr+1)` (§9.1.4). Verifies the
+/// `MACt`, advances `CmdCtr`, decrypts the ciphertext, strips the
+/// ISO/IEC 9797-1 Method 2 padding, and copies the plaintext into `buf`.
+///
+/// Padding rules (§9.1.4): the PICC always appends `0x80` then
+/// zero-pads to the next 16-byte boundary — i.e. when the plaintext
+/// length is already a multiple of 16, a whole extra padding block is
+/// added.
+pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf: &mut [u8],
+) -> Result<usize, SessionError<T::Error>> {
+    assert!(!buf.is_empty(), "read_data_full: buf must be non-empty");
+    if length != 0 {
+        assert!(
+            buf.len() >= length as usize,
+            "read_data_full: buf too small for requested length",
+        );
+    }
+
+    let header = build_header(file_no, offset, length);
+    let cmd_mac = channel.compute_cmd_mac(0xAD, &header, &[]);
+
+    let mut apdu = [0u8; 5 + 7 + MAC_LEN + 1];
+    apdu[..5].copy_from_slice(&[0x90, 0xAD, 0x00, 0x00, 0x0F]);
+    apdu[5..12].copy_from_slice(&header);
+    apdu[12..20].copy_from_slice(&cmd_mac);
+    // apdu[20] = 0x00 (Le).
+
+    let resp = transport.transmit(&apdu).await?;
+    let code = ResponseCode::desfire(resp.sw1, resp.sw2);
+    if !matches!(code.status(), ResponseStatus::OperationOk) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    let ciphertext = channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
+    if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(BLOCK) {
+        return Err(SessionError::UnexpectedLength {
+            got: ciphertext.len(),
+        });
+    }
+
+    // Decrypt in place in a local scratch buffer (≤ 256 bytes).
+    let mut scratch = [0u8; READ_DATA_RESP_CAP];
+    let ct_len = ciphertext.len();
+    scratch[..ct_len].copy_from_slice(ciphertext);
+    channel.decrypt_response(&mut scratch[..ct_len]);
+
+    // Strip ISO/IEC 9797-1 Method 2 padding: find the last 0x80 preceded
+    // only by 0x00 bytes. The PICC always appends exactly one 0x80 and
+    // zero-pads to the next 16-byte boundary, so the 0x80 must live in
+    // the last block.
+    //
+    // NOTE on error semantics: the response MAC has already verified at
+    // this point, so `CmdCtr` was advanced inside
+    // `verify_response_mac_and_advance`. Malformed padding here is a
+    // protocol-level anomaly (well-formed MAC over garbage plaintext
+    // from a conforming PICC "can't happen"), not a MAC mismatch — so
+    // surface it as `UnexpectedLength` and leave the (now-advanced)
+    // counter alone; it matches the PICC's state.
+    let Some(pad_start) = strip_m2_padding(&scratch[..ct_len]) else {
+        return Err(SessionError::UnexpectedLength { got: ct_len });
+    };
+
+    // If the caller pinned `length`, the plaintext must match it exactly.
+    if length != 0 && pad_start != length as usize {
+        return Err(SessionError::UnexpectedLength { got: pad_start });
+    }
+    if pad_start > buf.len() {
+        return Err(SessionError::UnexpectedLength { got: pad_start });
+    }
+
+    buf[..pad_start].copy_from_slice(&scratch[..pad_start]);
+    Ok(pad_start)
+}
+
+/// Strip ISO/IEC 9797-1 Method 2 padding (`0x80` followed by `0x00`s).
+/// Returns the original message length, or `None` if the padding is
+/// malformed. The PICC always appends padding — so a valid `FULL`
+/// response can never end in anything but zero-or-more `0x00` bytes
+/// preceded by a single `0x80`.
+fn strip_m2_padding(plain: &[u8]) -> Option<usize> {
+    // Walk backwards skipping 0x00, then expect exactly one 0x80.
+    let mut i = plain.len();
+    while i > 0 && plain[i - 1] == 0x00 {
+        i -= 1;
+    }
+    if i == 0 || plain[i - 1] != 0x80 {
+        return None;
+    }
+    Some(i - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::suite::{AesSuite, Direction, SessionSuite as _};
+    use crate::session::Authenticated;
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use alloc::vec::Vec;
+
+    fn authenticated_aes(
+        enc_key: [u8; 16],
+        mac_key: [u8; 16],
+        ti: [u8; 4],
+        cmd_counter: u16,
+    ) -> Authenticated<AesSuite> {
+        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        for _ in 0..cmd_counter {
+            state.advance_counter();
+        }
+        state
+    }
+
+    /// Plain read from file 02h, 16 bytes at offset 0: the APDU is
+    /// pinned byte-for-byte and the returned payload is copied verbatim.
+    #[test]
+    fn read_data_plain_frames_header_and_copies_payload() {
+        let payload = [0xABu8; 16];
+        // `90 AD 00 00 07 FileNo=02 Offset=000000 Length=100000 Le=00`.
+        let expected = hex_bytes("90AD0000070200000010000000");
+        let mut transport = TestTransport::new([Exchange::new(&expected, &payload, 0x91, 0x00)]);
+
+        let mut buf = [0u8; 16];
+        let n =
+            block_on(read_data_plain(&mut transport, 0x02, 0, 16, &mut buf)).expect("plain read");
+        assert_eq!(n, 16);
+        assert_eq!(buf, payload);
+    }
+
+    /// Offset and length are encoded 3-byte little-endian per Table 78.
+    #[test]
+    fn read_data_plain_encodes_offset_and_length_little_endian() {
+        // offset = 0x123456, length = 0x0000AB → `56 34 12` and `AB 00 00`.
+        let expected = hex_bytes("90AD00000703563412AB000000");
+        let payload = [0x77u8; 0xAB];
+        let mut transport = TestTransport::new([Exchange::new(&expected, &payload, 0x91, 0x00)]);
+        let mut buf = [0u8; 0xAB];
+        let n = block_on(read_data_plain(
+            &mut transport,
+            0x03,
+            0x12_3456,
+            0x0000_00AB,
+            &mut buf,
+        ))
+        .expect("plain read");
+        assert_eq!(n, 0xAB);
+    }
+
+    /// PERMISSION_DENIED (`91 9D`, Table 80) surfaces as `ErrorResponse`.
+    #[test]
+    fn read_data_plain_surfaces_permission_denied() {
+        let expected = hex_bytes("90AD0000070200000010000000");
+        let mut transport = TestTransport::new([Exchange::new(&expected, &[], 0x91, 0x9D)]);
+        let mut buf = [0u8; 16];
+        match block_on(read_data_plain(&mut transport, 0x02, 0, 16, &mut buf)) {
+            Err(SessionError::ErrorResponse(ResponseStatus::PermissionDenied)) => (),
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+    }
+
+    /// `CommMode.MAC` round-trip with hand-computed command + response
+    /// MACs over the §9.1.9 inputs. Pins the framing:
+    /// `90 AD 00 00 0F FileNo Offset Length MACt(8) 00`, response
+    /// `<plain data> <MACt(8)>`.
+    #[test]
+    fn read_data_mac_roundtrip_advances_counter() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let header = build_header(0x02, 0, 20);
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0xAD);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            suite.mac(&input)
+        };
+
+        let resp_data: Vec<u8> = (0..20u8).collect();
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&resp_data);
+            suite.mac(&input)
+        };
+
+        let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x0F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut resp_body = resp_data.clone();
+        resp_body.extend_from_slice(&resp_mac);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 32];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x02, 0, 20, &mut buf).await
+        })
+        .expect("MAC read must succeed");
+
+        assert_eq!(n, 20);
+        assert_eq!(&buf[..n], resp_data.as_slice());
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Flipping one byte of the response trailer must surface as
+    /// `ResponseMacMismatch` and leave `CmdCtr` pinned.
+    #[test]
+    fn read_data_mac_rejects_bad_trailer() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let header = build_header(0x02, 0, 20);
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0xAD);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            suite.mac(&input)
+        };
+
+        let resp_data: Vec<u8> = (0..20u8).collect();
+        let mut bad_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&resp_data);
+            suite.mac(&input)
+        };
+        bad_mac[0] ^= 0x01;
+
+        let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x0F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut resp_body = resp_data.clone();
+        resp_body.extend_from_slice(&bad_mac);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 32];
+        let result = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x02, 0, 20, &mut buf).await
+        });
+        match result {
+            Err(SessionError::ResponseMacMismatch) => (),
+            other => panic!("expected ResponseMacMismatch, got {other:?}"),
+        }
+        assert_eq!(state.counter(), 0);
+    }
+
+    /// `CommMode.FULL` round-trip: 20-byte plaintext → 32-byte
+    /// ciphertext (padded per ISO/IEC 9797-1 Method 2), trailing MACt
+    /// over the ciphertext. Exercises decrypt + unpad.
+    #[test]
+    fn read_data_full_roundtrip_decrypts_and_unpads() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let header = build_header(0x03, 0, 20);
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0xAD);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            suite.mac(&input)
+        };
+
+        let plaintext: Vec<u8> = (0..20u8).collect();
+        // ISO/IEC 9797-1 Method 2 pad to 32 bytes.
+        let mut padded = [0u8; 32];
+        padded[..20].copy_from_slice(&plaintext);
+        padded[20] = 0x80;
+        let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+        enc_suite.encrypt(Direction::Response, &ti, 1, &mut padded);
+        let ciphertext = padded;
+
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&ciphertext);
+            suite.mac(&input)
+        };
+
+        let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x0F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut resp_body = Vec::from(ciphertext);
+        resp_body.extend_from_slice(&resp_mac);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 32];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 20, &mut buf).await
+        })
+        .expect("FULL read must succeed");
+
+        assert_eq!(n, 20);
+        assert_eq!(&buf[..n], plaintext.as_slice());
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// FULL mode: valid response MAC but the decrypted plaintext lacks
+    /// the trailing `0x80` sentinel (§9.1.4 padding). This "can't
+    /// happen" for a conforming PICC, but when the PICC did return
+    /// `91 00` with a verifying MAC it *also* advanced `CmdCtr`, so:
+    /// - error is `UnexpectedLength` (not `ResponseMacMismatch` — the
+    ///   MAC checked out), and
+    /// - our `CmdCtr` must be advanced to stay in sync with the PICC.
+    #[test]
+    fn read_data_full_bad_padding_is_unexpected_length_and_advances_counter() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let header = build_header(0x03, 0, 16);
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0xAD);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            suite.mac(&input)
+        };
+
+        // 16 bytes of all-zero plaintext (no 0x80 sentinel).
+        let mut padded = [0u8; 16];
+        let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+        enc_suite.encrypt(Direction::Response, &ti, 1, &mut padded);
+        let ciphertext = padded;
+
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&ciphertext);
+            suite.mac(&input)
+        };
+
+        let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x0F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut resp_body = Vec::from(ciphertext);
+        resp_body.extend_from_slice(&resp_mac);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 32];
+        let result = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 16, &mut buf).await
+        });
+        match result {
+            Err(SessionError::UnexpectedLength { got: 16 }) => (),
+            other => panic!("expected UnexpectedLength, got {other:?}"),
+        }
+        assert_eq!(state.counter(), 1, "counter must track PICC state");
+    }
+
+    /// Unit-test the padding stripper around its edge cases.
+    #[test]
+    fn strip_m2_padding_edge_cases() {
+        // Normal: data || 0x80 || 0x00..
+        assert_eq!(strip_m2_padding(&[1, 2, 3, 0x80, 0, 0, 0, 0]), Some(3));
+        // Padding is exactly one 0x80 at the last boundary — a full
+        // extra block of 0x80 00..00 appended to already-aligned data.
+        assert_eq!(strip_m2_padding(&[0x80, 0, 0, 0, 0, 0, 0, 0]), Some(0));
+        // No 0x80 → malformed.
+        assert_eq!(strip_m2_padding(&[1, 2, 3, 0, 0, 0]), None);
+        // Empty → malformed.
+        assert_eq!(strip_m2_padding(&[]), None);
+    }
+}
