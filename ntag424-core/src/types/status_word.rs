@@ -1,3 +1,4 @@
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StatusWord {
     /// Successful operation.
     OperationOk,

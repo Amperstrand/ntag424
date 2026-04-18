@@ -2,10 +2,10 @@ use core::error::Error;
 
 use thiserror::Error;
 
-use crate::commands::{Version, get_version};
+use crate::commands::{Version, authenticate_ev2_first_aes, get_version};
 use crate::crypto::originality::{self, OriginalityError, SIGNATURE_LEN};
-use crate::crypto::suite::SessionSuite;
-use crate::types::{ResponseCode, StatusWord, Uid};
+use crate::crypto::suite::{AesSuite, SessionSuite};
+use crate::types::{KeyNumber, ResponseCode, StatusWord, Uid};
 use crate::{PseudoApduCapable, Transport};
 
 #[derive(Error, Debug)]
@@ -18,6 +18,11 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     UnexpectedLength { got: usize },
     #[error("originality verification failed: {0:?}")]
     OriginalityVerificationFailed(OriginalityError),
+    /// `RndA'` returned by the PICC in Part 2 of `AuthenticateEV2First`
+    /// did not match the `RndA` the PCD sent — wrong key, or a MitM
+    /// (§9.1.5, Table 30: `AUTHENTICATION_ERROR`).
+    #[error("authentication mismatch: RndA' did not match RndA")]
+    AuthenticationMismatch,
 }
 
 pub struct Session<S> {
@@ -88,6 +93,31 @@ impl Session<Unauthenticated> {
         get_version(transport).await
     }
 
+    /// Drive `AuthenticateEV2First` for AES secure messaging (NT4H2421Gx
+    /// §9.1.5, §10.4.1).
+    ///
+    /// On success, transitions the session into
+    /// [`Authenticated<AesSuite>`] with `CmdCtr = 0` and the
+    /// Transaction Identifier assigned by the PICC. `rnd_a` is the
+    /// 16-byte PCD challenge; the caller owns entropy so this method
+    /// stays deterministic in tests and free of RNG dependencies in
+    /// `no_std`.
+    pub async fn authenticate_aes<T: Transport>(
+        self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Session<Authenticated<AesSuite>>, SessionError<T::Error>>
+    where
+        T::Error: core::fmt::Debug,
+    {
+        let (suite, ti) = authenticate_ev2_first_aes(transport, key_no, key, rnd_a).await?;
+        Ok(Session {
+            state: Authenticated::new(suite, ti),
+        })
+    }
+
     /// Issue `Read_Sig` (INS = 0x3C, NT4H2421Gx §10.12) and verify the
     /// 56-byte ECDSA originality signature against `uid` using the NXP
     /// master public key (AN12196 §7.2).
@@ -133,4 +163,148 @@ pub struct Authenticated<S: SessionSuite> {
     ///
     /// Used together with `cmd_counter` to prevent replay attacks.
     ti: [u8; 4],
+}
+
+impl<S: SessionSuite> Authenticated<S> {
+    pub(crate) fn new(suite: S, ti: [u8; 4]) -> Self {
+        Self {
+            suite,
+            cmd_counter: 0,
+            ti,
+        }
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Transaction Identifier assigned by the PICC on the first
+    /// authentication of this transaction (§9.1.1).
+    pub fn ti(&self) -> &[u8; 4] {
+        &self.state.ti
+    }
+
+    /// Current value of the shared Command Counter (§9.1.2). Reset to
+    /// zero on `AuthenticateEV2First`, advanced in lockstep with the
+    /// PICC as commands succeed.
+    pub fn cmd_counter(&self) -> u16 {
+        self.state.cmd_counter
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::testing::{Exchange, TestTransport, block_on};
+
+    fn hex_nib(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'A'..=b'F' => c - b'A' + 10,
+            b'a'..=b'f' => c - b'a' + 10,
+            _ => panic!("invalid hex char"),
+        }
+    }
+
+    fn hex(s: &str) -> alloc::vec::Vec<u8> {
+        assert!(s.len().is_multiple_of(2));
+        let b = s.as_bytes();
+        (0..b.len() / 2)
+            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
+            .collect()
+    }
+
+    fn hex_array<const N: usize>(s: &str) -> [u8; N] {
+        assert_eq!(s.len(), 2 * N);
+        let b = s.as_bytes();
+        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
+    }
+
+    /// AN12196 §5.6, Table 14 — full `AuthenticateEV2First` transcript
+    /// with `Key No = 0x00` and the all-zero application key. End-to-end
+    /// integration test: drives `Session::authenticate_aes` against a
+    /// mock PICC that asserts every outgoing APDU byte-for-byte and
+    /// replies with the exact bytes from the application note.
+    #[test]
+    fn authenticate_aes_an12196_key0_full_handshake() {
+        let key = [0u8; 16];
+        // Step 10 — fixed RndA from the transcript (step 10).
+        let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+
+        let transport = TestTransport::new([
+            // Step 5 command / step 6–8 response.
+            Exchange::new(
+                &hex("9071000002000000"),
+                &hex("A04C124213C186F22399D33AC2A30215"),
+                0x91,
+                0xAF,
+            ),
+            // Step 14 command / step 15–17 response.
+            Exchange::new(
+                &hex(
+                    "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00",
+                ),
+                &hex("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663"),
+                0x91,
+                0x00,
+            ),
+        ]);
+        let mut transport = transport;
+
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a,
+        ))
+        .expect("handshake should succeed");
+
+        // Step 19 — TI chosen by the PICC.
+        assert_eq!(session.ti(), &hex_array::<4>("9D00C4DF"));
+        // CmdCtr is zero immediately after AuthenticateEV2First (§9.1.2).
+        assert_eq!(session.cmd_counter(), 0);
+        // Both queued exchanges consumed — no extra round-trips.
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Part 2 returning `91 AE` (`AUTHENTICATION_ERROR`, §10.4.1 Table 30)
+    /// must surface as [`SessionError::ErrorResponse`] rather than a silent
+    /// success or a panic.
+    #[test]
+    fn authenticate_aes_surfaces_picc_auth_error() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex("9071000002000000"),
+                &hex("A04C124213C186F22399D33AC2A30215"),
+                0x91,
+                0xAF,
+            ),
+            // Same Part 2 APDU as the success case — the PICC can still
+            // refuse with 91 AE (e.g. wrong key).
+            Exchange::new(
+                &hex(
+                    "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00",
+                ),
+                &[],
+                0x91,
+                0xAE,
+            ),
+        ]);
+
+        let result = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a,
+        ));
+        match result {
+            Err(SessionError::ErrorResponse(code)) => {
+                assert_eq!(code.status_word(), StatusWord::AuthenticationError);
+            }
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("91 AE must not authenticate"),
+        }
+    }
 }

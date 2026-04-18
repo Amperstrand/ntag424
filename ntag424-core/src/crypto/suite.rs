@@ -165,7 +165,7 @@ pub struct AesSuite {
 impl AesSuite {
     /// `IV = E(SesAuthENCKey, label || TI || CmdCtr(LSB) || 0…0)` per
     /// §9.1.4. `label` is `A5 5A` for commands, `5A A5` for responses.
-    fn iv(&self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16) -> Block {
+    fn iv(&self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16) -> [u8; 16] {
         let mut input = [0u8; 16];
         input[0..2].copy_from_slice(&dir.label());
         input[2..6].copy_from_slice(ti);
@@ -173,7 +173,7 @@ impl AesSuite {
         let cipher = Aes128::new(&Array::from(self.enc_key));
         let mut iv = Block::default();
         cipher.encrypt_block_b2b(&Array::from(input), &mut iv);
-        iv
+        iv.into()
     }
 }
 
@@ -192,39 +192,50 @@ impl SessionSuite for AesSuite {
     }
 
     fn encrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]) {
-        assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
-        let iv = self.iv(dir, ti, cmd_ctr);
-        let cipher = Aes128::new(&Array::from(self.enc_key));
-        let mut prev = iv;
-        for chunk in buf.chunks_exact_mut(16) {
-            for (b, p) in chunk.iter_mut().zip(prev.iter()) {
-                *b ^= *p;
-            }
-            let input = Block::try_from(&*chunk).unwrap();
-            let mut out = Block::default();
-            cipher.encrypt_block_b2b(&input, &mut out);
-            chunk.copy_from_slice(&out);
-            prev.copy_from_slice(chunk);
-        }
+        aes_cbc_encrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf);
     }
 
     fn decrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]) {
-        assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
-        let iv = self.iv(dir, ti, cmd_ctr);
-        let cipher = Aes128::new(&Array::from(self.enc_key));
-        let mut prev = iv;
-        let mut save = Block::default();
-        for chunk in buf.chunks_exact_mut(16) {
-            save.copy_from_slice(chunk);
-            let input = Block::try_from(&*chunk).unwrap();
-            let mut out = Block::default();
-            cipher.decrypt_block_b2b(&input, &mut out);
-            chunk.copy_from_slice(&out);
-            for (b, p) in chunk.iter_mut().zip(prev.iter()) {
-                *b ^= *p;
-            }
-            prev.copy_from_slice(&save);
+        aes_cbc_decrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf);
+    }
+}
+
+/// AES-128 CBC encryption in place. `buf.len()` must be a positive
+/// multiple of 16; no padding is applied.
+///
+/// Shared between the §9.1.4 session-message path (IV derived from
+/// `TI || CmdCtr`) and the §9.1.5 authentication handshake (zero IV,
+/// no padding).
+pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
+    debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    let cipher = Aes128::new(&Array::from(*key));
+    let mut prev: [u8; 16] = *iv;
+    for chunk in buf.chunks_exact_mut(16) {
+        for (b, p) in chunk.iter_mut().zip(prev.iter()) {
+            *b ^= *p;
         }
+        let mut out = Block::default();
+        cipher.encrypt_block_b2b(&Block::try_from(&*chunk).unwrap(), &mut out);
+        chunk.copy_from_slice(&out);
+        prev.copy_from_slice(chunk);
+    }
+}
+
+/// In-place inverse of [`aes_cbc_encrypt`]. Same length preconditions.
+pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
+    debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    let cipher = Aes128::new(&Array::from(*key));
+    let mut prev: [u8; 16] = *iv;
+    let mut save = [0u8; 16];
+    for chunk in buf.chunks_exact_mut(16) {
+        save.copy_from_slice(chunk);
+        let mut out = Block::default();
+        cipher.decrypt_block_b2b(&Block::try_from(&*chunk).unwrap(), &mut out);
+        chunk.copy_from_slice(&out);
+        for (b, p) in chunk.iter_mut().zip(prev.iter()) {
+            *b ^= *p;
+        }
+        prev.copy_from_slice(&save);
     }
 }
 
@@ -405,10 +416,7 @@ mod tests {
         let cmd_ctr = 0u16;
 
         let iv = suite.iv(Direction::Command, &ti, cmd_ctr);
-        assert_eq!(
-            <[u8; 16]>::from(iv),
-            hex16("4C651A64261A90307B6C293F611C7F7B")
-        );
+        assert_eq!(iv, hex16("4C651A64261A90307B6C293F611C7F7B"));
 
         let mut enc = hex("0102030405060708090A800000000000");
         suite.encrypt(Direction::Command, &ti, cmd_ctr, &mut enc);
@@ -460,10 +468,7 @@ mod tests {
         let cmd_ctr = 0u16;
 
         let iv = suite.iv(Direction::Command, &ti, cmd_ctr);
-        assert_eq!(
-            <[u8; 16]>::from(iv),
-            hex16("D2CB7277A17841A06654A48188C1F8F5")
-        );
+        assert_eq!(iv, hex16("D2CB7277A17841A06654A48188C1F8F5"));
 
         let expected_ct = hex(
             "421C73A27D827658AF481FDFF20A5025B559D0E3AA21E58D347F343CFFC768BFE596C706BC00F2176781D4B0242642A0FF5A42C461AAF894D9A1284B8C76BCFA658ACD40555D362E08DB15CF421B51283F9064BCBE20E96CAE545B407C9D651A3315B27373772E5DA2367D2064AE054AF996C6F1F669170FA88CE8C4E3A4A7BBBEF0FD971FF532C3A802AF745660F2B4",
@@ -503,10 +508,7 @@ mod tests {
 
         let response_ciphertext = hex16("70756055688505B52A5E26E59E329CD6");
         let iv = suite.iv(Direction::Response, &ti, 1);
-        assert_eq!(
-            <[u8; 16]>::from(iv),
-            hex16("7F6BB0B278EA054CBD238C5D9E9E342B")
-        );
+        assert_eq!(iv, hex16("7F6BB0B278EA054CBD238C5D9E9E342B"));
 
         let mut plaintext = response_ciphertext;
         suite.decrypt(Direction::Response, &ti, 1, &mut plaintext);
