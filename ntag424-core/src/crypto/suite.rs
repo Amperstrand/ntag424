@@ -163,6 +163,14 @@ pub struct AesSuite {
 }
 
 impl AesSuite {
+    /// Construct directly from known session keys. Intended for test
+    /// harnesses that replay AN12196 vectors without a handshake; real
+    /// code should use [`Self::derive`].
+    #[cfg(test)]
+    pub(crate) fn from_keys(enc_key: [u8; 16], mac_key: [u8; 16]) -> Self {
+        Self { enc_key, mac_key }
+    }
+
     /// `IV = E(SesAuthENCKey, label || TI || CmdCtr(LSB) || 0…0)` per
     /// §9.1.4. `label` is `A5 5A` for commands, `5A A5` for responses.
     fn iv(&self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16) -> [u8; 16] {

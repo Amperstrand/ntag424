@@ -4,8 +4,7 @@ use crate::types::ResponseCode;
 
 /// ISO/IEC 7816-4 DF name of the NTAG 424 DNA NDEF application
 /// (NT4H2421Gx §8.2.2).
-pub(crate) const NDEF_APPLICATION_DF_NAME: [u8; 7] =
-    [0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
+pub(crate) const NDEF_APPLICATION_DF_NAME: [u8; 7] = [0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
 
 /// Maximum DF name length per ISO/IEC 7816-4.
 const MAX_DF_NAME_LEN: usize = 16;

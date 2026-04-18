@@ -1,6 +1,7 @@
 /// Software, hardware, and production information about the tag.
 ///
 /// See [Session](`crate::Session::get_version`) for how to obtain this information from the tag.
+#[derive(Debug)]
 pub struct Version {
     pub(crate) part1: [u8; 7],
     pub(crate) part2: [u8; 7],

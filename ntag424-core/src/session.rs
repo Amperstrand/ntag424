@@ -2,7 +2,7 @@ use core::error::Error;
 
 use thiserror::Error;
 
-use crate::commands::{authenticate_ev2_first_aes, get_version};
+use crate::commands::{SecureChannel, authenticate_ev2_first_aes, get_version, get_version_mac};
 use crate::crypto::originality::{self, OriginalityError, SIGNATURE_LEN};
 use crate::crypto::suite::{AesSuite, SessionSuite};
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
@@ -23,6 +23,12 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     /// (§9.1.5, Table 30: `AUTHENTICATION_ERROR`).
     #[error("authentication mismatch: RndA' did not match RndA")]
     AuthenticationMismatch,
+    /// 8-byte trailing `MACt` on a secure-messaging response did not
+    /// match the value the PCD computed over
+    /// `RC || (CmdCtr+1) || TI || RespData` (§9.1.9). Wrong session
+    /// keys, tampered response, or out-of-sync `CmdCtr`.
+    #[error("response MAC mismatch")]
+    ResponseMacMismatch,
 }
 
 /// An NTAG 424 DNA session.
@@ -84,16 +90,31 @@ impl<S> Session<S> {
             got => Err(SessionError::UnexpectedLength { got }),
         }
     }
+}
 
+impl Session<Unauthenticated> {
     /// Read software, hardware and production version information.
     ///
-    /// Uses `GetVersion` (INS `60`, NT4H2421Gx §10.7).
+    /// Uses `GetVersion` (INS `60`, NT4H2421Gx §10.7) in `CommMode.Plain`.
     pub async fn get_version<T: Transport>(
         &self,
         transport: &mut T,
     ) -> Result<Version, SessionError<T::Error>> {
-        // TODO: check in authenticated sessions
         get_version(transport).await
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Read software, hardware and production version information over
+    /// `CommMode.MAC` (§10.2 Table 21 footnote [1]). Verifies the
+    /// trailing `MACt` on the last chained response and advances
+    /// `CmdCtr` on success.
+    pub async fn get_version<T: Transport>(
+        &mut self,
+        transport: &mut T,
+    ) -> Result<Version, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        get_version_mac(transport, &mut channel).await
     }
 }
 
@@ -170,6 +191,29 @@ impl<S: SessionSuite> Authenticated<S> {
             ti,
         }
     }
+
+    pub(crate) fn suite(&self) -> &S {
+        &self.suite
+    }
+
+    pub(crate) fn suite_mut(&mut self) -> &mut S {
+        &mut self.suite
+    }
+
+    pub(crate) fn ti_bytes(&self) -> &[u8; 4] {
+        &self.ti
+    }
+
+    pub(crate) fn counter(&self) -> u16 {
+        self.cmd_counter
+    }
+
+    /// Advance `CmdCtr` by one (§9.1.2). Called after a successful
+    /// secure-messaging exchange (MAC or FULL); `CmdCtr` stays put on
+    /// failure and on `CommMode.Plain` passthrough.
+    pub(crate) fn advance_counter(&mut self) {
+        self.cmd_counter = self.cmd_counter.wrapping_add(1);
+    }
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
@@ -230,12 +274,7 @@ mod tests {
         let transport = TestTransport::new([
             // ISOSelectFile(NDEF app) — §10.9.1. Must precede AuthenticateEV2First
             // on a freshly powered PICC (§8.2.1).
-            Exchange::new(
-                &hex("00A4040007D276000085010100"),
-                &[],
-                0x90,
-                0x00,
-            ),
+            Exchange::new(&hex("00A4040007D276000085010100"), &[], 0x90, 0x00),
             // Step 5 command / step 6–8 response.
             Exchange::new(
                 &hex("9071000002000000"),
@@ -280,12 +319,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
 
         let mut transport = TestTransport::new([
-            Exchange::new(
-                &hex("00A4040007D276000085010100"),
-                &[],
-                0x90,
-                0x00,
-            ),
+            Exchange::new(&hex("00A4040007D276000085010100"), &[], 0x90, 0x00),
             Exchange::new(
                 &hex("9071000002000000"),
                 &hex("A04C124213C186F22399D33AC2A30215"),
