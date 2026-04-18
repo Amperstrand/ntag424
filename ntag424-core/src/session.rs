@@ -3,8 +3,8 @@ use core::error::Error;
 use thiserror::Error;
 
 use crate::commands::{
-    SecureChannel, authenticate_ev2_first_aes, get_version, get_version_mac, read_sig,
-    read_sig_mac,
+    SecureChannel, authenticate_ev2_first_aes, get_card_uid, get_version, get_version_mac,
+    read_sig, read_sig_mac,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, SessionSuite};
@@ -118,6 +118,24 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ) -> Result<Version, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         get_version_mac(transport, &mut channel).await
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Retrieve the permanent 7-byte UID of the PICC via `GetCardUID`
+    /// (INS `51`, NT4H2421Gx §10.5.3) in `CommMode.FULL`.
+    ///
+    /// Authentication with any application key must be established before
+    /// calling this. The command always returns the permanent UID even when
+    /// the tag is configured for Random ID at activation (§10.5.3). Verifies
+    /// the response `MACt`, decrypts the payload, checks ISO/IEC 9797-1
+    /// Method 2 padding, and advances `CmdCtr` on success.
+    pub async fn get_card_uid<T: Transport>(
+        &mut self,
+        transport: &mut T,
+    ) -> Result<[u8; 7], SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        get_card_uid(transport, &mut channel).await
     }
 }
 
