@@ -4,11 +4,14 @@ use thiserror::Error;
 
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
-    get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac, set_configuration,
+    change_master_key, get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac,
+    set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
-use crate::types::{Configuration, KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
+use crate::types::{
+    Configuration, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus, Uid, Version,
+};
 use crate::{PseudoApduCapable, Transport};
 
 #[derive(Error, Debug)]
@@ -128,27 +131,22 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Change an application key (`ChangeKey`, INS `C4`, NT4H2421Gx §10.6.1)
-    /// in `CommMode.FULL`.
+    /// Change a non-master application key (`ChangeKey` Case 1, INS `C4`,
+    /// NT4H2421Gx §10.6.1, AN12196 §5.16.1) in `CommMode.FULL`.
     ///
     /// Authentication with key 0 must be established before calling this.
+    /// The command cryptogram contains `NewKey ⊕ OldKey` together with
+    /// `CRC32(NewKey)`; pass the current PICC key as `old_key`. The PICC
+    /// responds with a `MACt` that is verified before returning, and
+    /// `CmdCtr` is advanced on success.
     ///
-    /// Two cases are distinguished by `key_no`:
-    ///
-    /// - **Case 1** (`key_no ≠ Key0`): The command cryptogram contains
-    ///   `NewKey ⊕ OldKey` together with `CRC32(NewKey)` (AN12196 §5.16.1).
-    ///   Pass the current PICC key as `old_key`. The PICC responds with a
-    ///   `MACt` that is verified before returning.
-    /// - **Case 2** (`key_no == Key0`): The command cryptogram contains only
-    ///   `NewKey` (AN12196 §5.16.2). `old_key` is ignored. The PICC responds
-    ///   with `91 00` (no `MACt`). The session keys remain in memory but are
-    ///   no longer valid after this call; discard the session.
-    ///
-    /// `CmdCtr` is advanced on success in both cases.
+    /// To change the Application Master Key (`Key0`), use
+    /// [`Session::change_master_key`] instead — it has different
+    /// cryptogram/response semantics and invalidates the session.
     pub async fn change_key<T: Transport>(
         &mut self,
         transport: &mut T,
-        key_no: KeyNumber,
+        key_no: NonMasterKeyNumber,
         new_key: &[u8; 16],
         new_key_version: u8,
         old_key: &[u8; 16],
@@ -163,6 +161,31 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
             old_key,
         )
         .await
+    }
+
+    /// Change the Application Master Key `Key0` (`ChangeKey` Case 2,
+    /// INS `C4`, NT4H2421Gx §10.6.1, AN12196 §5.16.2) in `CommMode.FULL`.
+    ///
+    /// Authentication with key 0 must be established before calling this.
+    /// The command cryptogram contains only `NewKey`; the PICC responds
+    /// with `91 00` (no `MACt`). After this call the session keys are
+    /// no longer valid for any further command, so the session is
+    /// consumed and an [`Unauthenticated`] one is returned — re-run the
+    /// authentication handshake (with the new key) to issue further
+    /// authenticated commands.
+    ///
+    /// On error the session is dropped as well: at that point the PCD
+    /// cannot tell whether the PICC accepted the change or not, so
+    /// continuing to use the old session keys is unsafe.
+    pub async fn change_master_key<T: Transport>(
+        mut self,
+        transport: &mut T,
+        new_key: &[u8; 16],
+        new_key_version: u8,
+    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_master_key(transport, &mut channel, new_key, new_key_version).await?;
+        Ok(Session::new())
     }
 }
 

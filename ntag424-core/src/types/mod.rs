@@ -7,7 +7,7 @@ mod uid;
 mod version;
 
 pub use configuration::Configuration;
-pub use key_number::KeyNumber;
+pub use key_number::{KeyNumber, NonMasterKeyNumber};
 pub(crate) use response_code::ResponseCode;
 pub use response_status::ResponseStatus;
 pub use uid::Uid;

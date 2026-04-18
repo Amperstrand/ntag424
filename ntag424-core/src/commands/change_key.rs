@@ -5,7 +5,7 @@ use crate::{
     commands::SecureChannel,
     crypto::suite::SessionSuite,
     session::SessionError,
-    types::{KeyNumber, ResponseCode, ResponseStatus},
+    types::{KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus},
 };
 
 /// CRC32/ISO-HDLC (IEEE Std 802.3-2008) as required by NT4H2421Gx
@@ -31,53 +31,68 @@ fn crc32(data: &[u8]) -> [u8; 4] {
     crc.to_le_bytes()
 }
 
-/// `ChangeKey` (INS `C4`, NT4H2421Gx §10.6.1) in `CommMode.FULL`.
+/// `ChangeKey` (INS `C4`) Case 1 — non-master application key
+/// (NT4H2421Gx §10.6.1, AN12196 §5.16.1, Table 25).
 ///
 /// Authentication with application key 0 is required before calling this.
 ///
-/// Two cases are distinguished by whether `key_no` equals the key used for
-/// the current authenticated session (always `Key0` on NTAG 424 DNA):
+/// Plaintext layout (32 bytes after ISO/IEC 9797-1 Method 2 padding):
+/// `(NewKey ⊕ OldKey) || KeyVer || CRC32(NewKey) || 0x80 || 0x00*10`.
 ///
-/// - **Case 1** (`key_no ≠ Key0`): plaintext is
-///   `(NewKey ⊕ OldKey) || KeyVer || CRC32(NewKey)` padded to 32 bytes
-///   (AN12196 §5.16.1, Table 25). `old_key` is used; the PICC responds
-///   with an 8-byte `MACt`.
-/// - **Case 2** (`key_no == Key0`): plaintext is `NewKey || KeyVer`
-///   padded to 32 bytes (AN12196 §5.16.2, Table 26). `old_key` is
-///   ignored; the PICC responds with `91 00` only (no `MACt`).
-///
-/// `old_key` must be the current key stored on the PICC for `key_no`.
-/// For Case 2 it is unused; passing all-zeros is fine.
-///
-/// On success `CmdCtr` is advanced by one regardless of case.
+/// `old_key` must be the current PICC key for `key_no`. The PICC responds
+/// with an 8-byte `MACt` which is verified before returning. `CmdCtr` is
+/// advanced on success.
 pub(crate) async fn change_key<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
-    key_no: KeyNumber,
+    key_no: NonMasterKeyNumber,
     new_key: &[u8; 16],
     new_key_version: u8,
     old_key: &[u8; 16],
 ) -> Result<(), SessionError<T::Error>> {
-    let is_auth_key = key_no == KeyNumber::Key0;
-
-    // Assemble 32-byte padded plaintext (ISO/IEC 9797-1 Method 2).
     let mut plaintext = [0u8; 32];
-    if is_auth_key {
-        // Case 2: NewKey(16) || KeyVer(1) || 0x80 || 0x00*14
-        plaintext[..16].copy_from_slice(new_key);
-        plaintext[16] = new_key_version;
-        plaintext[17] = 0x80;
-    } else {
-        // Case 1: (NewKey ⊕ OldKey)(16) || KeyVer(1) || CRC32NK(4) || 0x80 || 0x00*10
-        for i in 0..16 {
-            plaintext[i] = new_key[i] ^ old_key[i];
-        }
-        plaintext[16] = new_key_version;
-        plaintext[17..21].copy_from_slice(&crc32(new_key));
-        plaintext[21] = 0x80;
+    for i in 0..16 {
+        plaintext[i] = new_key[i] ^ old_key[i];
     }
+    plaintext[16] = new_key_version;
+    plaintext[17..21].copy_from_slice(&crc32(new_key));
+    plaintext[21] = 0x80;
 
-    // Encrypt the plaintext in place (Command direction).
+    transmit(transport, channel, KeyNumber::from(key_no), plaintext, true).await
+}
+
+/// `ChangeKey` (INS `C4`) Case 2 — Application Master Key (`Key0`)
+/// (NT4H2421Gx §10.6.1, AN12196 §5.16.2, Table 26).
+///
+/// Authentication with key 0 is required before calling this. Plaintext
+/// layout (32 bytes after padding): `NewKey || KeyVer || 0x80 || 0x00*14`.
+/// The PICC responds with `91 00` only — there is no `MACt`. `CmdCtr` is
+/// advanced on success but the session keys are no longer valid for any
+/// further command and the caller must re-authenticate.
+pub(crate) async fn change_master_key<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    new_key: &[u8; 16],
+    new_key_version: u8,
+) -> Result<(), SessionError<T::Error>> {
+    let mut plaintext = [0u8; 32];
+    plaintext[..16].copy_from_slice(new_key);
+    plaintext[16] = new_key_version;
+    plaintext[17] = 0x80;
+
+    transmit(transport, channel, KeyNumber::Key0, plaintext, false).await
+}
+
+/// Encrypt the prepared 32-byte plaintext, build the `90 C4 …` APDU, send
+/// it, and either verify the trailing `MACt` (Case 1) or check that the
+/// response body is empty (Case 2). Advances `CmdCtr` on success.
+async fn transmit<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    key_no: KeyNumber,
+    mut plaintext: [u8; 32],
+    expect_mact: bool,
+) -> Result<(), SessionError<T::Error>> {
     channel.encrypt_command(&mut plaintext);
 
     // MAC: Cmd || CmdCtr(LE) || TI || KeyNo (header) || ciphertext (data).
@@ -100,15 +115,15 @@ pub(crate) async fn change_key<T: Transport, S: SessionSuite>(
     }
 
     let body = resp.data.as_ref();
-    if is_auth_key {
+    if expect_mact {
+        // Case 1: 8-byte MACt over empty RespData (§5.16.1 Table 25 step 20).
+        channel.verify_response_mac_and_advance(resp.sw2, body)?;
+    } else {
         // Case 2: PICC returns 91 00 with no MACt (§5.16.2 Table 26 step 18).
         if !body.is_empty() {
             return Err(SessionError::UnexpectedLength { got: body.len() });
         }
         channel.advance_counter();
-    } else {
-        // Case 1: PICC returns 8-byte MACt over empty RespData (§5.16.1 Table 25 step 20).
-        channel.verify_response_mac_and_advance(resp.sw2, body)?;
     }
 
     Ok(())
@@ -167,7 +182,7 @@ mod tests {
             change_key(
                 &mut transport,
                 &mut ch,
-                KeyNumber::Key2,
+                NonMasterKeyNumber::Key2,
                 &new_key,
                 new_key_version,
                 &old_key,
@@ -183,15 +198,13 @@ mod tests {
     /// AN12196 §5.16.2, Table 26 — `ChangeKey` Case 2: key 0 changed
     /// while authenticated with key 0. No MACt in response.
     #[test]
-    fn change_key_case2_an12196_vector() {
+    fn change_master_key_case2_an12196_vector() {
         let mac_key = hex_array("5529860B2FC5FB6154B7F28361D30BF9");
         let enc_key = hex_array("4CF3CB41A22583A61E89B158D252FC53");
         let ti = hex_array("7614281A");
 
         let new_key = hex_array("5004BF991F408672B1EF00F08F9E8647");
         let new_key_version: u8 = 0x01;
-        // old_key unused for Case 2; pass zeros.
-        let old_key = [0u8; 16];
 
         // Step 17: expected C-APDU.
         let expected_apdu = hex_bytes(
@@ -204,15 +217,7 @@ mod tests {
         let mut state = authenticated_aes(enc_key, mac_key, ti, 3);
         block_on(async {
             let mut ch = SecureChannel::new(&mut state);
-            change_key(
-                &mut transport,
-                &mut ch,
-                KeyNumber::Key0,
-                &new_key,
-                new_key_version,
-                &old_key,
-            )
-            .await
+            change_master_key(&mut transport, &mut ch, &new_key, new_key_version).await
         })
         .expect("ChangeKey Case 2 must succeed");
 
