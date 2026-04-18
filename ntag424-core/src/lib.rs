@@ -65,6 +65,8 @@
 //! # async fn run() -> Result<(), ntag424_core::SessionError<Infallible>> {
 //! // let mut transport = ...; // Obtain a Transport implementation for your NFC reader.
 //! # let mut transport = TestTransport::new([
+//! #     // ISOSelectFile(NDEF app) auto-issued by authenticate_aes.
+//! #     Response { data: Vec::new(), sw1: 0x90, sw2: 0x00 },
 //! #     Response {
 //! #         data: hex("A04C124213C186F22399D33AC2A30215"),
 //! #         sw1: 0x91,

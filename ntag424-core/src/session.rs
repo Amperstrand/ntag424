@@ -228,6 +228,14 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
 
         let transport = TestTransport::new([
+            // ISOSelectFile(NDEF app) — §10.9.1. Must precede AuthenticateEV2First
+            // on a freshly powered PICC (§8.2.1).
+            Exchange::new(
+                &hex("00A4040007D276000085010100"),
+                &[],
+                0x90,
+                0x00,
+            ),
             // Step 5 command / step 6–8 response.
             Exchange::new(
                 &hex("9071000002000000"),
@@ -272,6 +280,12 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
 
         let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex("00A4040007D276000085010100"),
+                &[],
+                0x90,
+                0x00,
+            ),
             Exchange::new(
                 &hex("9071000002000000"),
                 &hex("A04C124213C186F22399D33AC2A30215"),
