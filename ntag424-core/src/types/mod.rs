@@ -11,7 +11,7 @@ pub use configuration::Configuration;
 pub use file_settings::{
     AccessCondition, AccessRights, CommMode, FileSettings, FileSettingsError, FileType,
     MAX_CHANGE_FILE_SETTINGS_LEN, SdmAccessRights, SdmCtrRet, SdmFileRead, SdmMetaRead, SdmOffsets,
-    SdmSettings,
+    SdmSettings, SdmSettingsBuilder,
 };
 pub use key_number::{KeyNumber, NonMasterKeyNumber};
 pub(crate) use response_code::ResponseCode;
