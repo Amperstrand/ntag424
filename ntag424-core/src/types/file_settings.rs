@@ -1,6 +1,8 @@
 //! File settings payloads for the `ChangeFileSettings` and `GetFileSettings`
-//! commands (NT4H2421Gx §10.7.1, §10.7.2; access-rights nibble layout per
-//! §8.2.3.3, Tables 6 and 7; CommMode encoding per Table 22).
+//! commands.
+//!
+//! See NT4H2421Gx §10.7.1, §10.7.2; access-rights nibble layout per
+//! §8.2.3.3, Tables 6 and 7; CommMode encoding per Table 22.
 //!
 //! [`FileSettings`] is the in-memory representation. Use
 //! [`FileSettings::decode`] to parse a `GetFileSettings` response payload and

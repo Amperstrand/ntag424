@@ -1,5 +1,7 @@
-/// UID observed pre-authentication. Randomized tags return a 4-byte
-/// single-size UID (leading byte `0x08` per ISO/IEC 14443-3) — *not* the
+/// UID observed pre-authentication.
+///
+/// Randomized tags return a 4-byte single-size UID (leading byte
+/// `0x08` per ISO/IEC 14443-3) — *not* the
 /// permanent UID, which on NTAG 424 DNA is only accessible through
 /// `GetCardUID` (INS `51`) after authentication. Normal tags return the
 /// permanent 7-byte double-size UID.

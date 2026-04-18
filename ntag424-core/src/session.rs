@@ -118,7 +118,7 @@ impl Session<Unauthenticated> {
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
     /// Read software, hardware and production version information over
-    /// `CommMode.MAC` (§10.2 Table 21 footnote [1]). Verifies the
+    /// `CommMode.MAC` (§10.2 Table 21 footnote 1). Verifies the
     /// trailing `MACt` on the last chained response and advances
     /// `CmdCtr` on success.
     pub async fn get_version<T: Transport>(
@@ -170,7 +170,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// The command cryptogram contains only `NewKey`; the PICC responds
     /// with `91 00` (no `MACt`). After this call the session keys are
     /// no longer valid for any further command, so the session is
-    /// consumed and an [`Unauthenticated`] one is returned — re-run the
+    /// consumed and an unauthenticated one is returned — re-run the
     /// authentication handshake (with the new key) to issue further
     /// authenticated commands.
     ///
@@ -254,7 +254,7 @@ impl Session<Unauthenticated> {
     /// the caller supplies entropy to keep this method deterministic in tests
     /// and free of RNG dependencies in `no_std`.
     ///
-    /// On success, returns a session backed by [`LrpSuite`] with `EncCtr = 1`
+    /// On success, returns a session backed by LRP with `EncCtr = 1`
     /// (§9.2.4: the value `0` is consumed by the Part 2 response decryption
     /// during the handshake itself).
     pub async fn authenticate_lrp<T: Transport>(
