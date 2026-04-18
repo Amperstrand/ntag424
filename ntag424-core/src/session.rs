@@ -4,11 +4,11 @@ use thiserror::Error;
 
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
-    get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac,
+    get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac, set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
-use crate::types::{KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
+use crate::types::{Configuration, KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
 use crate::{PseudoApduCapable, Transport};
 
 #[derive(Error, Debug)]
@@ -181,6 +181,26 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ) -> Result<[u8; 7], SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         get_card_uid(transport, &mut channel).await
+    }
+
+    /// Apply tag configuration changes via `SetConfiguration` (INS `5C`,
+    /// NT4H2421Gx §10.5.1) in `CommMode.FULL`.
+    ///
+    /// Authentication with the application master key (`Key0`) must be
+    /// established before calling this. Each option set on `configuration`
+    /// is sent as its own APDU (the command is single-option per call) in
+    /// the canonical Table 50 order; `CmdCtr` advances once per APDU on
+    /// success. A configuration with no options is a no-op.
+    ///
+    /// Several options are irreversible — see [`Configuration`] for the
+    /// individual `with_*` builder methods.
+    pub async fn set_configuration<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        configuration: &Configuration,
+    ) -> Result<(), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        set_configuration(transport, &mut channel, configuration).await
     }
 }
 
