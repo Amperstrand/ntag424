@@ -271,6 +271,14 @@ impl LrpSuite {
     pub fn enc_ctr(&self) -> u32 {
         self.enc_ctr
     }
+
+    /// Full (untruncated) 16-byte `CMAC_LRP` over `data` with the session MAC
+    /// key (§9.2.3). Used during the `AuthenticateLRPFirst` handshake where
+    /// `PCDResponse` and `PICCResponse` are full-length MACs rather than the
+    /// 8-byte truncated `MACt` used in secure-messaging commands.
+    pub(crate) fn mac_full(&self, data: &[u8]) -> [u8; 16] {
+        cmac_lrp(self.mac_key.clone(), data)
+    }
 }
 
 impl SessionSuite for LrpSuite {

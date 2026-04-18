@@ -3,8 +3,6 @@
 //!
 //! LRP is a drop-in replacement for AES.
 
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
 use core::iter::from_fn;
 
 use aes::{
@@ -96,28 +94,9 @@ fn inc(counter: &mut [Nibble]) {
     }
 }
 
-/// Maximum LRICB counter/IV length in bytes accepted by
-/// [`Lrp::lricb_encrypt_into`] and [`Lrp::lricb_decrypt_into`]. Comfortably
-/// covers every NTAG 424 DNA counter (≤ 8 bytes).
-pub const LRICB_COUNTER_MAX_BYTES: usize = 16;
-
-/// Required `out` length for [`Lrp::lricb_encrypt_into`].
-///
-/// With `pad = true` the result is always `((pt_len / 16) + 1) * 16`, i.e. one
-/// full padding block is appended even when `pt_len` is already a multiple of
-/// 16, per ISO/IEC 9797‑1 Method 2.
-///
-/// With `pad = false`, `pt_len` must be a positive multiple of 16; otherwise
-/// the call returns `None`.
-pub const fn lricb_encrypted_len(pt_len: usize, pad: bool) -> Option<usize> {
-    if pad {
-        Some((pt_len / 16 + 1) * 16)
-    } else if pt_len == 0 || !pt_len.is_multiple_of(16) {
-        None
-    } else {
-        Some(pt_len)
-    }
-}
+/// Maximum LRICB counter/IV length in bytes. Comfortably covers every
+/// NTAG 424 DNA counter (≤ 8 bytes).
+const LRICB_COUNTER_MAX_BYTES: usize = 16;
 
 /// LRP as a 16-byte block cipher, per AN12304 §2.2 Algorithm 3 with `final = true`.
 ///
@@ -181,157 +160,6 @@ impl Lrp {
         for (i, b) in counter.iter_mut().enumerate() {
             *b = (nibs[2 * i].get() << 4) | nibs[2 * i + 1].get();
         }
-    }
-
-    /// `LRICBEnc` per AN12304 §3.3. Encrypts `plaintext` into `out` starting
-    /// from `counter`; `counter` is advanced in place by one per output block
-    /// (data + padding), matching the NTAG 424 DNA rule that `EncCtr`
-    /// advances by the number of processed blocks.
-    ///
-    /// `counter` is a big-endian byte string, each byte carrying two nibbles
-    /// (high nibble first). Must be non-empty and at most
-    /// [`LRICB_COUNTER_MAX_BYTES`] long. Byte‑wise big‑endian increment
-    /// coincides with the AN12304 nibble‑string increment because byte and
-    /// nibble‑pair boundaries align.
-    ///
-    /// With `pad = true`, ISO/IEC 9797‑1 Method 2 padding is applied and
-    /// `out` must be at least [`lricb_encrypted_len(plaintext.len(), true)`]
-    /// bytes. With `pad = false`, `plaintext.len()` must be a positive
-    /// multiple of 16 and `out` must be at least `plaintext.len()` bytes.
-    ///
-    /// Returns the number of bytes written, or `None` on invalid input
-    /// shape, unsupported counter length, or insufficient `out` buffer.
-    pub fn lricb_encrypt_into(
-        &self,
-        counter: &mut [u8],
-        plaintext: &[u8],
-        pad: bool,
-        out: &mut [u8],
-    ) -> Option<usize> {
-        let out_len = lricb_encrypted_len(plaintext.len(), pad)?;
-        if out.len() < out_len {
-            return None;
-        }
-
-        let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
-        let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
-
-        let full_blocks = plaintext.len() / 16;
-        for i in 0..full_blocks {
-            let pt_block = Block::try_from(&plaintext[i * 16..(i + 1) * 16]).unwrap();
-            let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
-            let mut ct_block = Block::default();
-            Aes128::new(&y).encrypt_block_b2b(&pt_block, &mut ct_block);
-            out[i * 16..(i + 1) * 16].copy_from_slice(&ct_block);
-            inc(nibs);
-        }
-
-        if pad {
-            let remaining = &plaintext[full_blocks * 16..];
-            let mut last_pt = [0u8; 16];
-            last_pt[..remaining.len()].copy_from_slice(remaining);
-            last_pt[remaining.len()] = 0x80;
-            let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
-            let mut ct_block = Block::default();
-            Aes128::new(&y).encrypt_block_b2b(&Array::from(last_pt), &mut ct_block);
-            out[full_blocks * 16..(full_blocks + 1) * 16].copy_from_slice(&ct_block);
-            inc(nibs);
-        }
-
-        Self::store_counter(nibs, counter);
-        Some(out_len)
-    }
-
-    /// `LRICBDec` per AN12304 §3.3. `ciphertext.len()` must be a positive
-    /// multiple of 16. `counter` is advanced in place by one per input
-    /// block.
-    ///
-    /// With `pad = true`, ISO/IEC 9797‑1 Method 2 padding is stripped after
-    /// decryption; returns `None` if the `0x80` marker is missing or any
-    /// byte after it is non-zero.
-    ///
-    /// `out.len()` must be at least `ciphertext.len()`. Returns the
-    /// number of plaintext bytes written — shorter than `ciphertext.len()`
-    /// when padded; bytes past the returned length may hold stripped padding.
-    pub fn lricb_decrypt_into(
-        &self,
-        counter: &mut [u8],
-        ciphertext: &[u8],
-        pad: bool,
-        out: &mut [u8],
-    ) -> Option<usize> {
-        if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(16) {
-            return None;
-        }
-        if out.len() < ciphertext.len() {
-            return None;
-        }
-
-        let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
-        let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
-
-        let blocks = ciphertext.len() / 16;
-        for i in 0..blocks {
-            let ct_block = Block::try_from(&ciphertext[i * 16..(i + 1) * 16]).unwrap();
-            let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
-            let mut pt_block = Block::default();
-            Aes128::new(&y).decrypt_block_b2b(&ct_block, &mut pt_block);
-            out[i * 16..(i + 1) * 16].copy_from_slice(&pt_block);
-            inc(nibs);
-        }
-
-        Self::store_counter(nibs, counter);
-
-        let mut total = ciphertext.len();
-        if pad {
-            let start = total - 16;
-            let mut found = false;
-            for i in (start..total).rev() {
-                match out[i] {
-                    0x00 => total -= 1,
-                    0x80 => {
-                        total -= 1;
-                        found = true;
-                        break;
-                    }
-                    _ => return None,
-                }
-            }
-            if !found {
-                return None;
-            }
-        }
-
-        Some(total)
-    }
-
-    /// Allocating wrapper over [`lricb_encrypt_into`](Self::lricb_encrypt_into).
-    #[cfg(feature = "alloc")]
-    pub fn lricb_encrypt(
-        &self,
-        counter: &mut [u8],
-        plaintext: &[u8],
-        pad: bool,
-    ) -> Option<Vec<u8>> {
-        let out_len = lricb_encrypted_len(plaintext.len(), pad)?;
-        let mut out = alloc::vec![0u8; out_len];
-        let n = self.lricb_encrypt_into(counter, plaintext, pad, &mut out)?;
-        debug_assert_eq!(n, out_len);
-        Some(out)
-    }
-
-    /// Allocating wrapper over [`lricb_decrypt_into`](Self::lricb_decrypt_into).
-    #[cfg(feature = "alloc")]
-    pub fn lricb_decrypt(
-        &self,
-        counter: &mut [u8],
-        ciphertext: &[u8],
-        pad: bool,
-    ) -> Option<Vec<u8>> {
-        let mut out = alloc::vec![0u8; ciphertext.len()];
-        let n = self.lricb_decrypt_into(counter, ciphertext, pad, &mut out)?;
-        out.truncate(n);
-        Some(out)
     }
 
     /// In-place `LRICBEnc` without padding (AN12304 §3.3). `buf.len()` must
@@ -415,7 +243,6 @@ mod tests {
     use super::*;
 
     use crate::testing::{hex_array, hex_bytes, hex_nib};
-    use alloc::vec;
     use alloc::vec::Vec;
 
     fn hex_nibbles(s: &str) -> Vec<Nibble> {
@@ -662,51 +489,9 @@ mod tests {
             let pt = hex_bytes(v.pt);
             let expected_ct = hex_bytes(v.ct);
             assert!(!expected_ct.is_empty(), "vector {i}: empty CT");
-            assert_eq!(
-                lricb_encrypted_len(pt.len(), v.pad),
-                Some(expected_ct.len()),
-                "vector {i}: encrypted_len",
-            );
 
-            // No-alloc path.
-            {
-                let mut counter = iv.clone();
-                let mut ct_out = vec![0u8; expected_ct.len()];
-                let n = lrp
-                    .lricb_encrypt_into(&mut counter, &pt, v.pad, &mut ct_out)
-                    .unwrap_or_else(|| panic!("encrypt_into vector {i} returned None"));
-                assert_eq!(n, expected_ct.len(), "encrypt_into len vector {i}");
-                assert_eq!(&ct_out[..n], &expected_ct[..], "encrypt_into vector {i}");
-            }
-            {
-                let mut counter = iv.clone();
-                let mut pt_out = vec![0u8; expected_ct.len()];
-                let n = lrp
-                    .lricb_decrypt_into(&mut counter, &expected_ct, v.pad, &mut pt_out)
-                    .unwrap_or_else(|| panic!("decrypt_into vector {i} returned None"));
-                assert_eq!(&pt_out[..n], &pt[..], "decrypt_into vector {i}");
-            }
-
-            // Allocating wrappers.
-            {
-                let mut counter = iv.clone();
-                let got_ct = lrp
-                    .lricb_encrypt(&mut counter, &pt, v.pad)
-                    .unwrap_or_else(|| panic!("encrypt vector {i} returned None"));
-                assert_eq!(got_ct, expected_ct, "encrypt vector {i}");
-            }
-            {
-                let mut counter = iv.clone();
-                let got_pt = lrp
-                    .lricb_decrypt(&mut counter, &expected_ct, v.pad)
-                    .unwrap_or_else(|| panic!("decrypt vector {i} returned None"));
-                assert_eq!(got_pt, pt, "decrypt vector {i}");
-            }
-
-            // In-place variants. They don't apply padding, so pre-pad the
-            // plaintext manually (ISO/IEC 9797-1 Method 2) for `pad=true`
-            // vectors. The decrypt output is the padded plaintext because
-            // the in-place decrypt doesn't strip padding either.
+            // Pre-pad with ISO/IEC 9797-1 Method 2 for `pad=true` vectors.
+            // The in-place methods don't handle padding themselves.
             let padded_pt: Vec<u8> = if v.pad {
                 let mut p = pt.clone();
                 p.push(0x80);

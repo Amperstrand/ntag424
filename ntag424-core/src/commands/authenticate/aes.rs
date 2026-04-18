@@ -9,13 +9,12 @@ use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
 ///
 /// Drives the two-part challenge/response handshake with the PICC using
 /// the application key `key` at slot `key_no` and the caller-supplied
-/// 16-byte random `rnd_a`. On success, returns the derived
-/// `AesSuite` session and the 4-byte Transaction Identifier chosen by
-/// the PICC.
+/// 16-byte random `rnd_a`. On success, returns the derived [`AesSuite`]
+/// session and the 4-byte Transaction Identifier chosen by the PICC.
 ///
 /// The caller owns entropy: passing `rnd_a` in keeps this crate
 /// `no_std`-clean and makes the handshake deterministically testable.
-pub(crate) async fn authenticate_ev2_first_aes<T: Transport>(
+pub(crate) async fn authenticate_ev2_first<T: Transport>(
     transport: &mut T,
     key_no: KeyNumber,
     key: &[u8; 16],
@@ -85,7 +84,7 @@ fn build_part2_apdu(key: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> [u8; 
 /// Decrypt the Part 2 response and derive the session suite.
 ///
 /// Verifies `RndA'` matches the `RndA` the PCD sent (rotated left by one),
-/// then derives `AesSuite` per §9.1.7 and returns it alongside the
+/// then derives [`AesSuite`] per §9.1.7 and returns it alongside the
 /// Transaction Identifier chosen by the PICC.
 fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     key: &[u8; 16],
@@ -117,9 +116,6 @@ mod tests {
     use super::*;
     use crate::testing::hex_array;
 
-    // AN12196 §6.10 ("Authorization with key 0x03") — full AuthenticateEV2First
-    // transcript. Verifies the Part 2 APDU that the PCD builds from RndB and
-    // RndA, and that `finish_auth` derives the expected session keys and TI.
     #[derive(Debug)]
     struct NeverError;
     impl core::fmt::Display for NeverError {
@@ -129,8 +125,10 @@ mod tests {
     }
     impl core::error::Error for NeverError {}
 
+    /// AN12196 §6.10 — `AuthenticateEV2First` with key 0x03 (all-zero default
+    /// value). Verifies the Part 2 APDU bytes and TI extraction.
     #[test]
-    fn ev2_first_aes_an12196_key3() {
+    fn part2_apdu_and_finish_an12196_key3() {
         let key = [0u8; 16];
         let rnd_a: [u8; 16] = hex_array("B98F4C50CF1C2E084FD150E33992B048");
         let rnd_b_enc: [u8; 16] = hex_array("B875CEB0E66A6C5CD00898DC371F92D1");
@@ -152,15 +150,12 @@ mod tests {
             Err(e) => panic!("finish_auth rejected a valid transcript: {e:?}"),
         };
         assert_eq!(ti, hex_array::<4>("7614281A"));
-        // The full KDF is already pinned down by
-        // `crypto::suite::tests::aes_session_keys_an12196`, which uses the
-        // same RndA / RndB — here we only verify TI extraction + RndA' check.
+        // The full KDF is pinned by `crypto::suite::tests::aes_session_keys_an12196`.
     }
 
-    // AN12196 §6.6 ("Authorization with key 0x00") — second transcript,
-    // exercises the same routines with a different TI and session keys.
+    /// AN12196 §6.6 — `AuthenticateEV2First` with key 0x00.
     #[test]
-    fn ev2_first_aes_an12196_key0() {
+    fn part2_apdu_and_finish_an12196_key0() {
         let key = [0u8; 16];
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
         let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
@@ -184,16 +179,16 @@ mod tests {
         assert_eq!(ti, hex_array::<4>("9D00C4DF"));
     }
 
+    /// A corrupted `RndA'` in the Part 2 response must be rejected.
     #[test]
-    fn finish_auth_detects_wrong_rnda() {
+    fn finish_auth_detects_wrong_rnd_a() {
         let key = [0u8; 16];
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
         let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
         let mut rnd_b = rnd_b_enc;
         aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
 
-        // Flip one byte of the encrypted response — any single-bit change in
-        // the RndA' block propagates to the recovered RndA and must be caught.
+        // Flip one byte — any single-bit change propagates to the recovered RndA.
         let mut resp_enc: [u8; 32] =
             hex_array("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
         resp_enc[20] ^= 0x01;

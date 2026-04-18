@@ -3,11 +3,11 @@ use core::error::Error;
 use thiserror::Error;
 
 use crate::commands::{
-    SecureChannel, authenticate_ev2_first_aes, change_key, get_card_uid, get_version,
-    get_version_mac, read_sig, read_sig_mac,
+    SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
+    get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac,
 };
 use crate::crypto::originality::{self, OriginalityError};
-use crate::crypto::suite::{AesSuite, SessionSuite};
+use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
 use crate::{PseudoApduCapable, Transport};
 
@@ -21,10 +21,16 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     UnexpectedLength { got: usize },
     #[error("originality verification failed: {0:?}")]
     OriginalityVerificationFailed(OriginalityError),
-    /// `RndA'` returned by the PICC in Part 2 of `AuthenticateEV2First`
-    /// did not match the `RndA` the PCD sent — wrong key, or a MitM
-    /// (§9.1.5, Table 30: `AUTHENTICATION_ERROR`).
-    #[error("authentication mismatch: RndA' did not match RndA")]
+    /// A handshake validation step failed — the PICC's response did not
+    /// match what the PCD computed. Typical causes: wrong key, tampered
+    /// response, or a MitM.
+    ///
+    /// - AES (§9.1.5): the decrypted `RndA'` did not match the `RndA`
+    ///   the PCD sent.
+    /// - LRP (§9.2.5, §10.4.3): the `AuthMode` byte in the Part 1
+    ///   response, the `PICCResponse` MAC, or the echoed `PCDCap2` in
+    ///   the decrypted Part 2 `PICCData` did not validate.
+    #[error("authentication mismatch")]
     AuthenticationMismatch,
     /// 8-byte trailing `MACt` on a secure-messaging response did not
     /// match the value the PCD computed over
@@ -192,6 +198,30 @@ impl Session<Unauthenticated> {
         rnd_a: [u8; 16],
     ) -> Result<Session<Authenticated<AesSuite>>, SessionError<T::Error>> {
         let (suite, ti) = authenticate_ev2_first_aes(transport, key_no, key, rnd_a).await?;
+        Ok(Session {
+            state: Authenticated::new(suite, ti),
+        })
+    }
+
+    /// Perform LRP authentication (`AuthenticateLRPFirst`, NT4H2421Gx §9.2.5,
+    /// §10.4.3).
+    ///
+    /// The tag must have been put into LRP mode beforehand via
+    /// `SetConfiguration` (§10.10). `rnd_a` is the 16-byte PCD challenge;
+    /// the caller supplies entropy to keep this method deterministic in tests
+    /// and free of RNG dependencies in `no_std`.
+    ///
+    /// On success, returns a session backed by [`LrpSuite`] with `EncCtr = 1`
+    /// (§9.2.4: the value `0` is consumed by the Part 2 response decryption
+    /// during the handshake itself).
+    pub async fn authenticate_lrp<T: Transport>(
+        self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Session<Authenticated<LrpSuite>>, SessionError<T::Error>> {
+        let (suite, ti) = authenticate_ev2_first_lrp(transport, key_no, key, rnd_a).await?;
         Ok(Session {
             state: Authenticated::new(suite, ti),
         })
@@ -378,6 +408,134 @@ mod tests {
         let result = block_on(Session::<Unauthenticated>::new().authenticate_aes(
             &mut transport,
             KeyNumber::Key0,
+            &key,
+            rnd_a,
+        ));
+        match result {
+            Err(SessionError::ErrorResponse(status)) => {
+                assert_eq!(status, ResponseStatus::AuthenticationError);
+            }
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("91 AE must not authenticate"),
+        }
+    }
+
+    /// AN12321 §4, Table 2 — full `AuthenticateLRPFirst` transcript with key
+    /// 0x03 (all-zero default value). End-to-end integration test: drives
+    /// `Session::authenticate_lrp` against a mock PICC that asserts every
+    /// outgoing APDU byte-for-byte and replies with the exact bytes from the
+    /// application note.
+    ///
+    /// Key vectors: pages 7–8 of AN12321.
+    #[test]
+    fn authenticate_lrp_an12321_key3_full_handshake() {
+        let key = [0u8; 16];
+        // RndA from AN12321 Table 2 step 14.
+        let rnd_a: [u8; 16] = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
+
+        let mut transport = TestTransport::new([
+            // ISOSelectFile(NDEF app) — §10.9.1.
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            // Part 1 command (step 10) / response (step 11).
+            // Command: 90 71 00 00 08 || KeyNo=03 || LenCap=06 || PCDcap2=020000000000 || 00
+            // Response: AuthMode=01 || RndB (16 bytes)
+            Exchange::new(
+                &hex_bytes("9071000008030602000000000000"),
+                &hex_bytes("0156109A31977C855319CD4618C9D2AED2"),
+                0x91,
+                0xAF,
+            ),
+            // Part 2 command (step 19) / response (step 20).
+            // Command: 90 AF 00 00 20 || RndA (16) || PCDResponse (16) || 00
+            // Response: PICCData (16) || PICCResponse (16)
+            Exchange::new(
+                &hex_bytes(
+                    "90AF00002074D7DF6A2CEC0B72B412DE0D2B1117E6189B59DCEDC31A3D3F38EF8D4810B3B400",
+                ),
+                &hex_bytes("F4FC209D9D60623588B299FA5D6B2D710125F8547D9FB8D572C90D2C2A14E235"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+            &mut transport,
+            KeyNumber::Key3,
+            &key,
+            rnd_a,
+        ))
+        .expect("handshake should succeed");
+
+        // TI from step 25 of AN12321 Table 2.
+        assert_eq!(session.ti(), &hex_array::<4>("58EE9424"));
+        // CmdCtr is zero immediately after AuthenticateLRPFirst (§9.2.2).
+        assert_eq!(session.cmd_counter(), 0);
+        // All queued exchanges consumed — no extra round-trips.
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// A Part 1 response carrying a non-LRP `AuthMode` byte (anything
+    /// other than `01h`, Table 38) must be rejected before any session
+    /// keys are derived or Part 2 is sent.
+    #[test]
+    fn authenticate_lrp_rejects_wrong_auth_mode() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            // AuthMode = 00h (not 01h) — PICC is not in LRP mode.
+            Exchange::new(
+                &hex_bytes("9071000008030602000000000000"),
+                &hex_bytes("0056109A31977C855319CD4618C9D2AED2"),
+                0x91,
+                0xAF,
+            ),
+        ]);
+
+        let result = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+            &mut transport,
+            KeyNumber::Key3,
+            &key,
+            rnd_a,
+        ));
+        match result {
+            Err(SessionError::AuthenticationMismatch) => (),
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("wrong AuthMode must not authenticate"),
+        }
+        // Part 2 must not be issued on an AuthMode failure.
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Part 2 returning `91 AE` (`AUTHENTICATION_ERROR`) must surface as
+    /// [`SessionError::ErrorResponse`] rather than a silent success.
+    #[test]
+    fn authenticate_lrp_surfaces_picc_auth_error() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            Exchange::new(
+                &hex_bytes("9071000008030602000000000000"),
+                &hex_bytes("0156109A31977C855319CD4618C9D2AED2"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes(
+                    "90AF00002074D7DF6A2CEC0B72B412DE0D2B1117E6189B59DCEDC31A3D3F38EF8D4810B3B400",
+                ),
+                &[],
+                0x91,
+                0xAE,
+            ),
+        ]);
+
+        let result = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+            &mut transport,
+            KeyNumber::Key3,
             &key,
             rnd_a,
         ));
