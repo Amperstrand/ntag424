@@ -42,7 +42,22 @@ impl Configuration {
 
     /// Enable LRP (Leakage Resilient Primitive) mode (PDCap2.1 bit 1).
     ///
-    /// This change is **permanent** — once enabled, LRP cannot be disabled.
+    /// This change is **permanent** — once enabled, LRP cannot be disabled
+    /// (NT4H2421Gx §8, "After this switch, it is not possible to revert back
+    /// to AES mode").
+    ///
+    /// The switch does **not** take effect within the current secure session:
+    /// AES vs. LRP is negotiated only on First Authentication via
+    /// `PCDCap2.1` / `PDCap2.1` (NT4H2421Gx §9.1.4, Table 19), so the
+    /// remainder of this session — including further `SetConfiguration`
+    /// options sent after this one — continues to use the AES session keys.
+    /// AN12321 §5 Table 3 confirms this: step 28 right after enabling LRP
+    /// still uses the AES `SesAuthMACKey` for the response MAC.
+    ///
+    /// The new mode applies the next time the PCD performs a First
+    /// Authentication (typically after RF reset). At that point the PICC
+    /// will reject `AuthenticateEV2First` with `PERMISSION_DENIED` and only
+    /// accept `AuthenticateLRPFirst`.
     pub fn with_lrp_enabled(mut self) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[4] |= 1 << 1;
