@@ -1,5 +1,4 @@
 use crate::Transport;
-use crate::commands::select_ndef_application;
 use crate::crypto::suite::{Direction, LrpSuite, SessionSuite};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
@@ -30,12 +29,6 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     key: &[u8; 16],
     rnd_a: [u8; 16],
 ) -> Result<(LrpSuite, [u8; 4]), SessionError<T::Error>> {
-    // After POR the PICC level (MF) is selected; AppKeys live in the
-    // NDEF DF (§8.2.1). Select it before the handshake so a fresh tag
-    // does not answer `9140 NO_SUCH_KEY`. If the caller already
-    // selected the DF the re-select is a cheap no-op on the PICC.
-    select_ndef_application(transport).await?;
-
     // Part 1: CLA=90 CMD=71 P1=00 P2=00 Lc=08
     //   [KeyNo | LenCap=06 | PCDcap2 (6 bytes)] Le=00.
     // LenCap=06 means all 6 PCDcap2 bytes are carried (§10.4.3, Table 37).

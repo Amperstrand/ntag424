@@ -41,6 +41,26 @@ pub(crate) async fn iso_select_df_by_name<T: Transport>(
     Ok(())
 }
 
+/// Select an Elementary File by its 2-byte File Identifier via `ISOSelectFile`
+/// (`CLA=00 INS=A4 P1=00 P2=0C`, NT4H2421Gx §10.9.1).
+///
+/// P2=`0C` suppresses the response data (no FCI template). The NDEF
+/// application must already be selected before calling this (§8.2.1).
+pub(crate) async fn iso_select_ef_by_fid<T: Transport>(
+    transport: &mut T,
+    file_id: u16,
+) -> Result<(), SessionError<T::Error>> {
+    let fid = file_id.to_be_bytes();
+    // 00 A4 00 0C 02 <FID_HI> <FID_LO>  — no Le (P2=0Ch suppresses response)
+    let apdu = [0x00, 0xA4, 0x00, 0x0C, 0x02, fid[0], fid[1]];
+    let r = transport.transmit(&apdu).await?;
+    let code = ResponseCode::iso(r.sw1, r.sw2);
+    if !code.ok() {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    Ok(())
+}
+
 /// Select the NDEF application (§8.2.2). After POR the PICC level (MF)
 /// is active and the AppKeys/files are not reachable; callers that need
 /// `AuthenticateEV2First`, `Read/Write`, `ChangeFileSettings`, etc. must

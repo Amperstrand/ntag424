@@ -160,9 +160,10 @@ impl CapabilityContainer {
 
         let mut files = Vec::new();
         let mut offset = 7;
+        let limit = (cc_len as usize).min(data.len());
 
-        while offset < data.len() {
-            if offset + 2 > data.len() {
+        while offset < limit {
+            if offset + 2 > limit {
                 break;
             }
 
@@ -170,7 +171,7 @@ impl CapabilityContainer {
             let l = data[offset + 1] as usize;
             offset += 2;
 
-            if offset + l > data.len() {
+            if offset + l > limit {
                 return Err(CcError::EntryOverflow);
             }
 

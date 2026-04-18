@@ -4,13 +4,13 @@ use thiserror::Error;
 
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
-    change_master_key, get_card_uid, get_version, get_version_mac, read_sig, read_sig_mac,
-    set_configuration,
+    change_master_key, get_card_uid, get_version, get_version_mac, iso_read_binary,
+    iso_select_ef_by_fid, read_sig, read_sig_mac, select_ndef_application, set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
-    Configuration, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus, Uid, Version,
+    Configuration, File, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus, Uid, Version,
 };
 use crate::{PseudoApduCapable, Transport};
 
@@ -51,12 +51,20 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 /// session in the authenticated state on success.
 pub struct Session<S> {
     state: S,
+    /// Whether the NDEF application (AID `D2760000850101`) has been selected
+    /// on the transport since the last power-on or deselect.
+    ndef_selected: bool,
+    /// The File ID of the currently-selected EF, or `None` if no EF has been
+    /// selected since the last application select.
+    ef_selected: Option<u16>,
 }
 
 impl Session<Unauthenticated> {
     pub fn new() -> Self {
         Self {
             state: Unauthenticated,
+            ndef_selected: false,
+            ef_selected: None,
         }
     }
 }
@@ -101,6 +109,75 @@ impl<S> Session<S> {
             }
             got => Err(SessionError::UnexpectedLength { got }),
         }
+    }
+}
+
+impl Session<Unauthenticated> {
+    /// Select the NDEF application via `ISOSelectFile` by DF name.
+    ///
+    /// `CLA=00 INS=A4 P1=04 P2=00`, NT4H2421Gx §10.9.1.
+    ///
+    /// After power-on the PICC starts at the MF (master file) level where
+    /// ISO file commands and `AuthenticateEV2First` are not reachable.
+    /// Call this once per transport session before any `read_unauthenticated`
+    /// or authentication call (§8.2.1).
+    ///
+    /// The result is cached: if the application was already selected on this
+    /// session, the APDU is skipped and `Ok(())` is returned immediately.
+    ///
+    /// Only exposed on an unauthenticated session: re-selecting the
+    /// application on the PICC terminates an active `AuthenticatedEV2` /
+    /// `AuthenticatedLRP` state (NT4H2421Gx §8.2.1), so doing so silently
+    /// through a `Session<Authenticated<_>>` would desynchronize the
+    /// tracked session keys and `CmdCtr`.
+    pub(crate) async fn select_ndef_application<T: Transport>(
+        &mut self,
+        transport: &mut T,
+    ) -> Result<(), SessionError<T::Error>> {
+        if self.ndef_selected {
+            return Ok(());
+        }
+        select_ndef_application(transport).await?;
+        self.ndef_selected = true;
+        self.ef_selected = None;
+        Ok(())
+    }
+
+    /// Read bytes from a StandardData file via `ISOReadBinary`.
+    ///
+    /// `CLA=00 INS=B0`, NT4H2421Gx §10.9.2. Always `CommMode.Plain` —
+    /// the command has no secure-messaging variant and never advances
+    /// `CmdCtr`. `Read` or `ReadWrite` access on the targeted file must
+    /// be set to free (`Eh`) for the call to succeed.
+    ///
+    /// Restricted to `Session<Unauthenticated>`: per NT4H2421Gx Table 89,
+    /// while the PICC is in `AuthenticatedEV2` / `AuthenticatedLRP` state
+    /// `ISOReadBinary` is rejected with `SW=6982h` ("AuthenticatedEV2/LRP
+    /// not allowed") and the PICC treats the raw ISO APDU as a protocol
+    /// violation, tearing the EV2/LRP session down. Use the native
+    /// `ReadData` command (available on `Session<Authenticated<_>>`)
+    /// instead for reads inside a secure channel.
+    ///
+    /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
+    /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
+    ///
+    /// The number of bytes requested is `min(buf.len(), 256)`; when that
+    /// hits the 256 cap the command asks for the entire file (`Le = 00h`)
+    /// and the PICC truncates at the file boundary. The returned `usize`
+    /// is the number of bytes actually copied into `buf`.
+    pub async fn read_unauthenticated<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u16,
+        buf: &mut [u8],
+    ) -> Result<usize, SessionError<T::Error>> {
+        self.select_ndef_application(transport).await?;
+        if self.ef_selected != Some(file.file_id()) {
+            iso_select_ef_by_fid(transport, file.file_id()).await?;
+            self.ef_selected = Some(file.file_id());
+        }
+        iso_read_binary(transport, None, offset, buf).await
     }
 }
 
@@ -230,43 +307,55 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 impl Session<Unauthenticated> {
     /// Perform AES authentication.
     ///
-    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy so this method
-    /// stays deterministic in tests and free of RNG dependencies in
-    /// `no_std`.
+    /// Selects the NDEF application (`ISOSelectFile` by DF name) if it has
+    /// not already been selected in this session, then drives the two-part
+    /// `AuthenticateEV2First` AES handshake. `rnd_a` is the 16-byte PCD
+    /// challenge; the caller owns entropy so this method stays deterministic
+    /// in tests and free of RNG dependencies in `no_std`.
     pub async fn authenticate_aes<T: Transport>(
-        self,
+        mut self,
         transport: &mut T,
         key_no: KeyNumber,
         key: &[u8; 16],
         rnd_a: [u8; 16],
     ) -> Result<Session<Authenticated<AesSuite>>, SessionError<T::Error>> {
+        self.select_ndef_application(transport).await?;
+        let ef_selected = self.ef_selected;
         let (suite, ti) = authenticate_ev2_first_aes(transport, key_no, key, rnd_a).await?;
         Ok(Session {
             state: Authenticated::new(suite, ti),
+            ndef_selected: true,
+            ef_selected,
         })
     }
 
     /// Perform LRP authentication (`AuthenticateLRPFirst`, NT4H2421Gx §9.2.5,
     /// §10.4.3).
     ///
-    /// The tag must have been put into LRP mode beforehand via
-    /// `SetConfiguration` (§10.10). `rnd_a` is the 16-byte PCD challenge;
-    /// the caller supplies entropy to keep this method deterministic in tests
-    /// and free of RNG dependencies in `no_std`.
+    /// Selects the NDEF application (`ISOSelectFile` by DF name) if it has
+    /// not already been selected in this session, then drives the two-part
+    /// `AuthenticateLRPFirst` handshake. The tag must have been put into LRP
+    /// mode beforehand via `SetConfiguration` (§10.10). `rnd_a` is the
+    /// 16-byte PCD challenge; the caller supplies entropy to keep this method
+    /// deterministic in tests and free of RNG dependencies in `no_std`.
     ///
     /// On success, returns a session backed by LRP with `EncCtr = 1`
     /// (§9.2.4: the value `0` is consumed by the Part 2 response decryption
     /// during the handshake itself).
     pub async fn authenticate_lrp<T: Transport>(
-        self,
+        mut self,
         transport: &mut T,
         key_no: KeyNumber,
         key: &[u8; 16],
         rnd_a: [u8; 16],
     ) -> Result<Session<Authenticated<LrpSuite>>, SessionError<T::Error>> {
+        self.select_ndef_application(transport).await?;
+        let ef_selected = self.ef_selected;
         let (suite, ti) = authenticate_ev2_first_lrp(transport, key_no, key, rnd_a).await?;
         Ok(Session {
             state: Authenticated::new(suite, ti),
+            ndef_selected: true,
+            ef_selected,
         })
     }
 
