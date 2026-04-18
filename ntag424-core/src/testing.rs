@@ -45,7 +45,7 @@ pub(crate) struct TestTransport {
 }
 
 impl TestTransport {
-    pub fn new(exchanges: impl IntoIterator<Item = Exchange>) -> Self {
+    pub(crate) fn new(exchanges: impl IntoIterator<Item = Exchange>) -> Self {
         Self {
             exchanges: exchanges.into_iter().collect(),
         }

@@ -1,9 +1,9 @@
-/// Targeted authentication key (NT4H2421Gx §10.4.1, Table 25).
+/// Supported application key numbers for NTAG 424 DNA.
 ///
-/// The `KeyNo` byte of `AuthenticateEV2First` / `AuthenticateEV2NonFirst`
-/// carries the key slot in its low 6 bits (high two bits are RFU = `00b`).
 /// NTAG 424 DNA exposes five application keys, `0h` to `4h`; key `0` is the
-/// Application Master Key (§8.3.1).
+/// Application Master Key.
+///
+/// All keys should be overwritten even if not used.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum KeyNumber {
     /// Application Master Key.

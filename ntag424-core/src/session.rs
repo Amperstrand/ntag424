@@ -2,18 +2,18 @@ use core::error::Error;
 
 use thiserror::Error;
 
-use crate::commands::{Version, authenticate_ev2_first_aes, get_version};
+use crate::commands::{authenticate_ev2_first_aes, get_version};
 use crate::crypto::originality::{self, OriginalityError, SIGNATURE_LEN};
 use crate::crypto::suite::{AesSuite, SessionSuite};
-use crate::types::{KeyNumber, ResponseCode, StatusWord, Uid};
+use crate::types::{KeyNumber, ResponseCode, ResponseStatus, Uid, Version};
 use crate::{PseudoApduCapable, Transport};
 
 #[derive(Error, Debug)]
 pub enum SessionError<E: Error + core::fmt::Debug> {
     #[error(transparent)]
     Transport(#[from] E),
-    #[error("error response: {:04X}", .0.code())]
-    ErrorResponse(ResponseCode),
+    #[error("error response: {0:?}")]
+    ErrorResponse(ResponseStatus),
     #[error("unexpected response length: {got}")]
     UnexpectedLength { got: usize },
     #[error("originality verification failed: {0:?}")]
@@ -25,6 +25,12 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     AuthenticationMismatch,
 }
 
+/// An NTAG 424 DNA session.
+///
+/// A unauthenticated session can be initialized using `Session::default()`.
+/// To get access to commands requiring authentication, call an authentication method,
+/// e.g. [`Session::authenticate_aes`], which performs the handshake and returns a new
+/// session in the authenticated state on success.
 pub struct Session<S> {
     state: S,
 }
@@ -45,26 +51,23 @@ impl Default for Session<Unauthenticated> {
 
 pub struct Unauthenticated;
 
-impl Session<Unauthenticated> {
+impl<S> Session<S> {
     /// Read the UID via the PC/SC `GET_UID` pseudo-APDU (`FF CA 00 00 00`).
     ///
     /// Single round-trip; served by the reader driver from its anticollision
     /// cache, so the bytes never reach the card. Only available on transports
     /// that implement [`PseudoApduCapable`].
-    /// In random-UID mode the value returned here is the randomized UID, not
+    /// In random-ID mode the value returned here is the randomized UID, not
     /// the permanent one.
     pub async fn get_uid_from_reader<T: Transport + PseudoApduCapable>(
         &self,
         transport: &mut T,
-    ) -> Result<Uid, SessionError<T::Error>>
-    where
-        T::Error: core::fmt::Debug,
-    {
+    ) -> Result<Uid, SessionError<T::Error>> {
         let response = transport.transmit(&[0xFF, 0xCA, 0x00, 0x00, 0x00]).await?;
 
         let code = ResponseCode::iso(response.sw1, response.sw2);
         if !code.ok() {
-            return Err(SessionError::ErrorResponse(code));
+            return Err(SessionError::ErrorResponse(code.status()));
         }
         let data = response.data.as_ref();
         match data.len() {
@@ -82,24 +85,22 @@ impl Session<Unauthenticated> {
         }
     }
 
-    /// Read version information using `GetVersion` (INS `60`, NT4H2421Gx §10.7).
+    /// Read software, hardware and production version information.
+    ///
+    /// Uses `GetVersion` (INS `60`, NT4H2421Gx §10.7).
     pub async fn get_version<T: Transport>(
         &self,
         transport: &mut T,
-    ) -> Result<Version, SessionError<T::Error>>
-    where
-        T::Error: core::fmt::Debug,
-    {
+    ) -> Result<Version, SessionError<T::Error>> {
+        // TODO: check in authenticated sessions
         get_version(transport).await
     }
+}
 
-    /// Drive `AuthenticateEV2First` for AES secure messaging (NT4H2421Gx
-    /// §9.1.5, §10.4.1).
+impl Session<Unauthenticated> {
+    /// Perform AES authentication.
     ///
-    /// On success, transitions the session into
-    /// [`Authenticated<AesSuite>`] with `CmdCtr = 0` and the
-    /// Transaction Identifier assigned by the PICC. `rnd_a` is the
-    /// 16-byte PCD challenge; the caller owns entropy so this method
+    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy so this method
     /// stays deterministic in tests and free of RNG dependencies in
     /// `no_std`.
     pub async fn authenticate_aes<T: Transport>(
@@ -108,16 +109,15 @@ impl Session<Unauthenticated> {
         key_no: KeyNumber,
         key: &[u8; 16],
         rnd_a: [u8; 16],
-    ) -> Result<Session<Authenticated<AesSuite>>, SessionError<T::Error>>
-    where
-        T::Error: core::fmt::Debug,
-    {
+    ) -> Result<Session<Authenticated<AesSuite>>, SessionError<T::Error>> {
         let (suite, ti) = authenticate_ev2_first_aes(transport, key_no, key, rnd_a).await?;
         Ok(Session {
             state: Authenticated::new(suite, ti),
         })
     }
 
+    /// Verify tag originality by its UID.
+    ///
     /// Issue `Read_Sig` (INS = 0x3C, NT4H2421Gx §10.12) and verify the
     /// 56-byte ECDSA originality signature against `uid` using the NXP
     /// master public key (AN12196 §7.2).
@@ -125,22 +125,20 @@ impl Session<Unauthenticated> {
         &self,
         transport: &mut T,
         uid: &[u8; 7],
-    ) -> Result<(), SessionError<T::Error>>
-    where
-        T::Error: core::fmt::Debug,
-    {
+    ) -> Result<(), SessionError<T::Error>> {
+        // TODO: check in authenticated sessions
         // DESFire-wrapped APDU: CLA=90 INS=3C P1=P2=00 Lc=01 Data=00 Le=00.
         let response = transport
             .transmit(&[0x90, 0x3C, 0x00, 0x00, 0x01, 0x00, 0x00])
             .await?;
         let code = ResponseCode::desfire(response.sw1, response.sw2);
         if !matches!(
-            code.status_word(),
+            code.status(),
             // The response code 90 91 is "documented by example" in table 30
             // of AN12196, but nowhere else it seems, seems to be the "success" code.
-            StatusWord::Unknown(0x9190) | StatusWord::OperationOk
+            ResponseStatus::Unknown(0x9190) | ResponseStatus::OperationOk
         ) {
-            return Err(SessionError::ErrorResponse(code));
+            return Err(SessionError::ErrorResponse(code.status()));
         }
         let data = response.data.as_ref();
         let sig: &[u8; SIGNATURE_LEN] = data
@@ -150,11 +148,10 @@ impl Session<Unauthenticated> {
     }
 }
 
-pub struct AwaitingAuthChallenge {
-    rnd_a: [u8; 16],
-    key: [u8; 16],
-}
-
+/// State of an authenticated session.
+///
+/// The session suite `S` determines the cryptographic algorithms, the tag
+/// supports AES and LRP.
 pub struct Authenticated<S: SessionSuite> {
     suite: S,
     cmd_counter: u16,
@@ -300,8 +297,8 @@ mod tests {
             rnd_a,
         ));
         match result {
-            Err(SessionError::ErrorResponse(code)) => {
-                assert_eq!(code.status_word(), StatusWord::AuthenticationError);
+            Err(SessionError::ErrorResponse(status)) => {
+                assert_eq!(status, ResponseStatus::AuthenticationError);
             }
             Err(other) => panic!("unexpected error: {other:?}"),
             Ok(_) => panic!("91 AE must not authenticate"),

@@ -1,7 +1,7 @@
 use crate::Transport;
 use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt, aes_cbc_encrypt};
 use crate::session::SessionError;
-use crate::types::{KeyNumber, ResponseCode, StatusWord};
+use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
 
 /// `AuthenticateEV2First` for AES secure messaging (NT4H2421Gx §9.1.5,
 /// §10.4.1).
@@ -19,17 +19,14 @@ pub(crate) async fn authenticate_ev2_first_aes<T: Transport>(
     key_no: KeyNumber,
     key: &[u8; 16],
     rnd_a: [u8; 16],
-) -> Result<(AesSuite, [u8; 4]), SessionError<T::Error>>
-where
-    T::Error: core::fmt::Debug,
-{
+) -> Result<(AesSuite, [u8; 4]), SessionError<T::Error>> {
     // Part 1: CLA=90 CMD=71 P1=00 P2=00 Lc=02 [KeyNo LenCap=00] Le=00.
     // LenCap = 0 means no `PCDcap2` is carried (§10.4.1, Table 25).
     let part1_apdu = [0x90, 0x71, 0x00, 0x00, 0x02, key_no.as_byte(), 0x00, 0x00];
     let r1 = transport.transmit(&part1_apdu).await?;
     let code = ResponseCode::desfire(r1.sw1, r1.sw2);
-    if !matches!(code.status_word(), StatusWord::AdditionalFrame) {
-        return Err(SessionError::ErrorResponse(code));
+    if !matches!(code.status(), ResponseStatus::AdditionalFrame) {
+        return Err(SessionError::ErrorResponse(code.status()));
     }
     let rnd_b_enc: [u8; 16] =
         r1.data
@@ -47,7 +44,7 @@ where
     let r2 = transport.transmit(&part2_apdu).await?;
     let code = ResponseCode::desfire(r2.sw1, r2.sw2);
     if !code.ok() {
-        return Err(SessionError::ErrorResponse(code));
+        return Err(SessionError::ErrorResponse(code.status()));
     }
     let resp_enc: [u8; 32] =
         r2.data

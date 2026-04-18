@@ -1,5 +1,6 @@
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StatusWord {
+/// A response status word returned by the tag after processing a command.
+pub enum ResponseStatus {
     /// Successful operation.
     OperationOk,
     /// Command code not supported.

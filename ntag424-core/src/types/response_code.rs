@@ -1,9 +1,9 @@
-use crate::types::status_word::StatusWord;
+use super::ResponseStatus;
 
 /// Status word returned by the card or reader, tagged with the framing the
 /// caller used so `ok()` can pick the right success code.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ResponseCode {
+pub(crate) enum ResponseCode {
     /// ISO 7816 status word (CLA=`00` commands, PC/SC pseudo-APDUs). OK = `9000`.
     Iso { sw1: u8, sw2: u8 },
     /// DESFire-native status (CLA=`90` commands on NTAG 424 DNA). OK = `9100`.
@@ -40,40 +40,40 @@ impl ResponseCode {
         }
     }
 
-    pub fn status_word(&self) -> StatusWord {
+    pub fn status(&self) -> ResponseStatus {
         if matches!(self, Self::Desfire { .. }) {
             match self.code() {
-                0x9100 => StatusWord::OperationOk,
-                0x911C => StatusWord::IllegalCommandCode,
-                0x911E => StatusWord::IntegrityError,
-                0x9140 => StatusWord::NoSuchKey,
-                0x917E => StatusWord::LengthError,
-                0x919D => StatusWord::PermissionDenied,
-                0x919E => StatusWord::ParameterError,
-                0x91AD => StatusWord::AuthenticationDelay,
-                0x91AE => StatusWord::AuthenticationError,
-                0x91AF => StatusWord::AdditionalFrame,
-                0x91BE => StatusWord::BoundaryError,
-                0x91CA => StatusWord::CommandAborted,
-                0x91EE => StatusWord::MemoryError,
-                0x91F0 => StatusWord::FileNotFound,
-                code => StatusWord::Unknown(code),
+                0x9100 => ResponseStatus::OperationOk,
+                0x911C => ResponseStatus::IllegalCommandCode,
+                0x911E => ResponseStatus::IntegrityError,
+                0x9140 => ResponseStatus::NoSuchKey,
+                0x917E => ResponseStatus::LengthError,
+                0x919D => ResponseStatus::PermissionDenied,
+                0x919E => ResponseStatus::ParameterError,
+                0x91AD => ResponseStatus::AuthenticationDelay,
+                0x91AE => ResponseStatus::AuthenticationError,
+                0x91AF => ResponseStatus::AdditionalFrame,
+                0x91BE => ResponseStatus::BoundaryError,
+                0x91CA => ResponseStatus::CommandAborted,
+                0x91EE => ResponseStatus::MemoryError,
+                0x91F0 => ResponseStatus::FileNotFound,
+                code => ResponseStatus::Unknown(code),
             }
         } else {
             match self.code() {
-                0x6700 => StatusWord::WrongLength,
-                0x6982 => StatusWord::SecurityStatusNotSatisfied,
-                0x6985 => StatusWord::ConditionsOfUseNotSatisfied,
-                0x6A80 => StatusWord::IncorrectParametersInTheCommandDataField,
-                0x6A82 => StatusWord::FileOrApplicationNotFound,
-                0x6A86 => StatusWord::IncorrectParametersP1P2,
-                0x6A87 => StatusWord::LcInconsistentWithParametersP1P2,
-                0x6C00 => StatusWord::WrongLeField,
-                c @ 0x6C01..=0x6CFF => StatusWord::WrongLeFieldExpected((c & 0xFF) as u8),
-                0x6D00 => StatusWord::InstructionCodeNotSupportedOrInvalid,
-                0x6E00 => StatusWord::ClassNotSupported,
-                0x9000 => StatusWord::NormalProcessing,
-                code => StatusWord::Unknown(code),
+                0x6700 => ResponseStatus::WrongLength,
+                0x6982 => ResponseStatus::SecurityStatusNotSatisfied,
+                0x6985 => ResponseStatus::ConditionsOfUseNotSatisfied,
+                0x6A80 => ResponseStatus::IncorrectParametersInTheCommandDataField,
+                0x6A82 => ResponseStatus::FileOrApplicationNotFound,
+                0x6A86 => ResponseStatus::IncorrectParametersP1P2,
+                0x6A87 => ResponseStatus::LcInconsistentWithParametersP1P2,
+                0x6C00 => ResponseStatus::WrongLeField,
+                c @ 0x6C01..=0x6CFF => ResponseStatus::WrongLeFieldExpected((c & 0xFF) as u8),
+                0x6D00 => ResponseStatus::InstructionCodeNotSupportedOrInvalid,
+                0x6E00 => ResponseStatus::ClassNotSupported,
+                0x9000 => ResponseStatus::NormalProcessing,
+                code => ResponseStatus::Unknown(code),
             }
         }
     }
