@@ -56,31 +56,8 @@ mod tests {
     use super::*;
     use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on};
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
-    fn hex_vec(s: &str) -> Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..b.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
 
     /// AN12196 §6.3 Table 28 — full `GetCardUID` round-trip.
     ///
@@ -90,15 +67,15 @@ mod tests {
     #[test]
     fn get_card_uid_an12196_vector() {
         // Steps 2–5.
-        let mac_key = hex16("379D32130CE61705DD5FD8C36B95D764");
-        let enc_key = hex16("2B4D963C014DC36F24F69A50A394F875");
+        let mac_key = hex_array("379D32130CE61705DD5FD8C36B95D764");
+        let enc_key = hex_array("2B4D963C014DC36F24F69A50A394F875");
         let ti = [0xDF, 0x05, 0x55, 0x22];
 
         // Step 10: expected C-APDU (MACt from step 9).
-        let expected_apdu = hex_vec("90510000088E2C155ADDA99BE300");
+        let expected_apdu = hex_bytes("90510000088E2C155ADDA99BE300");
 
         // Step 11: R-APDU body (ciphertext from step 15 + MACt from step 12).
-        let resp_body = hex_vec("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
+        let resp_body = hex_bytes("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
 
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
@@ -133,8 +110,8 @@ mod tests {
     /// left at zero.
     #[test]
     fn get_card_uid_rejects_bad_trailer() {
-        let mac_key = hex16("379D32130CE61705DD5FD8C36B95D764");
-        let enc_key = hex16("2B4D963C014DC36F24F69A50A394F875");
+        let mac_key = hex_array("379D32130CE61705DD5FD8C36B95D764");
+        let enc_key = hex_array("2B4D963C014DC36F24F69A50A394F875");
         let ti = [0xDF, 0x05, 0x55, 0x22];
         let uid = [0x04, 0x95, 0x8C, 0xAA, 0x5C, 0x5E, 0x80];
         let suite = AesSuite::from_keys(enc_key, mac_key);

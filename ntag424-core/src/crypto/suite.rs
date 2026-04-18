@@ -321,42 +321,8 @@ impl SessionSuite for LrpSuite {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{hex_array, hex_bytes};
     use alloc::vec::Vec;
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char: {:?}", c as char),
-        }
-    }
-
-    fn hex(s: &str) -> Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..b.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
-    fn hex8(s: &str) -> [u8; 8] {
-        assert_eq!(s.len(), 16);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
-    fn hex32(s: &str) -> [u8; 32] {
-        assert_eq!(s.len(), 64);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
 
     // AN12196 §5.10 "AuthenticateEV2First with key 0x03". Worked example
     // with Kx = all zeros, RndA / RndB from the transcript, and the
@@ -365,23 +331,23 @@ mod tests {
     #[test]
     fn aes_session_keys_an12196() {
         let kx = [0u8; 16];
-        let rnd_a = hex16("B98F4C50CF1C2E084FD150E33992B048");
-        let rnd_b = hex16("91517975190DCEA6104948EFA3085C1B");
+        let rnd_a = hex_array("B98F4C50CF1C2E084FD150E33992B048");
+        let rnd_b = hex_array("91517975190DCEA6104948EFA3085C1B");
 
         let sv1 = session_vector_aes([0xA5, 0x5A], &rnd_a, &rnd_b);
         let sv2 = session_vector_aes([0x5A, 0xA5], &rnd_a, &rnd_b);
         assert_eq!(
             sv1,
-            hex32("A55A00010080B98FDD01B6693705CEA6104948EFA3085C1B4FD150E33992B048"),
+            hex_array("A55A00010080B98FDD01B6693705CEA6104948EFA3085C1B4FD150E33992B048"),
         );
         assert_eq!(
             sv2,
-            hex32("5AA500010080B98FDD01B6693705CEA6104948EFA3085C1B4FD150E33992B048"),
+            hex_array("5AA500010080B98FDD01B6693705CEA6104948EFA3085C1B4FD150E33992B048"),
         );
 
         let suite = AesSuite::derive(&kx, &rnd_a, &rnd_b);
-        assert_eq!(suite.enc_key, hex16("7A93D6571E4B180FCA6AC90C9A7488D4"));
-        assert_eq!(suite.mac_key, hex16("FC4AF159B62E549B5812394CAB1918CC"));
+        assert_eq!(suite.enc_key, hex_array("7A93D6571E4B180FCA6AC90C9A7488D4"));
+        assert_eq!(suite.mac_key, hex_array("FC4AF159B62E549B5812394CAB1918CC"));
     }
 
     // AN12196 §5.6 "AuthenticateEV2First with key 0x00". Separate worked
@@ -390,23 +356,23 @@ mod tests {
     #[test]
     fn aes_session_keys_key0_an12196() {
         let kx = [0u8; 16];
-        let rnd_a = hex16("13C5DB8A5930439FC3DEF9A4C675360F");
-        let rnd_b = hex16("B9E2FC789B64BF237CCCAA20EC7E6E48");
+        let rnd_a = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+        let rnd_b = hex_array("B9E2FC789B64BF237CCCAA20EC7E6E48");
 
         let sv1 = session_vector_aes([0xA5, 0x5A], &rnd_a, &rnd_b);
         let sv2 = session_vector_aes([0x5A, 0xA5], &rnd_a, &rnd_b);
         assert_eq!(
             sv1,
-            hex32("A55A0001008013C56268A548D8FBBF237CCCAA20EC7E6E48C3DEF9A4C675360F"),
+            hex_array("A55A0001008013C56268A548D8FBBF237CCCAA20EC7E6E48C3DEF9A4C675360F"),
         );
         assert_eq!(
             sv2,
-            hex32("5AA50001008013C56268A548D8FBBF237CCCAA20EC7E6E48C3DEF9A4C675360F"),
+            hex_array("5AA50001008013C56268A548D8FBBF237CCCAA20EC7E6E48C3DEF9A4C675360F"),
         );
 
         let suite = AesSuite::derive(&kx, &rnd_a, &rnd_b);
-        assert_eq!(suite.enc_key, hex16("1309C877509E5A215007FF0ED19CA564"));
-        assert_eq!(suite.mac_key, hex16("4C6626F5E72EA694202139295C7A7FC7"));
+        assert_eq!(suite.enc_key, hex_array("1309C877509E5A215007FF0ED19CA564"));
+        assert_eq!(suite.mac_key, hex_array("4C6626F5E72EA694202139295C7A7FC7"));
     }
 
     // AN12196 §5.12 "Write to Proprietary File - using Cmd.WriteData,
@@ -417,32 +383,32 @@ mod tests {
     #[test]
     fn aes_secure_messaging_write_data_an12196() {
         let mut suite = AesSuite {
-            enc_key: hex16("7A93D6571E4B180FCA6AC90C9A7488D4"),
-            mac_key: hex16("FC4AF159B62E549B5812394CAB1918CC"),
+            enc_key: hex_array("7A93D6571E4B180FCA6AC90C9A7488D4"),
+            mac_key: hex_array("FC4AF159B62E549B5812394CAB1918CC"),
         };
         let ti = [0x76, 0x14, 0x28, 0x1A];
         let cmd_ctr = 0u16;
 
         let iv = suite.iv(Direction::Command, &ti, cmd_ctr);
-        assert_eq!(iv, hex16("4C651A64261A90307B6C293F611C7F7B"));
+        assert_eq!(iv, hex_array("4C651A64261A90307B6C293F611C7F7B"));
 
-        let mut enc = hex("0102030405060708090A800000000000");
+        let mut enc = hex_bytes("0102030405060708090A800000000000");
         suite.encrypt(Direction::Command, &ti, cmd_ctr, &mut enc);
-        assert_eq!(enc, hex("6B5E6804909962FC4E3FF5522CF0F843"));
+        assert_eq!(enc, hex_bytes("6B5E6804909962FC4E3FF5522CF0F843"));
 
-        let mac_input = hex("8D00007614281A030000000A00006B5E6804909962FC4E3FF5522CF0F843");
+        let mac_input = hex_bytes("8D00007614281A030000000A00006B5E6804909962FC4E3FF5522CF0F843");
         assert_eq!(
             cmac_aes(&suite.mac_key, &mac_input),
-            hex16("426CD70CE153ED315E5B139CB97384AA")
+            hex_array("426CD70CE153ED315E5B139CB97384AA")
         );
-        assert_eq!(suite.mac(&mac_input), hex8("6C0C53315B9C73AA"));
+        assert_eq!(suite.mac(&mac_input), hex_array("6C0C53315B9C73AA"));
 
-        let resp_mac_input = hex("0001007614281A");
+        let resp_mac_input = hex_bytes("0001007614281A");
         assert_eq!(
             cmac_aes(&suite.mac_key, &resp_mac_input),
-            hex16("86C2486D35237F6E974A437C4004C46D"),
+            hex_array("86C2486D35237F6E974A437C4004C46D"),
         );
-        assert_eq!(suite.mac(&resp_mac_input), hex8("C26D236E4A7C046D"));
+        assert_eq!(suite.mac(&resp_mac_input), hex_array("C26D236E4A7C046D"));
     }
 
     // AN12196 §5.4 "Get File Settings". This is a compact CommMode.MAC
@@ -451,14 +417,14 @@ mod tests {
     fn aes_mac_mode_get_file_settings_an12196() {
         let suite = AesSuite {
             enc_key: [0u8; 16],
-            mac_key: hex16("8248134A386E86EB7FAF54A52E536CB6"),
+            mac_key: hex_array("8248134A386E86EB7FAF54A52E536CB6"),
         };
-        let mac_input = hex("F500007A21085E02");
+        let mac_input = hex_bytes("F500007A21085E02");
         assert_eq!(
             cmac_aes(&suite.mac_key, &mac_input),
-            hex16("B565AC978FA46D5784C845CD1444102C"),
+            hex_array("B565AC978FA46D5784C845CD1444102C"),
         );
-        assert_eq!(suite.mac(&mac_input), hex8("6597A457C8CD442C"));
+        assert_eq!(suite.mac(&mac_input), hex_array("6597A457C8CD442C"));
     }
 
     // AN12196 §5.8.2 "Write NDEF File - using Cmd.WriteData, CommMode.FULL".
@@ -469,19 +435,19 @@ mod tests {
     #[test]
     fn aes_secure_messaging_write_ndef_multiblock_an12196() {
         let mut suite = AesSuite {
-            enc_key: hex16("1309C877509E5A215007FF0ED19CA564"),
-            mac_key: hex16("4C6626F5E72EA694202139295C7A7FC7"),
+            enc_key: hex_array("1309C877509E5A215007FF0ED19CA564"),
+            mac_key: hex_array("4C6626F5E72EA694202139295C7A7FC7"),
         };
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
         let cmd_ctr = 0u16;
 
         let iv = suite.iv(Direction::Command, &ti, cmd_ctr);
-        assert_eq!(iv, hex16("D2CB7277A17841A06654A48188C1F8F5"));
+        assert_eq!(iv, hex_array("D2CB7277A17841A06654A48188C1F8F5"));
 
-        let expected_ct = hex(
+        let expected_ct = hex_bytes(
             "421C73A27D827658AF481FDFF20A5025B559D0E3AA21E58D347F343CFFC768BFE596C706BC00F2176781D4B0242642A0FF5A42C461AAF894D9A1284B8C76BCFA658ACD40555D362E08DB15CF421B51283F9064BCBE20E96CAE545B407C9D651A3315B27373772E5DA2367D2064AE054AF996C6F1F669170FA88CE8C4E3A4A7BBBEF0FD971FF532C3A802AF745660F2B4",
         );
-        let expected_pt = hex(
+        let expected_pt = hex_bytes(
             "0051D1014D550463686F6F73652E75726C2E636F6D2F6E7461673432343F653D303030303030303030303030303030303030303030303030303030303030303026633D3030303030303030303030303030303000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000",
         );
 
@@ -502,33 +468,33 @@ mod tests {
     #[test]
     fn aes_secure_messaging_get_uid_an12196() {
         let mut suite = AesSuite {
-            enc_key: hex16("2B4D963C014DC36F24F69A50A394F875"),
-            mac_key: hex16("379D32130CE61705DD5FD8C36B95D764"),
+            enc_key: hex_array("2B4D963C014DC36F24F69A50A394F875"),
+            mac_key: hex_array("379D32130CE61705DD5FD8C36B95D764"),
         };
         let ti = [0xDF, 0x05, 0x55, 0x22];
 
-        let cmd_mac_input = hex("510000DF055522");
+        let cmd_mac_input = hex_bytes("510000DF055522");
         assert_eq!(
             cmac_aes(&suite.mac_key, &cmd_mac_input),
-            hex16("CC8E8C2CD015945AFDDD7DA9B19BB9E3"),
+            hex_array("CC8E8C2CD015945AFDDD7DA9B19BB9E3"),
         );
-        assert_eq!(suite.mac(&cmd_mac_input), hex8("8E2C155ADDA99BE3"));
+        assert_eq!(suite.mac(&cmd_mac_input), hex_array("8E2C155ADDA99BE3"));
 
-        let response_ciphertext = hex16("70756055688505B52A5E26E59E329CD6");
+        let response_ciphertext: [u8; 16] = hex_array("70756055688505B52A5E26E59E329CD6");
         let iv = suite.iv(Direction::Response, &ti, 1);
-        assert_eq!(iv, hex16("7F6BB0B278EA054CBD238C5D9E9E342B"));
+        assert_eq!(iv, hex_array("7F6BB0B278EA054CBD238C5D9E9E342B"));
 
         let mut plaintext = response_ciphertext;
         suite.decrypt(Direction::Response, &ti, 1, &mut plaintext);
-        assert_eq!(plaintext, hex16("04958CAA5C5E80800000000000000000"));
-        assert_eq!(&plaintext[..7], &hex("04958CAA5C5E80"));
+        assert_eq!(plaintext, hex_array("04958CAA5C5E80800000000000000000"));
+        assert_eq!(&plaintext[..7], &hex_bytes("04958CAA5C5E80"));
 
-        let resp_mac_input = hex("000100DF05552270756055688505B52A5E26E59E329CD6");
+        let resp_mac_input = hex_bytes("000100DF05552270756055688505B52A5E26E59E329CD6");
         assert_eq!(
             cmac_aes(&suite.mac_key, &resp_mac_input),
-            hex16("F4593D5FAB671F225798C4EA894195B7"),
+            hex_array("F4593D5FAB671F225798C4EA894195B7"),
         );
-        assert_eq!(suite.mac(&resp_mac_input), hex8("595F672298EA41B7"));
+        assert_eq!(suite.mac(&resp_mac_input), hex_array("595F672298EA41B7"));
     }
 
     // AN12321 §4 "Authentication using AuthenticateLRPFirst". Key 0x03 with
@@ -539,20 +505,20 @@ mod tests {
     #[test]
     fn lrp_session_keys_an12321() {
         let kx = [0u8; 16];
-        let rnd_a = hex16("74D7DF6A2CEC0B72B412DE0D2B1117E6");
-        let rnd_b = hex16("56109A31977C855319CD4618C9D2AED2");
+        let rnd_a = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
+        let rnd_b = hex_array("56109A31977C855319CD4618C9D2AED2");
 
         let sv = session_vector_lrp(&rnd_a, &rnd_b);
         assert_eq!(
             sv,
-            hex32("0001008074D7897AB6DD9C0E855319CD4618C9D2AED2B412DE0D2B1117E69669"),
+            hex_array("0001008074D7897AB6DD9C0E855319CD4618C9D2AED2B412DE0D2B1117E69669"),
         );
 
         let suite = LrpSuite::derive(&kx, &rnd_a, &rnd_b);
         let mac_uk: [u8; 16] = (*suite.mac_key.k_prime()).into();
         let enc_uk: [u8; 16] = (*suite.enc_key.k_prime()).into();
-        assert_eq!(mac_uk, hex16("F56CADE598CC2A3FE47E438CFEB885DB"));
-        assert_eq!(enc_uk, hex16("E9043D65AB21C0C422781099AB25EFDD"));
+        assert_eq!(mac_uk, hex_array("F56CADE598CC2A3FE47E438CFEB885DB"));
+        assert_eq!(enc_uk, hex_array("E9043D65AB21C0C422781099AB25EFDD"));
         assert_eq!(suite.enc_ctr, 0);
     }
 
@@ -564,27 +530,28 @@ mod tests {
     #[test]
     fn lrp_authenticate_first_exchange_an12321() {
         let kx = [0u8; 16];
-        let rnd_a = hex16("74D7DF6A2CEC0B72B412DE0D2B1117E6");
-        let rnd_b = hex16("56109A31977C855319CD4618C9D2AED2");
+        let rnd_a = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
+        let rnd_b = hex_array("56109A31977C855319CD4618C9D2AED2");
         let mut suite = LrpSuite::derive(&kx, &rnd_a, &rnd_b);
 
-        let pcd_mac_input = hex("74D7DF6A2CEC0B72B412DE0D2B1117E656109A31977C855319CD4618C9D2AED2");
+        let pcd_mac_input =
+            hex_bytes("74D7DF6A2CEC0B72B412DE0D2B1117E656109A31977C855319CD4618C9D2AED2");
         assert_eq!(
             cmac_lrp(suite.mac_key.clone(), &pcd_mac_input),
-            hex16("189B59DCEDC31A3D3F38EF8D4810B3B4"),
+            hex_array("189B59DCEDC31A3D3F38EF8D4810B3B4"),
         );
 
-        let mut picc_data = hex("F4FC209D9D60623588B299FA5D6B2D71");
+        let mut picc_data = hex_bytes("F4FC209D9D60623588B299FA5D6B2D71");
         suite.decrypt(Direction::Response, &[0; 4], 0, &mut picc_data);
-        assert_eq!(picc_data, hex("58EE9424020000000000020000000000"));
+        assert_eq!(picc_data, hex_bytes("58EE9424020000000000020000000000"));
         assert_eq!(suite.enc_ctr(), 1);
 
-        let picc_mac_input = hex(
+        let picc_mac_input = hex_bytes(
             "56109A31977C855319CD4618C9D2AED274D7DF6A2CEC0B72B412DE0D2B1117E6F4FC209D9D60623588B299FA5D6B2D71",
         );
         assert_eq!(
             cmac_lrp(suite.mac_key.clone(), &picc_mac_input),
-            hex16("0125F8547D9FB8D572C90D2C2A14E235"),
+            hex_array("0125F8547D9FB8D572C90D2C2A14E235"),
         );
     }
 
@@ -594,7 +561,8 @@ mod tests {
     #[test]
     fn lrp_stateful_get_uid_sequence_nfc_ev2_crypto() {
         let auth_key = [0u8; 16];
-        let sv = hex32("00010080993C4EED466BFC0E7EE1D30C1EBD0DEA6F6481E0D70E9A174E789669");
+        let sv: [u8; 32] =
+            hex_array("00010080993C4EED466BFC0E7EE1D30C1EBD0DEA6F6481E0D70E9A174E789669");
 
         let master = cmac_lrp(Lrp::from_base_key(auth_key), &sv);
         let mut pt_iter = generate_plaintexts(master);
@@ -636,9 +604,13 @@ mod tests {
             cmd_input.push(0x51);
             cmd_input.extend_from_slice(&cmd_ctr.to_le_bytes());
             cmd_input.extend_from_slice(&ti);
-            assert_eq!(suite.mac(&cmd_input), hex8(cmd_mact), "cmd MACt vector {i}");
+            assert_eq!(
+                suite.mac(&cmd_input),
+                hex_array(*cmd_mact),
+                "cmd MACt vector {i}"
+            );
 
-            let resp_ciphertext = hex(resp_ct);
+            let resp_ciphertext = hex_bytes(resp_ct);
             let mut resp_input = Vec::with_capacity(7 + resp_ciphertext.len());
             resp_input.push(0x00);
             resp_input.extend_from_slice(&(cmd_ctr + 1).to_le_bytes());
@@ -646,7 +618,7 @@ mod tests {
             resp_input.extend_from_slice(&resp_ciphertext);
             assert_eq!(
                 suite.mac(&resp_input),
-                hex8(resp_mact),
+                hex_array(*resp_mact),
                 "resp MACt vector {i}"
             );
 
@@ -654,7 +626,7 @@ mod tests {
             suite.decrypt(Direction::Response, &ti, cmd_ctr + 1, &mut pt);
             assert_eq!(
                 pt,
-                hex("04940D2A2F7080800000000000000000"),
+                hex_bytes("04940D2A2F7080800000000000000000"),
                 "resp PT vector {i}"
             );
             assert_eq!(suite.enc_ctr(), i as u32 + 2, "enc_ctr vector {i}");
@@ -667,7 +639,8 @@ mod tests {
     #[test]
     fn lrp_command_encrypt_decrypt_nfc_ev2_crypto() {
         let auth_key = [0u8; 16];
-        let sv = hex32("0001008008A6953C60BC3D34E53766689732E2A203FF23855751D644ED519669");
+        let sv: [u8; 32] =
+            hex_array("0001008008A6953C60BC3D34E53766689732E2A203FF23855751D644ED519669");
 
         let master = cmac_lrp(Lrp::from_base_key(auth_key), &sv);
         let mut pt_iter = generate_plaintexts(master);
@@ -682,13 +655,14 @@ mod tests {
             enc_ctr: 1,
         };
 
-        let cmd_mac_input = hex("8D0000204F227603000000030000EAF0FAD0430ECDC947A822E12EC8D5F3");
-        assert_eq!(suite.mac(&cmd_mac_input), hex8("BB75F218B405FDBC"));
+        let cmd_mac_input =
+            hex_bytes("8D0000204F227603000000030000EAF0FAD0430ECDC947A822E12EC8D5F3");
+        assert_eq!(suite.mac(&cmd_mac_input), hex_array("BB75F218B405FDBC"));
 
-        let padded_cmd = hex("01020380000000000000000000000000");
+        let padded_cmd = hex_bytes("01020380000000000000000000000000");
         let mut ct = padded_cmd.clone();
         suite.encrypt(Direction::Command, &[0x20, 0x4F, 0x22, 0x76], 0, &mut ct);
-        assert_eq!(ct, hex("EAF0FAD0430ECDC947A822E12EC8D5F3"));
+        assert_eq!(ct, hex_bytes("EAF0FAD0430ECDC947A822E12EC8D5F3"));
         assert_eq!(suite.enc_ctr(), 2);
 
         let mut fresh_suite = LrpSuite {
@@ -696,7 +670,7 @@ mod tests {
             enc_key: suite.enc_key.clone(),
             enc_ctr: 1,
         };
-        let mut pt = hex("EAF0FAD0430ECDC947A822E12EC8D5F3");
+        let mut pt = hex_bytes("EAF0FAD0430ECDC947A822E12EC8D5F3");
         fresh_suite.decrypt(Direction::Command, &[0, 0, 0, 0], 999, &mut pt);
         assert_eq!(pt, padded_cmd);
         assert_eq!(fresh_suite.enc_ctr(), 2);

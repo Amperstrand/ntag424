@@ -414,31 +414,9 @@ impl BlockCipherEncrypt for Lrp {
 mod tests {
     use super::*;
 
+    use crate::testing::{hex_array, hex_bytes, hex_nib};
     use alloc::vec;
     use alloc::vec::Vec;
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char: {:?}", c as char),
-        }
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
-    fn hex_bytes(s: &str) -> Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..s.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
 
     fn hex_nibbles(s: &str) -> Vec<Nibble> {
         s.bytes().map(|c| Nibble::from_masked(hex_nib(c))).collect()
@@ -558,7 +536,7 @@ mod tests {
         ];
 
         for (i, v) in vectors.iter().enumerate() {
-            let key = hex16(v.key);
+            let key = hex_array(v.key);
             let plaintexts: [Block; 16] = {
                 let mut it = generate_plaintexts(key);
                 core::array::from_fn(|_| it.next().unwrap())
@@ -566,7 +544,7 @@ mod tests {
             let uk = generate_updated_keys(key).nth(v.uk).unwrap();
             let nibbles = hex_nibbles(v.iv);
             let got = eval_lrp(&plaintexts, uk, &nibbles, v.finalize);
-            let want = hex16(v.res);
+            let want: [u8; 16] = hex_array(v.res);
             assert_eq!(got.as_slice(), &want[..], "vector {i}");
         }
     }
@@ -679,7 +657,7 @@ mod tests {
         ];
 
         for (i, v) in vectors.iter().enumerate() {
-            let lrp = Lrp::from_base_key(hex16(v.key));
+            let lrp = Lrp::from_base_key(hex_array(v.key));
             let iv = hex_bytes(v.iv);
             let pt = hex_bytes(v.pt);
             let expected_ct = hex_bytes(v.ct);
@@ -817,7 +795,7 @@ mod tests {
         ];
 
         for (i, v) in vectors.iter().enumerate() {
-            let lrp = Lrp::from_base_key(hex16(v.key));
+            let lrp = Lrp::from_base_key(hex_array(v.key));
             let msg = hex_bytes(v.msg);
 
             let mut k0 = Block::default();
@@ -831,12 +809,16 @@ mod tests {
             } else {
                 k2
             };
-            assert_eq!(want_kx, hex16(v.kx), "vector {i}: Kx");
+            assert_eq!(want_kx, hex_array(v.kx), "vector {i}: Kx");
 
             let mut mac = Cmac::<Lrp>::inner_init(lrp);
             mac.update(&msg);
             let got = mac.finalize().into_bytes();
-            assert_eq!(got.as_slice(), &hex16(v.mac)[..], "vector {i}: MAC");
+            assert_eq!(
+                got.as_slice(),
+                &hex_array::<16>(v.mac)[..],
+                "vector {i}: MAC"
+            );
         }
     }
 }

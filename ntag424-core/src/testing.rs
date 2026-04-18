@@ -104,3 +104,26 @@ pub(crate) fn block_on<F: Future>(fut: F) -> F::Output {
         Poll::Pending => panic!("block_on: future yielded, but tests must not block on I/O"),
     }
 }
+
+pub(crate) fn hex_nib(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'A'..=b'F' => c - b'A' + 10,
+        b'a'..=b'f' => c - b'a' + 10,
+        _ => panic!("invalid hex char"),
+    }
+}
+
+pub(crate) fn hex_array<const N: usize>(s: &str) -> [u8; N] {
+    assert_eq!(s.len(), 2 * N);
+    let b = s.as_bytes();
+    core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
+}
+
+pub(crate) fn hex_bytes(s: &str) -> Vec<u8> {
+    assert!(s.len().is_multiple_of(2));
+    let b = s.as_bytes();
+    (0..b.len() / 2)
+        .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
+        .collect()
+}

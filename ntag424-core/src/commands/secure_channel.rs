@@ -202,7 +202,9 @@ fn fill_mac_input(
 mod tests {
     use super::*;
     use crate::crypto::suite::AesSuite;
-    use crate::testing::{Exchange, TestTransport, TestTransportError, block_on};
+    use crate::testing::{
+        Exchange, TestTransport, TestTransportError, block_on, hex_array, hex_bytes,
+    };
 
     // AES session keys can't be constructed via the public API without
     // a full handshake, so tests go through a private constructor.
@@ -220,42 +222,13 @@ mod tests {
         state
     }
 
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex(s: &str) -> Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..b.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
-    fn hex8(s: &str) -> [u8; 8] {
-        assert_eq!(s.len(), 16);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
     /// AN12196 §5.4 "Get File Settings" — CommMode.MAC worked example.
     /// Pins `compute_cmd_mac` to the published `MACt`.
     #[test]
     fn compute_cmd_mac_matches_get_file_settings_vector() {
         let mut state = authenticated_aes(
             [0u8; 16],
-            hex16("8248134A386E86EB7FAF54A52E536CB6"),
+            hex_array("8248134A386E86EB7FAF54A52E536CB6"),
             [0x7A, 0x21, 0x08, 0x5E],
             0,
         );
@@ -263,7 +236,7 @@ mod tests {
         // Cmd = F5 (GetFileSettings), CmdHeader = file number 02h.
         assert_eq!(
             ch.compute_cmd_mac(0xF5, &[0x02], &[]),
-            hex8("6597A457C8CD442C")
+            hex_array("6597A457C8CD442C")
         );
     }
 
@@ -274,19 +247,19 @@ mod tests {
     #[test]
     fn verify_response_mac_matches_get_card_uid_vector() {
         let mut state = authenticated_aes(
-            hex16("2B4D963C014DC36F24F69A50A394F875"),
-            hex16("379D32130CE61705DD5FD8C36B95D764"),
+            hex_array("2B4D963C014DC36F24F69A50A394F875"),
+            hex_array("379D32130CE61705DD5FD8C36B95D764"),
             [0xDF, 0x05, 0x55, 0x22],
             0,
         );
         let mut ch = SecureChannel::new(&mut state);
 
         // Body = ciphertext (16) || MACt (8).
-        let body = hex("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
+        let body = hex_bytes("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
         let plain = ch
             .verify_response_mac_and_advance::<TestTransportError>(0x00, &body)
             .expect("vector MAC must verify");
-        assert_eq!(plain, hex("70756055688505B52A5E26E59E329CD6"));
+        assert_eq!(plain, hex_bytes("70756055688505B52A5E26E59E329CD6"));
         assert_eq!(ch.cmd_ctr(), 1);
     }
 
@@ -295,14 +268,14 @@ mod tests {
     #[test]
     fn response_mac_mismatch_leaves_counter_untouched() {
         let mut state = authenticated_aes(
-            hex16("2B4D963C014DC36F24F69A50A394F875"),
-            hex16("379D32130CE61705DD5FD8C36B95D764"),
+            hex_array("2B4D963C014DC36F24F69A50A394F875"),
+            hex_array("379D32130CE61705DD5FD8C36B95D764"),
             [0xDF, 0x05, 0x55, 0x22],
             0,
         );
         let mut ch = SecureChannel::new(&mut state);
 
-        let mut body = hex("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
+        let mut body = hex_bytes("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
         *body.last_mut().unwrap() ^= 0x01;
         match ch.verify_response_mac_and_advance::<TestTransportError>(0x00, &body) {
             Err(SessionError::ResponseMacMismatch) => (),
@@ -318,13 +291,13 @@ mod tests {
     #[test]
     fn send_mac_roundtrip_advances_counter() {
         // Keys + TI as in the §5.4 vector; CmdCtr starts at 0.
-        let mac_key = hex16("8248134A386E86EB7FAF54A52E536CB6");
+        let mac_key = hex_array("8248134A386E86EB7FAF54A52E536CB6");
         let mut state = authenticated_aes([0u8; 16], mac_key, [0x7A, 0x21, 0x08, 0x5E], 0);
 
         // Hand-build a plausible GetFileSettings response body + MAC.
         // We don't need real NTAG data here — the test pins the
         // MAC-framing contract, not file-settings semantics.
-        let resp_data = hex("0040EEEE000100D1FE001F00");
+        let resp_data = hex_bytes("0040EEEE000100D1FE001F00");
         let resp_mac = {
             // Same session-MAC primitive exported via AesSuite.
             use crate::crypto::suite::SessionSuite as _;
@@ -340,7 +313,7 @@ mod tests {
         resp_body.extend_from_slice(&resp_mac);
 
         // Expected APDU: 90 F5 00 00 09 02 <8-byte MAC> 00.
-        let cmd_mac = hex8("6597A457C8CD442C");
+        let cmd_mac: [u8; 8] = hex_array("6597A457C8CD442C");
         let mut expected_apdu = Vec::from([0x90, 0xF5, 0x00, 0x00, 0x09, 0x02]);
         expected_apdu.extend_from_slice(&cmd_mac);
         expected_apdu.push(0x00);

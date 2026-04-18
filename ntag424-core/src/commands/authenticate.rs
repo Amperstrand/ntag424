@@ -115,21 +115,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex<const N: usize>(s: &str) -> [u8; N] {
-        assert_eq!(s.len(), 2 * N);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
+    use crate::testing::hex_array;
 
     // AN12196 §6.10 ("Authorization with key 0x03") — full AuthenticateEV2First
     // transcript. Verifies the Part 2 APDU that the PCD builds from RndB and
@@ -146,26 +132,26 @@ mod tests {
     #[test]
     fn ev2_first_aes_an12196_key3() {
         let key = [0u8; 16];
-        let rnd_a: [u8; 16] = hex("B98F4C50CF1C2E084FD150E33992B048");
-        let rnd_b_enc: [u8; 16] = hex("B875CEB0E66A6C5CD00898DC371F92D1");
+        let rnd_a: [u8; 16] = hex_array("B98F4C50CF1C2E084FD150E33992B048");
+        let rnd_b_enc: [u8; 16] = hex_array("B875CEB0E66A6C5CD00898DC371F92D1");
         let mut rnd_b = rnd_b_enc;
         aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
 
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
             part2,
-            hex::<38>(
+            hex_array::<38>(
                 "90AF000020FF0306E47DFBC50087C4D8A78E88E62DE1E8BE457AA477C707E2F0874916A8B100"
             ),
         );
 
         let resp_enc: [u8; 32] =
-            hex("0CC9A8094A8EEA683ECAAC5C7BF20584206D0608D477110FC6B3D5D3F65C3A6A");
+            hex_array("0CC9A8094A8EEA683ECAAC5C7BF20584206D0608D477110FC6B3D5D3F65C3A6A");
         let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Ok(v) => v,
             Err(e) => panic!("finish_auth rejected a valid transcript: {e:?}"),
         };
-        assert_eq!(ti, hex::<4>("7614281A"));
+        assert_eq!(ti, hex_array::<4>("7614281A"));
         // The full KDF is already pinned down by
         // `crypto::suite::tests::aes_session_keys_an12196`, which uses the
         // same RndA / RndB — here we only verify TI extraction + RndA' check.
@@ -176,40 +162,40 @@ mod tests {
     #[test]
     fn ev2_first_aes_an12196_key0() {
         let key = [0u8; 16];
-        let rnd_a: [u8; 16] = hex("13C5DB8A5930439FC3DEF9A4C675360F");
-        let rnd_b_enc: [u8; 16] = hex("A04C124213C186F22399D33AC2A30215");
+        let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+        let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
         let mut rnd_b = rnd_b_enc;
         aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
 
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
             part2,
-            hex::<38>(
+            hex_array::<38>(
                 "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00"
             ),
         );
 
         let resp_enc: [u8; 32] =
-            hex("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
+            hex_array("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
         let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Ok(v) => v,
             Err(e) => panic!("finish_auth rejected a valid transcript: {e:?}"),
         };
-        assert_eq!(ti, hex::<4>("9D00C4DF"));
+        assert_eq!(ti, hex_array::<4>("9D00C4DF"));
     }
 
     #[test]
     fn finish_auth_detects_wrong_rnda() {
         let key = [0u8; 16];
-        let rnd_a: [u8; 16] = hex("13C5DB8A5930439FC3DEF9A4C675360F");
-        let rnd_b_enc: [u8; 16] = hex("A04C124213C186F22399D33AC2A30215");
+        let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+        let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
         let mut rnd_b = rnd_b_enc;
         aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
 
         // Flip one byte of the encrypted response — any single-bit change in
         // the RndA' block propagates to the recovered RndA and must be caught.
         let mut resp_enc: [u8; 32] =
-            hex("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
+            hex_array("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
         resp_enc[20] ^= 0x01;
         match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Err(SessionError::AuthenticationMismatch) => (),

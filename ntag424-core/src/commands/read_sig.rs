@@ -94,7 +94,7 @@ mod tests {
     use super::*;
     use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on};
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array};
     use alloc::vec::Vec;
 
     /// Build the 64-byte CommMode.FULL ciphertext the PICC would ship:
@@ -110,21 +110,6 @@ mod tests {
         buf
     }
 
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
-
     /// Authenticated `Read_Sig` round-trip. Uses the AN12196 §5.6 key 0
     /// session material and a plausible 56-byte signature; both the
     /// request command-MAC and the encrypted response payload + MAC are
@@ -134,8 +119,8 @@ mod tests {
     /// padding, then MAC over the ciphertext).
     #[test]
     fn read_sig_mac_roundtrip() {
-        let mac_key = hex16("4C6626F5E72EA694202139295C7A7FC7");
-        let enc_key = hex16("1309C877509E5A215007FF0ED19CA564");
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
         // The signature bytes are opaque to this test — any 56 distinct
         // bytes work; ECDSA verification is exercised elsewhere.
@@ -189,8 +174,8 @@ mod tests {
     /// `CmdCtr` pinned — decryption is never attempted.
     #[test]
     fn read_sig_mac_rejects_bad_trailer() {
-        let mac_key = hex16("4C6626F5E72EA694202139295C7A7FC7");
-        let enc_key = hex16("1309C877509E5A215007FF0ED19CA564");
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
         let sig: Vec<u8> = (0..56u8).collect();
         let suite = AesSuite::from_keys(enc_key, mac_key);

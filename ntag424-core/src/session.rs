@@ -256,30 +256,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 mod tests {
     use super::*;
 
-    use crate::testing::{Exchange, TestTransport, block_on};
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex(s: &str) -> alloc::vec::Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..b.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
-
-    fn hex_array<const N: usize>(s: &str) -> [u8; N] {
-        assert_eq!(s.len(), 2 * N);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
 
     /// AN12196 §5.6, Table 14 — full `AuthenticateEV2First` transcript
     /// with `Key No = 0x00` and the all-zero application key. End-to-end
@@ -295,20 +272,20 @@ mod tests {
         let transport = TestTransport::new([
             // ISOSelectFile(NDEF app) — §10.9.1. Must precede AuthenticateEV2First
             // on a freshly powered PICC (§8.2.1).
-            Exchange::new(&hex("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
             // Step 5 command / step 6–8 response.
             Exchange::new(
-                &hex("9071000002000000"),
-                &hex("A04C124213C186F22399D33AC2A30215"),
+                &hex_bytes("9071000002000000"),
+                &hex_bytes("A04C124213C186F22399D33AC2A30215"),
                 0x91,
                 0xAF,
             ),
             // Step 14 command / step 15–17 response.
             Exchange::new(
-                &hex(
+                &hex_bytes(
                     "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00",
                 ),
-                &hex("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663"),
+                &hex_bytes("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663"),
                 0x91,
                 0x00,
             ),
@@ -340,17 +317,17 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
 
         let mut transport = TestTransport::new([
-            Exchange::new(&hex("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
             Exchange::new(
-                &hex("9071000002000000"),
-                &hex("A04C124213C186F22399D33AC2A30215"),
+                &hex_bytes("9071000002000000"),
+                &hex_bytes("A04C124213C186F22399D33AC2A30215"),
                 0x91,
                 0xAF,
             ),
             // Same Part 2 APDU as the success case — the PICC can still
             // refuse with 91 AE (e.g. wrong key).
             Exchange::new(
-                &hex(
+                &hex_bytes(
                     "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00",
                 ),
                 &[],

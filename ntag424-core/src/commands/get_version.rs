@@ -123,31 +123,8 @@ mod tests {
     use super::*;
     use crate::crypto::suite::AesSuite;
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on};
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
-
-    fn hex_nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'A'..=b'F' => c - b'A' + 10,
-            b'a'..=b'f' => c - b'a' + 10,
-            _ => panic!("invalid hex char"),
-        }
-    }
-
-    fn hex(s: &str) -> Vec<u8> {
-        assert!(s.len().is_multiple_of(2));
-        let b = s.as_bytes();
-        (0..b.len() / 2)
-            .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-            .collect()
-    }
-
-    fn hex16(s: &str) -> [u8; 16] {
-        assert_eq!(s.len(), 32);
-        let b = s.as_bytes();
-        core::array::from_fn(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-    }
 
     /// Assemble `90 60 00 00 08 <MACt> 00` with the command MAC the PICC
     /// expects on the head frame of an authenticated GetVersion chain
@@ -177,12 +154,12 @@ mod tests {
     /// authenticated GetVersion example.
     #[test]
     fn get_version_mac_roundtrip() {
-        let mac_key = hex16("4C6626F5E72EA694202139295C7A7FC7");
-        let enc_key = hex16("1309C877509E5A215007FF0ED19CA564");
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
-        let part1 = hex("0404083000110591AF"); // AN12196 §5.5 step 5
-        let part2 = hex("0404020101110591AF"); // step 7
-        let part3_data = hex("04968CAA5C5E80CD65935D402118"); // step 9 (14 B)
+        let part1 = hex_bytes("0404083000110591AF"); // AN12196 §5.5 step 5
+        let part2 = hex_bytes("0404020101110591AF"); // step 7
+        let part3_data = hex_bytes("04968CAA5C5E80CD65935D402118"); // step 9 (14 B)
         assert_eq!(part3_data.len(), 14);
 
         let suite = AesSuite::from_keys(enc_key, mac_key);
@@ -225,12 +202,12 @@ mod tests {
     /// [`SessionError::ResponseMacMismatch`] and leaves `CmdCtr` alone.
     #[test]
     fn get_version_mac_rejects_bad_trailer() {
-        let mac_key = hex16("4C6626F5E72EA694202139295C7A7FC7");
-        let enc_key = hex16("1309C877509E5A215007FF0ED19CA564");
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
-        let part1 = hex("0404083000110591AF");
-        let part2 = hex("0404020101110591AF");
-        let part3_data = hex("04968CAA5C5E80CD65935D402118");
+        let part1 = hex_bytes("0404083000110591AF");
+        let part2 = hex_bytes("0404020101110591AF");
+        let part3_data = hex_bytes("04968CAA5C5E80CD65935D402118");
 
         let suite = AesSuite::from_keys(enc_key, mac_key);
         let mut mac_input = Vec::new();
