@@ -401,7 +401,8 @@ impl SdmSettings {
 /// (matches AN12196 §5.9 Table 18):
 ///
 /// ```
-/// use ntag424_core::types::{KeyNumber, SdmCtrRet, SdmSettings};
+/// use ntag424_core::types::KeyNumber;
+/// use ntag424_core::types::file_settings::{SdmCtrRet, SdmSettings};
 ///
 /// let sdm = SdmSettings::builder()
 ///     .mirror_encrypted_picc_data(KeyNumber::Key2, 0x20, true, true)
