@@ -8,8 +8,10 @@ use crate::{
     types::{KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus},
 };
 
-/// CRC32/ISO-HDLC (IEEE Std 802.3-2008) as required by NT4H2421Gx
-/// Table 63 footnote [1] for the `CRC32NK` field.
+/// Compute the `CRC32NK` value.
+///
+/// This is CRC32/ISO-HDLC (IEEE Std 802.3-2008) as required by
+/// NT4H2421Gx Table 63 footnote [1].
 ///
 /// NXP convention (consistent with the AN12196 §5.16.1 vector): the
 /// register is initialised to `0xFFFF_FFFF` but the final one's-complement
@@ -31,8 +33,10 @@ fn crc32(data: &[u8]) -> [u8; 4] {
     crc.to_le_bytes()
 }
 
-/// `ChangeKey` (INS `C4`) Case 1 — non-master application key
-/// (NT4H2421Gx §10.6.1, AN12196 §5.16.1, Table 25).
+/// Change a non-master application key.
+///
+/// This is `ChangeKey` (INS `C4`) Case 1 (NT4H2421Gx §10.6.1,
+/// AN12196 §5.16.1, Table 25).
 ///
 /// Authentication with application key 0 is required before calling this.
 ///
@@ -61,7 +65,9 @@ pub(crate) async fn change_key<T: Transport, S: SessionSuite>(
     transmit(transport, channel, KeyNumber::from(key_no), plaintext, true).await
 }
 
-/// `ChangeKey` (INS `C4`) Case 2 — Application Master Key (`Key0`)
+/// Change the application master key.
+///
+/// This is `ChangeKey` (INS `C4`) Case 2 for `Key0`
 /// (NT4H2421Gx §10.6.1, AN12196 §5.16.2, Table 26).
 ///
 /// Authentication with key 0 is required before calling this. Plaintext
@@ -83,9 +89,12 @@ pub(crate) async fn change_master_key<T: Transport, S: SessionSuite>(
     transmit(transport, channel, KeyNumber::Key0, plaintext, false).await
 }
 
-/// Encrypt the prepared 32-byte plaintext, build the `90 C4 …` APDU, send
-/// it, and either verify the trailing `MACt` (Case 1) or check that the
-/// response body is empty (Case 2). Advances `CmdCtr` on success.
+/// Send a prepared `ChangeKey` APDU.
+///
+/// Encrypts the prepared 32-byte plaintext, builds the `90 C4 …` APDU,
+/// sends it, and either verifies the trailing `MACt` (Case 1) or checks
+/// that the response body is empty (Case 2). Advances `CmdCtr` on
+/// success.
 async fn transmit<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -149,8 +158,10 @@ mod tests {
         state
     }
 
-    /// AN12196 §5.16.1, Table 25 — `ChangeKey` Case 1: key 2 changed
-    /// while authenticated with key 0.
+    /// Replay the AN12196 non-master `ChangeKey` vector.
+    ///
+    /// AN12196 §5.16.1, Table 25 changes key 2 while authenticated with
+    /// key 0.
     ///
     /// All values are taken verbatim from the application note.
     #[test]
@@ -195,8 +206,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// AN12196 §5.16.2, Table 26 — `ChangeKey` Case 2: key 0 changed
-    /// while authenticated with key 0. No MACt in response.
+    /// Replay the AN12196 master-key `ChangeKey` vector.
+    ///
+    /// AN12196 §5.16.2, Table 26 changes key 0 while authenticated with
+    /// key 0. No `MACt` appears in the response.
     #[test]
     fn change_master_key_case2_an12196_vector() {
         let mac_key = hex_array("5529860B2FC5FB6154B7F28361D30BF9");

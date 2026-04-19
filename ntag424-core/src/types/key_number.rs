@@ -15,8 +15,10 @@ pub enum KeyNumber {
 }
 
 impl KeyNumber {
-    /// Encode as the `KeyNo` byte sent on the wire (high two bits zero,
-    /// low nibble = key index, per §10.4.1).
+    /// Encode this key number for the wire.
+    ///
+    /// The high two bits stay zero and the low nibble carries the key
+    /// index (§10.4.1).
     pub fn as_byte(self) -> u8 {
         match self {
             Self::Key0 => 0x00,

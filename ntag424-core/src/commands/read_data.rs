@@ -28,8 +28,10 @@ use crate::{
     types::{ResponseCode, ResponseStatus},
 };
 
-/// Response cap dictated by the short-`Le` field (§10.8.1 Table 78 /
-/// Table 79 — "up to 256 byte including secure messaging").
+/// Maximum `ReadData` response size.
+///
+/// This cap is dictated by the short-`Le` field (§10.8.1 Table 78 /
+/// Table 79: "up to 256 byte including secure messaging").
 const READ_DATA_RESP_CAP: usize = 256;
 
 /// AES / LRP block size, used for FULL-mode padding arithmetic.
@@ -63,8 +65,10 @@ fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
     [file_no, o[0], o[1], o[2], l[0], l[1], l[2]]
 }
 
-/// Size of the destination buffer the caller must provide, consistent
-/// with `length` (`0 == "whole file"` ⇒ use the full buffer).
+/// Compute the expected plain response size.
+///
+/// Keeps the destination buffer sizing consistent with `length`
+/// (`0 == "whole file"` ⇒ use the full buffer).
 fn want_plain_bytes(length: u32, buf_len: usize) -> usize {
     let requested = if length == 0 {
         buf_len
@@ -268,8 +272,10 @@ mod tests {
         state
     }
 
-    /// Plain read from file 02h, 16 bytes at offset 0: the APDU is
-    /// pinned byte-for-byte and the returned payload is copied verbatim.
+    /// Replay a fixed plain `ReadData` exchange.
+    ///
+    /// Reads file 02h, 16 bytes at offset 0. The APDU is pinned
+    /// byte-for-byte and the returned payload is copied verbatim.
     #[test]
     fn read_data_plain_frames_header_and_copies_payload() {
         let payload = [0xABu8; 16];
@@ -372,6 +378,8 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
+    /// Reject a bad `ReadData` response MAC.
+    ///
     /// Flipping one byte of the response trailer must surface as
     /// `ResponseMacMismatch` and leave `CmdCtr` pinned.
     #[test]
@@ -426,9 +434,11 @@ mod tests {
         assert_eq!(state.counter(), 0);
     }
 
-    /// `CommMode.FULL` round-trip: 20-byte plaintext → 32-byte
-    /// ciphertext (padded per ISO/IEC 9797-1 Method 2), trailing MACt
-    /// over the ciphertext. Exercises decrypt + unpad.
+    /// Replay a FULL-mode `ReadData` round-trip.
+    ///
+    /// This covers a 20-byte plaintext becoming a 32-byte ciphertext
+    /// after ISO/IEC 9797-1 Method 2 padding, with a trailing `MACt`
+    /// over the ciphertext. It exercises decrypt and unpad.
     #[test]
     fn read_data_full_roundtrip_decrypts_and_unpads() {
         let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
@@ -489,9 +499,11 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// FULL mode: valid response MAC but the decrypted plaintext lacks
-    /// the trailing `0x80` sentinel (§9.1.4 padding). This "can't
-    /// happen" for a conforming PICC, but when the PICC did return
+    /// Preserve counter state on malformed FULL-mode padding.
+    ///
+    /// In FULL mode, a valid response MAC with decrypted plaintext that
+    /// lacks the trailing `0x80` sentinel (§9.1.4 padding) "can't
+    /// happen" for a conforming PICC. But when the PICC did return
     /// `91 00` with a verifying MAC it *also* advanced `CmdCtr`, so:
     /// - error is `UnexpectedLength` (not `ResponseMacMismatch` — the
     ///   MAC checked out), and

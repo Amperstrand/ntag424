@@ -74,8 +74,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Build the 16-byte FULL-mode ciphertext the PICC would send for a
-    /// given UID using the session ENC key.
+    /// Build a `GetCardUID` response ciphertext.
+    ///
+    /// This is the 16-byte FULL-mode ciphertext the PICC would send for
+    /// a given UID using the session ENC key.
     fn encrypt_uid(suite_keys: (&[u8; 16], &[u8; 16]), ti: [u8; 4], uid: &[u8; 7]) -> [u8; 16] {
         let (enc_key, mac_key) = suite_keys;
         let mut buf = [0u8; 16];

@@ -7,8 +7,11 @@ use crate::types::ResponseCode;
 /// single-byte Le field nonetheless limits to 256 bytes.
 const ISO_READ_BINARY_MAX: usize = 256;
 
-/// `ISOReadBinary` (`CLA=00 INS=B0`, ISO/IEC 7816-4, NT4H2421Gx §10.9.2)
-/// in `CommMode.Plain` — the command has no secure-messaging variant.
+/// Read file bytes with `ISOReadBinary`.
+///
+/// This is `ISOReadBinary` (`CLA=00 INS=B0`, ISO/IEC 7816-4,
+/// NT4H2421Gx §10.9.2) in `CommMode.Plain`; the command has no
+/// secure-messaging variant.
 ///
 /// Addressing follows ISO/IEC 7816-4 §5.1.1.1 (Table 87, field `P1`):
 ///
@@ -123,8 +126,10 @@ mod tests {
         assert_eq!(buf, [0x55u8; 16]);
     }
 
-    /// Short ISO FileID `02h` (NDEF EF) with a 256-byte buffer encodes as
-    /// `00 B0 82 05 00` — Le = 00h requests the whole file.
+    /// Encode a short-file-ID read for the whole file.
+    ///
+    /// Short ISO FileID `02h` (NDEF EF) with a 256-byte buffer encodes
+    /// as `00 B0 82 05 00`; `Le = 00h` requests the whole file.
     #[test]
     fn short_file_id_selects_and_targets_ef() {
         let payload = [0xAAu8; 100];
@@ -142,8 +147,9 @@ mod tests {
         assert_eq!(&buf[..100], &payload);
     }
 
-    /// Buffers larger than 256 bytes are clamped to the short-Le cap; the
-    /// extra space past byte 256 is left untouched.
+    /// Clamp oversized buffers to the short-`Le` cap.
+    ///
+    /// The extra space past byte 256 is left untouched.
     /// Real NTAG 424 DNA NDEF file (factory state) returns 256 zero bytes.
     #[test]
     fn clamps_oversized_buffer_to_256() {
@@ -180,8 +186,11 @@ mod tests {
         }
     }
 
+    /// Reject overlong responses.
+    ///
     /// A PICC returning more bytes than the caller asked for is surfaced
-    /// as [`SessionError::UnexpectedLength`] rather than silently copying.
+    /// as [`SessionError::UnexpectedLength`] rather than silently
+    /// copying.
     #[test]
     fn rejects_overlong_response() {
         let mut transport = TestTransport::new([Exchange::new(
@@ -198,8 +207,11 @@ mod tests {
         }
     }
 
-    /// PICC returning `69 82` (security status not satisfied, Table 89)
-    /// when reading a key-protected file without authentication.
+    /// Surface ISO security-status failures.
+    ///
+    /// This covers a PICC returning `69 82` (security status not
+    /// satisfied, Table 89) when reading a key-protected file without
+    /// authentication.
     /// Confirmed on real NTAG 424 DNA hardware: Proprietary file (E105h)
     /// with ReadAccess=Key2 returns `69 82` for an unauthenticated read.
     #[test]

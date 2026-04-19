@@ -9,8 +9,10 @@ pub(crate) const NDEF_APPLICATION_DF_NAME: [u8; 7] = [0xD2, 0x76, 0x00, 0x00, 0x
 /// Maximum DF name length per ISO/IEC 7816-4.
 const MAX_DF_NAME_LEN: usize = 16;
 
-/// Select a Dedicated File by DF name via `ISOSelectFile`
-/// (NT4H2421Gx §10.9.1, `CLA=00 INS=A4 P1=04 P2=00`).
+/// Select a DF by name.
+///
+/// Uses `ISOSelectFile` (NT4H2421Gx §10.9.1, `CLA=00 INS=A4 P1=04
+/// P2=00`).
 ///
 /// Panics if `df_name` is empty or longer than 16 bytes — the only
 /// in-tree callers pass fixed, known-good constants.
@@ -41,8 +43,10 @@ pub(crate) async fn iso_select_df_by_name<T: Transport>(
     Ok(())
 }
 
-/// Select an Elementary File by its 2-byte File Identifier via `ISOSelectFile`
-/// (`CLA=00 INS=A4 P1=00 P2=0C`, NT4H2421Gx §10.9.1).
+/// Select an EF by File Identifier.
+///
+/// Uses `ISOSelectFile` (`CLA=00 INS=A4 P1=00 P2=0C`,
+/// NT4H2421Gx §10.9.1).
 ///
 /// P2=`0C` suppresses the response data (no FCI template). The NDEF
 /// application must already be selected before calling this (§8.2.1).

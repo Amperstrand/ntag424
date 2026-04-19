@@ -1,5 +1,6 @@
-/// ISO/IEC 7816-4 elementary files accessible on an NTAG 424 DNA tag via
-/// `ISOReadBinary` / `ISOUpdateBinary`.
+/// ISO/IEC 7816-4 elementary files on NTAG 424 DNA.
+///
+/// These files are accessible via `ISOReadBinary` / `ISOUpdateBinary`.
 ///
 /// Each variant carries the short ISO FileID (`SFID`, 5 bits) assigned by NXP
 /// in NT4H2421Gx §8.2.2 Table 69. The corresponding 16-bit File Identifiers
@@ -15,8 +16,10 @@ pub enum File {
 }
 
 impl File {
-    /// Returns the short ISO FileID (`01h`–`03h`) used in `ISOReadBinary`
-    /// / `ISOUpdateBinary` P1 encoding (ISO/IEC 7816-4 §5.1.1.1).
+    /// Return the short ISO FileID.
+    ///
+    /// This is the `01h`–`03h` value used in `ISOReadBinary` /
+    /// `ISOUpdateBinary` P1 encoding (ISO/IEC 7816-4 §5.1.1.1).
     pub fn short_file_id(self) -> u8 {
         match self {
             Self::CapabilityContainer => 0x01,
@@ -25,8 +28,10 @@ impl File {
         }
     }
 
-    /// Returns the 16-bit ISO File Identifier (`E103h`–`E105h`) used in
-    /// `ISOSelectFile` (NT4H2421Gx §8.2.2 Table 69).
+    /// Return the 16-bit ISO File Identifier.
+    ///
+    /// This is the `E103h`–`E105h` value used in `ISOSelectFile`
+    /// (NT4H2421Gx §8.2.2 Table 69).
     pub fn file_id(self) -> u16 {
         match self {
             Self::CapabilityContainer => 0xE103,
@@ -35,12 +40,13 @@ impl File {
         }
     }
 
-    /// Returns the native DESFire file number (`01h`–`03h`) used in the
-    /// `CmdHeader` of native file commands such as `ReadData`
-    /// (NT4H2421Gx §8.2.1, §10.8.1 Table 78). The NTAG 424 DNA chip
-    /// exposes exactly three files and assigns them the same numeric
-    /// values as their ISO short FileIDs, but the two are conceptually
-    /// distinct.
+    /// Return the native DESFire file number.
+    ///
+    /// This is the `01h`–`03h` value used in the `CmdHeader` of native
+    /// file commands such as `ReadData` (NT4H2421Gx §8.2.1, §10.8.1
+    /// Table 78). The NTAG 424 DNA chip exposes exactly three files and
+    /// assigns them the same numeric values as their ISO short FileIDs,
+    /// but the two are conceptually distinct.
     pub fn file_no(self) -> u8 {
         match self {
             Self::CapabilityContainer => 0x01,

@@ -34,9 +34,10 @@ pub(crate) async fn read_sig<T: Transport>(
         .map_err(|_| SessionError::UnexpectedLength { got: data.len() })
 }
 
-/// Block size of the response ciphertext: 56-byte sig padded per ISO/IEC
-/// 9797-1 Method 2 (append `80` then zero-pad) lands on the next 16-byte
-/// AES-CBC boundary = 64 bytes.
+/// Ciphertext length for an authenticated `Read_Sig` response.
+///
+/// A 56-byte signature padded with ISO/IEC 9797-1 Method 2 reaches the
+/// next 16-byte AES-CBC boundary at 64 bytes.
 const READ_SIG_CT_LEN: usize = 64;
 
 /// `Read_Sig` inside an authenticated session — `CommMode.FULL` (§9.1.4).
@@ -85,8 +86,11 @@ mod tests {
     use crate::testing::{Exchange, TestTransport, block_on, hex_array};
     use alloc::vec::Vec;
 
-    /// Build the 64-byte CommMode.FULL ciphertext the PICC would ship:
-    /// encrypt `sig || 80 || 00..00` under the response IV for `CmdCtr+1`.
+    /// Build an authenticated `Read_Sig` ciphertext.
+    ///
+    /// This is the 64-byte `CommMode.FULL` ciphertext the PICC would
+    /// send: `sig || 80 || 00..00` encrypted under the response IV for
+    /// `CmdCtr+1`.
     fn encrypt_sig(suite_keys: (&[u8; 16], &[u8; 16]), ti: [u8; 4], sig: &[u8]) -> [u8; 64] {
         let (enc_key, mac_key) = suite_keys;
         let mut buf = [0u8; 64];
@@ -158,8 +162,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
+    /// Reject a bad `Read_Sig` response MAC.
+    ///
     /// A bad trailing MAC surfaces as `ResponseMacMismatch` and keeps
-    /// `CmdCtr` pinned — decryption is never attempted.
+    /// `CmdCtr` pinned; decryption is never attempted.
     #[test]
     fn read_sig_mac_rejects_bad_trailer() {
         let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");

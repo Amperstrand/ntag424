@@ -8,8 +8,10 @@ use crate::{
     types::{ResponseCode, ResponseStatus, Version},
 };
 
-/// `GetVersion` (INS `60`, NT4H2421Gx §10.5.2/§10.7) in
-/// `CommMode.Plain` — used before any authentication is in place.
+/// Read version information in plain mode.
+///
+/// This uses `GetVersion` (INS `60`, NT4H2421Gx §10.5.2/§10.7) in
+/// `CommMode.Plain`, before any authentication is in place.
 ///
 /// Three chained frames: `90 60 00 00 00`, then twice `90 AF 00 00 00`.
 /// Parts 1 and 2 are 7 bytes each (HW / SW info); Part 3 carries 14
@@ -85,8 +87,10 @@ async fn drive_chain<T: Transport>(
     Ok((part1, part2, r3.data))
 }
 
-/// Transmit an intermediate chain frame, require `91 AF` ("additional frame"),
-/// and coerce the 7-byte payload to `[u8; 7]`.
+/// Read one intermediate `GetVersion` frame.
+///
+/// Requires `91 AF` ("additional frame") and coerces the 7-byte payload
+/// to `[u8; 7]`.
 async fn request_intermediate_part<T: Transport>(
     transport: &mut T,
     apdu: &[u8],
@@ -132,8 +136,10 @@ mod tests {
         apdu
     }
 
-    /// Plain (unauthenticated) `GetVersion` round-trip using bytes captured
-    /// from a real NTAG 424 DNA tag. The three response parts contain hardware
+    /// Replay a plain `GetVersion` round-trip.
+    ///
+    /// Uses bytes captured from a real NTAG 424 DNA tag. The three
+    /// response parts contain hardware
     /// and software version info (parts 1–2, 7 B each) and production data
     /// (part 3, 14 B including the 7-byte UID). No trailing MAC is present.
     ///

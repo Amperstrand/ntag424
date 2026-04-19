@@ -56,8 +56,10 @@ impl TestTransport {
     }
 }
 
-/// Uninhabited — [`TestTransport::transmit`] never fails at the transport
-/// layer; errors only surface as non-OK status words in the response.
+/// Uninhabited test transport error.
+///
+/// [`TestTransport::transmit`] never fails at the transport layer;
+/// errors only surface as non-OK status words in the response.
 #[derive(Debug)]
 pub(crate) enum TestTransportError {}
 

@@ -249,11 +249,15 @@ pub struct SdmAccessRights {
     /// Selects the form of `PICCData` mirroring (none / plain / encrypted),
     /// see [`SdmMetaRead`].
     pub meta_read: SdmMetaRead,
-    /// Selects the AppKey used to derive the SDM read session keys, or
-    /// disables SDM-read entirely; see [`SdmFileRead`].
+    /// Select the SDM read key.
+    ///
+    /// This chooses the AppKey used to derive the SDM read session
+    /// keys, or disables SDM-read entirely; see [`SdmFileRead`].
     pub file_read: SdmFileRead,
-    /// Access right for the `GetFileCounters` command, which returns the
-    /// current `SDMReadCtr` value (NT4H2421Gx §10.7.3).
+    /// Access right for `GetFileCounters`.
+    ///
+    /// This command returns the current `SDMReadCtr` value
+    /// (NT4H2421Gx §10.7.3).
     pub ctr_ret: SdmCtrRet,
 }
 
@@ -276,9 +280,10 @@ impl SdmAccessRights {
     }
 }
 
-/// Byte offsets (and one length) inside the file that tell the tag where to
-/// inject SDM dynamic content when the file is read unauthenticated
-/// (NT4H2421Gx §9.3, §10.7.1).
+/// SDM placeholder offsets inside the file.
+///
+/// These offsets tell the tag where to inject SDM dynamic content when
+/// the file is read unauthenticated (NT4H2421Gx §9.3, §10.7.1).
 ///
 /// At personalisation time you write the file with **placeholder bytes** at
 /// the positions listed below. On every unauthenticated read the tag
@@ -366,10 +371,11 @@ pub struct SdmSettings {
     /// On the wire `SDMReadCtr` is LSB-first; mirrored ASCII is MSB-first
     /// (§9.3.1).
     pub read_ctr_mirror: bool,
-    /// `SDMOptions[Bit 4]` — encrypt a contiguous slice of the file
-    /// ([`SdmOffsets::enc_data`]) into the response, keyed by
-    /// `SesSDMFileReadENCKey` derived from
-    /// [`SdmAccessRights::file_read`] (§9.3.5–§9.3.6). Requires
+    /// Encrypt a file slice into the SDM response.
+    ///
+    /// This is `SDMOptions[Bit 4]`. It encrypts the contiguous slice at
+    /// [`SdmOffsets::enc_data`] with `SesSDMFileReadENCKey` derived from
+    /// [`SdmAccessRights::file_read`] (§9.3.5–§9.3.6). It requires
     /// `file_read != None`, and per spec also requires both UID and
     /// `SDMReadCtr` mirroring to be enabled.
     pub enc_file_data: bool,
@@ -381,17 +387,20 @@ pub struct SdmSettings {
 }
 
 impl SdmSettings {
-    /// Start building [`SdmSettings`] with [`SdmSettingsBuilder`], which
-    /// keeps the [`SdmSettings`] flags and matching [`SdmOffsets`] in sync
-    /// automatically.
+    /// Start an [`SdmSettingsBuilder`].
+    ///
+    /// The builder keeps the [`SdmSettings`] flags and matching
+    /// [`SdmOffsets`] entries in sync automatically.
     pub fn builder() -> SdmSettingsBuilder {
         SdmSettingsBuilder::default()
     }
 }
 
-/// Fluent builder for [`SdmSettings`] that sets [`SdmSettings`] flags and
-/// the corresponding [`SdmOffsets`] entries together, so that callers cannot
-/// accidentally enable a mirror without supplying an offset (or vice versa).
+/// Builder for [`SdmSettings`].
+///
+/// It sets [`SdmSettings`] flags and the corresponding
+/// [`SdmOffsets`] entries together, so callers cannot accidentally
+/// enable a mirror without supplying an offset, or vice versa.
 ///
 /// Defaults: SDM disabled — no mirroring, `meta_read = None`,
 /// `file_read = None`, `ctr_ret = NoAccess`, no encrypted data, no read-ctr
@@ -510,10 +519,11 @@ impl SdmSettingsBuilder {
         self
     }
 
-    /// Enable `SDMENCFileData` over `range` (`start..end` are byte offsets
-    /// into the file; `end - start` must be a multiple of 32, see
-    /// [`SdmOffsets::enc_data`]). Requires that
-    /// [`enable_file_read`](Self::enable_file_read) was also configured.
+    /// Enable `SDMENCFileData` over a file range.
+    ///
+    /// `start..end` are byte offsets into the file; `end - start` must
+    /// be a multiple of 32, see [`SdmOffsets::enc_data`]. This also
+    /// requires [`enable_file_read`](Self::enable_file_read).
     pub fn mirror_enc_file_data(mut self, range: Range<u32>) -> Self {
         self.inner.enc_file_data = true;
         self.inner.offsets.enc_data = Some(range);
@@ -571,9 +581,10 @@ pub struct FileSettings {
     pub sdm: Option<SdmSettings>,
 }
 
-/// Upper bound on the bytes [`FileSettings::encode_change`] can write:
-/// `FileOption (1) + AccessRights (2) + SDMOptions (1) + SDMAccessRights (2)
-/// + 8 × 3-byte offset fields`.
+/// Maximum encoded `ChangeFileSettings` payload length.
+///
+/// This upper bound is `FileOption (1) + AccessRights (2) + SDMOptions
+/// (1) + SDMAccessRights (2) + 8 × 3-byte offset fields`.
 pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 8 * 3;
 
 #[derive(Debug, Error, PartialEq, Eq)]

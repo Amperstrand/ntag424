@@ -12,8 +12,10 @@ pub trait Transport {
     ) -> impl Future<Output = Result<Response<Self::Data>, Self::Error>>;
 }
 
-/// Marker for transports that support PC/SC 2.02 Part 3 reader pseudo-APDUs
-/// (`CLA = 0xFF`) such as `GET_UID` (`FF CA 00 00 00`).
+/// Marker for transports with PC/SC pseudo-APDU support.
+///
+/// This covers PC/SC 2.02 Part 3 reader pseudo-APDUs (`CLA = 0xFF`)
+/// such as `GET_UID` (`FF CA 00 00 00`).
 ///
 /// The reader driver intercepts these and answers from its anticollision cache; the bytes never
 /// reach the card. Non-PC/SC transports (bare NFC, proprietary USB protocols)

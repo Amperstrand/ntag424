@@ -23,8 +23,10 @@ use cmac::{Cmac, Mac, digest::InnerInit};
 
 use super::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
 
-/// Direction of an encrypted message, selecting the 2-byte label that
-/// separates command IVs from response IVs (§9.1.4 / §9.2.4).
+/// Direction of an encrypted message.
+///
+/// Selects the 2-byte label that separates command IVs from response
+/// IVs (§9.1.4 / §9.2.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     /// PCD → PICC. Label `A5 5A`.
@@ -63,9 +65,10 @@ impl Direction {
 /// The AES suite consumes them during IV derivation; the LRP suite ignores
 /// them in `encrypt`/`decrypt` because LRP's IV is the stateful `EncCtr`.
 pub trait SessionSuite: Sized {
-    /// Derive the session keys from the static application key `kx` and
-    /// the 16-byte randoms `rnd_a` (PCD) and `rnd_b` (PICC) exchanged
-    /// during the handshake.
+    /// Derive session keys from the authentication transcript.
+    ///
+    /// Uses the static application key `kx` and the 16-byte randoms
+    /// `rnd_a` (PCD) and `rnd_b` (PICC) exchanged during the handshake.
     ///
     /// - AES (§9.1.7): two CMAC-AES derivations of `SV1` / `SV2` keyed by
     ///   `kx` produce `SesAuthENCKey` and `SesAuthMACKey`.
@@ -75,9 +78,11 @@ pub trait SessionSuite: Sized {
     ///   `UK[1]` (ENC).
     fn derive(kx: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> Self;
 
-    /// CMAC over `data` with the session MAC key, truncated to 8 bytes by
-    /// keeping the even-numbered (1-indexed) output bytes in MSB-first
-    /// order (§9.1.3 / §9.2.3).
+    /// Compute the truncated session MAC.
+    ///
+    /// This is a CMAC over `data` with the session MAC key, truncated to
+    /// 8 bytes by keeping the even-numbered (1-indexed) output bytes in
+    /// MSB-first order (§9.1.3 / §9.2.3).
     ///
     /// The caller assembles the full NTAG 424 DNA MAC input, e.g.
     /// `Cmd || CmdCtr || TI || CmdHeader || CmdData` for commands and
@@ -101,9 +106,10 @@ pub trait SessionSuite: Sized {
     fn decrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]);
 }
 
-/// Truncate a 16-byte CMAC output per §9.1.3 / §9.2.3: keep the even-
-/// numbered (1-indexed) bytes in MSB-first order — i.e. 0-based indices
-/// 1, 3, 5, 7, 9, 11, 13, 15.
+/// Truncate a 16-byte CMAC output.
+///
+/// Per §9.1.3 / §9.2.3, keep the even-numbered (1-indexed) bytes in
+/// MSB-first order: 0-based indices 1, 3, 5, 7, 9, 11, 13, 15.
 fn truncate_mac(full: &[u8; 16]) -> [u8; 8] {
     core::array::from_fn(|i| full[2 * i + 1])
 }

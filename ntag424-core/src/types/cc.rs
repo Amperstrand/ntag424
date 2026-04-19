@@ -48,8 +48,10 @@ pub struct FileCtrl {
     write_access: AccessCondition,
 }
 
-/// Kind of File Control entry, distinguishing the two file types the
-/// NTAG 424 DNA exposes through the T4T mapping.
+/// Kind of File Control entry.
+///
+/// Distinguishes the two file types the NTAG 424 DNA exposes through
+/// the T4T mapping.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FileCtrlKind {
     /// NDEF File Control entry (on-wire tag `04h`).
@@ -79,8 +81,10 @@ pub enum AccessCondition {
     ProprietaryKey(KeyNumber),
     /// Access denied (`FFh`).
     Denied,
-    /// Any other raw byte value — RFU or a proprietary encoding not covered
-    /// by the variants above. Produced only by parsing; prefer the named
+    /// Any other raw byte value.
+    ///
+    /// This covers RFU or proprietary encodings not covered by the
+    /// variants above. It is produced only by parsing; prefer the named
     /// variants when constructing a value.
     Raw(u8),
 }
@@ -112,10 +116,13 @@ impl AccessCondition {
 }
 
 impl Default for CapabilityContainer {
-    /// Factory-default CC content as shipped by NXP on NTAG 424 DNA
-    /// (NT4H2421Gx §8.2.3.2): NDEF file `E104h` / 256 bytes / open access,
-    /// proprietary file `E105h` / 128 bytes / read via key `2h`, write via
-    /// key `3h`, mapping version 2.0, `MLe = 256`, `MLc = 255`.
+    /// Return the factory-default CC content.
+    ///
+    /// This matches the NXP NTAG 424 DNA default from NT4H2421Gx
+    /// §8.2.3.2: NDEF file `E104h` / 256 bytes / open access,
+    /// proprietary file `E105h` / 128 bytes / read via key `2h`,
+    /// write via key `3h`, mapping version 2.0, `MLe = 256`,
+    /// `MLc = 255`.
     fn default() -> Self {
         Self {
             cc_len: 0x0017,
@@ -253,8 +260,10 @@ impl CapabilityContainer {
         self.t4t_version & 0x0F
     }
 
-    /// Maximum number of bytes the PICC may return in a single `ReadBinary`
-    /// response (`MLe`). Defaults to `0x0100` (256).
+    /// Return the CC's `MLe` value.
+    ///
+    /// This is the maximum number of bytes the PICC may return in a
+    /// single `ReadBinary` response. The default is `0x0100` (256).
     pub fn max_le(&self) -> u16 {
         self.max_le
     }
@@ -373,7 +382,7 @@ pub enum CcError {
     /// The input is shorter than the 7-byte CC header.
     #[error("CC data too short")]
     TooShort,
-    /// A file entry announces a length that runs past the end of the input.
+    /// A file entry overruns the input.
     #[error("file entry extends beyond CC data")]
     EntryOverflow,
     /// Encountered an entry tag other than `04h` (NDEF) or `05h` (Proprietary).
@@ -483,9 +492,11 @@ mod tests {
         }
     }
 
-    /// Parse the full 32-byte CC file as read from a real NTAG 424 DNA tag
-    /// via `ISOReadBinary` (EF `E103h`). The first 23 bytes are the CC data
-    /// (matching [`NTAG424_DEFAULT_CC`]); remaining bytes are zero padding.
+    /// Parse a full 32-byte CC file image.
+    ///
+    /// The bytes come from a real NTAG 424 DNA tag via `ISOReadBinary`
+    /// (EF `E103h`). The first 23 bytes are the CC data (matching
+    /// [`NTAG424_DEFAULT_CC`]); the remaining bytes are zero padding.
     #[test]
     fn decode_full_cc_file_from_hardware() {
         #[rustfmt::skip]

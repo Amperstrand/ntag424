@@ -9,8 +9,9 @@ use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
 /// encrypted `PICCData` for verification.
 const PCDCAP2: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
 
-/// `AuthMode` value signalling LRP Secure Messaging in the Part 1
-/// response (§10.4.3 Table 38).
+/// `AuthMode` byte for LRP secure messaging.
+///
+/// This value appears in the Part 1 response (§10.4.3 Table 38).
 const AUTH_MODE_LRP: u8 = 0x01;
 
 /// `AuthenticateLRPNonFirst` (NT4H2421Gx §9.2.6, §10.4.4).
@@ -172,7 +173,10 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     Ok((suite, ti))
 }
 
-/// Build `90 AF 00 00 20 || RndA || PCDResponse || 00` (§10.4.3 Table 40).
+/// Build the authentication Part 2 APDU.
+///
+/// The wire form is `90 AF 00 00 20 || RndA || PCDResponse || 00`
+/// (§10.4.3 Table 40).
 fn build_part2_apdu(rnd_a: &[u8; 16], pcd_response: &[u8; 16]) -> [u8; 38] {
     let mut apdu = [0u8; 38];
     apdu[0] = 0x90;
@@ -351,6 +355,8 @@ mod tests {
         }
     }
 
+    /// Reject a mismatched `PCDCap2` echo.
+    ///
     /// A PICC that echoes back a different `PCDCap2` than we sent in
     /// Part 1 must be rejected even if every MAC check passes.
     ///

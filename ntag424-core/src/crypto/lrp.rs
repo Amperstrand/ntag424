@@ -98,7 +98,9 @@ fn inc(counter: &mut [Nibble]) {
 /// NTAG 424 DNA counter (≤ 8 bytes).
 const LRICB_COUNTER_MAX_BYTES: usize = 16;
 
-/// LRP as a 16-byte block cipher, per AN12304 §2.2 Algorithm 3 with `final = true`.
+/// LRP exposed as a 16-byte block cipher.
+///
+/// This follows AN12304 §2.2 Algorithm 3 with `final = true`.
 ///
 /// Implements the `cipher` crate's encryption traits, which gives an automatic
 /// `cmac::block_api::CmacCipher` impl via the blanket `impl` in the `cmac` crate.
@@ -110,7 +112,9 @@ pub struct Lrp {
 }
 
 impl Lrp {
-    /// Build LRP from a base key, using `UK[0]` as `k'` (the NTAG 424 DNA MACing key).
+    /// Build an LRP instance from a base key.
+    ///
+    /// Uses `UK[0]` as `k'`, the NTAG 424 DNA MACing key.
     pub fn from_base_key(key: impl Into<Block>) -> Self {
         let key = key.into();
         let mut it = generate_plaintexts(key);
@@ -137,10 +141,11 @@ impl Lrp {
         &self.k_prime
     }
 
-    /// Load `counter` bytes into the nibble scratch buffer as a big-endian
-    /// nibble string (two nibbles per byte, high nibble first) and return the
-    /// active slice. Rejects empty counters and counters longer than
-    /// [`LRICB_COUNTER_MAX_BYTES`].
+    /// Load a counter into the nibble scratch buffer.
+    ///
+    /// The counter is treated as a big-endian nibble string with two
+    /// nibbles per byte, high nibble first. Empty counters and counters
+    /// longer than [`LRICB_COUNTER_MAX_BYTES`] are rejected.
     fn load_counter<'a>(
         counter: &[u8],
         buf: &'a mut [Nibble; LRICB_COUNTER_MAX_BYTES * 2],

@@ -30,9 +30,10 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     FileSettings(FileSettingsError),
     #[error("originality verification failed: {0:?}")]
     OriginalityVerificationFailed(OriginalityError),
-    /// A handshake validation step failed — the PICC's response did not
-    /// match what the PCD computed. Typical causes: wrong key, tampered
-    /// response, or a MitM.
+    /// Authentication validation failed.
+    ///
+    /// The PICC's response did not match what the PCD computed. Typical
+    /// causes: wrong key, tampered response, or a MitM.
     ///
     /// - AES (§9.1.5): the decrypted `RndA'` did not match the `RndA`
     ///   the PCD sent.
@@ -41,10 +42,12 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     ///   the decrypted Part 2 `PICCData` did not validate.
     #[error("authentication mismatch")]
     AuthenticationMismatch,
-    /// 8-byte trailing `MACt` on a secure-messaging response did not
-    /// match the value the PCD computed over
-    /// `RC || (CmdCtr+1) || TI || RespData` (§9.1.9). Wrong session
-    /// keys, tampered response, or out-of-sync `CmdCtr`.
+    /// A response `MACt` did not verify.
+    ///
+    /// The trailing 8-byte `MACt` did not match the value the PCD
+    /// computed over `RC || (CmdCtr+1) || TI || RespData` (§9.1.9).
+    /// Wrong session keys, tampered response, or out-of-sync `CmdCtr`
+    /// can all cause this.
     #[error("response MAC mismatch")]
     ResponseMacMismatch,
 }
@@ -57,11 +60,15 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 /// session in the authenticated state on success.
 pub struct Session<S> {
     state: S,
-    /// Whether the NDEF application (AID `D2760000850101`) has been selected
-    /// on the transport since the last power-on or deselect.
+    /// Whether the NDEF application is selected.
+    ///
+    /// Tracks whether AID `D2760000850101` has been selected on the
+    /// transport since the last power-on or deselect.
     ndef_selected: bool,
-    /// The File ID of the currently-selected EF, or `None` if no EF has been
-    /// selected since the last application select.
+    /// The currently selected EF File ID.
+    ///
+    /// `None` means no EF has been selected since the last application
+    /// select.
     ef_selected: Option<u16>,
 }
 
@@ -217,10 +224,11 @@ impl Session<Unauthenticated> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Read software, hardware and production version information over
-    /// `CommMode.MAC` (§10.2 Table 21 footnote 1). Verifies the
-    /// trailing `MACt` on the last chained response and advances
-    /// `CmdCtr` on success.
+    /// Read version information in `CommMode.MAC`.
+    ///
+    /// Uses `GetVersion` over `CommMode.MAC` (§10.2 Table 21 footnote
+    /// 1). Verifies the trailing `MACt` on the last chained response
+    /// and advances `CmdCtr` on success.
     ///
     /// Consumes the session: a PICC error invalidates the authenticated
     /// state (§9.1.9) and the session cannot be reused.
@@ -235,8 +243,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Change a non-master application key (`ChangeKey` Case 1, INS `C4`,
-    /// NT4H2421Gx §10.6.1, AN12196 §5.16.1) in `CommMode.FULL`.
+    /// Change a non-master application key.
+    ///
+    /// Uses `ChangeKey` Case 1 (INS `C4`, NT4H2421Gx §10.6.1, AN12196
+    /// §5.16.1) in `CommMode.FULL`.
     ///
     /// Authentication with key 0 must be established before calling this.
     /// The command cryptogram contains `NewKey ⊕ OldKey` together with
@@ -270,8 +280,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok(self)
     }
 
-    /// Change the Application Master Key `Key0` (`ChangeKey` Case 2,
-    /// INS `C4`, NT4H2421Gx §10.6.1, AN12196 §5.16.2) in `CommMode.FULL`.
+    /// Change the application master key.
+    ///
+    /// Uses `ChangeKey` Case 2 for `Key0` (INS `C4`, NT4H2421Gx
+    /// §10.6.1, AN12196 §5.16.2) in `CommMode.FULL`.
     ///
     /// Authentication with key 0 must be established before calling this.
     /// The command cryptogram contains only `NewKey`; the PICC responds
@@ -297,8 +309,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Retrieve the permanent 7-byte UID of the PICC via `GetCardUID`
-    /// (INS `51`, NT4H2421Gx §10.5.3) in `CommMode.FULL`.
+    /// Read the permanent PICC UID.
+    ///
+    /// Uses `GetCardUID` (INS `51`, NT4H2421Gx §10.5.3) in
+    /// `CommMode.FULL`.
     ///
     /// Authentication with any application key must be established before
     /// calling this. The command always returns the permanent UID even when
@@ -316,9 +330,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok((uid, self))
     }
 
-    /// Retrieve the current key version of an application key via
-    /// `GetKeyVersion` (INS `64`, NT4H2421Gx §10.6.2) in `CommMode.MAC`
-    /// (§10.2 Table 21).
+    /// Read an application key version.
+    ///
+    /// Uses `GetKeyVersion` (INS `64`, NT4H2421Gx §10.6.2) in
+    /// `CommMode.MAC` (§10.2 Table 21).
     ///
     /// Authentication with any application key must be established before
     /// calling this. The PICC returns `00h` for disabled keys and for
@@ -336,8 +351,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok((version, self))
     }
 
-    /// Retrieve a file's settings via `GetFileSettings` (INS `F5h`,
-    /// NT4H2421Gx §10.7.2) in `CommMode.MAC` (§10.2 Table 21).
+    /// Read file settings in `CommMode.MAC`.
+    ///
+    /// Uses `GetFileSettings` (INS `F5h`, NT4H2421Gx §10.7.2) in
+    /// `CommMode.MAC` (§10.2 Table 21).
     ///
     /// Authentication with any application key must be established before
     /// calling this. The response `MACt` is verified, the secure-messaging
@@ -356,8 +373,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok((settings, self))
     }
 
-    /// Retrieve the current `SDMReadCtr` for a file via `GetFileCounters`
-    /// (INS `F6h`, NT4H2421Gx §10.7.3) in `CommMode.MAC`.
+    /// Read a file's `SDMReadCtr`.
+    ///
+    /// Uses `GetFileCounters` (INS `F6h`, NT4H2421Gx §10.7.3) in
+    /// `CommMode.MAC`.
     ///
     /// The file must have SDM enabled and the `SDMCtrRet` access right
     /// must be set to a key number other than `Fh` (free). The response
@@ -464,8 +483,10 @@ impl Session<Unauthenticated> {
 }
 
 impl Session<Authenticated<AesSuite>> {
-    /// Enable LRP mode on the PICC via `SetConfiguration` Option `05h`
-    /// (NT4H2421Gx §10.5.1, AN12321 §5).
+    /// Enable LRP mode on the PICC.
+    ///
+    /// Uses `SetConfiguration` Option `05h` (NT4H2421Gx §10.5.1,
+    /// AN12321 §5).
     ///
     /// Consumes the authenticated AES session: enabling LRP tears down the
     /// secure channel on the PICC (the PICC returns `9100` without a
@@ -585,8 +606,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Read bytes from `file` in `CommMode.Plain` under an active session
-    /// (NT4H2421Gx §10.8.1, `ReadData` INS `AD`).
+    /// Read file bytes in `CommMode.Plain`.
+    ///
+    /// Uses `ReadData` (INS `AD`) under an active session
+    /// (NT4H2421Gx §10.8.1).
     ///
     /// Per §8.2.3.3, `CommMode.Plain` must be used when the only access
     /// condition granting the current session access is free access (`Eh`).
@@ -610,7 +633,9 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok(n)
     }
 
-    /// Read `length` bytes from `file` starting at `offset`, using the
+    /// Read file bytes with an explicit CommMode.
+    ///
+    /// Reads `length` bytes from `file` starting at `offset`, using the
     /// caller-supplied `mode` as the command's effective CommMode
     /// (NT4H2421Gx §10.8.1 `ReadData`, INS `AD`).
     ///
@@ -688,9 +713,11 @@ impl<S: SessionSuite> Authenticated<S> {
         }
     }
 
-    /// Re-authentication constructor: preserves `ti` and `cmd_counter` from
-    /// the prior session while replacing the suite with newly derived keys.
-    /// Used by NonFirst auth (§9.1.6, §9.2.6).
+    /// Construct a re-authenticated state.
+    ///
+    /// Preserves `ti` and `cmd_counter` from the prior session while
+    /// replacing the suite with newly derived keys. Used by NonFirst
+    /// auth (§9.1.6, §9.2.6).
     pub(crate) fn non_first(suite: S, ti: [u8; 4], cmd_counter: u16) -> Self {
         Self {
             suite,
@@ -724,8 +751,10 @@ impl<S: SessionSuite> Authenticated<S> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Transaction Identifier assigned by the PICC on the first
-    /// authentication of this transaction (§9.1.1).
+    /// Return the session transaction identifier.
+    ///
+    /// This value is assigned by the PICC on the first authentication
+    /// of the transaction (§9.1.1).
     pub fn ti(&self) -> &[u8; 4] {
         &self.state.ti
     }
@@ -744,11 +773,14 @@ mod tests {
 
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
 
-    /// AN12196 §5.6, Table 14 — full `AuthenticateEV2First` transcript
-    /// with `Key No = 0x00` and the all-zero application key. End-to-end
-    /// integration test: drives `Session::authenticate_aes` against a
-    /// mock PICC that asserts every outgoing APDU byte-for-byte and
-    /// replies with the exact bytes from the application note.
+    /// Replay the AN12196 AES-first transcript.
+    ///
+    /// AN12196 §5.6, Table 14 gives a full `AuthenticateEV2First`
+    /// transcript with `Key No = 0x00` and the all-zero application
+    /// key. This end-to-end integration test drives
+    /// `Session::authenticate_aes` against a mock PICC that asserts
+    /// every outgoing APDU byte-for-byte and replies with the exact
+    /// bytes from the application note.
     #[test]
     fn authenticate_aes_an12196_key0_full_handshake() {
         let key = [0u8; 16];
@@ -794,9 +826,11 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Part 2 returning `91 AE` (`AUTHENTICATION_ERROR`, §10.4.1 Table 30)
-    /// must surface as [`SessionError::ErrorResponse`] rather than a silent
-    /// success or a panic.
+    /// Surface a PICC authentication error from Part 2.
+    ///
+    /// `91 AE` (`AUTHENTICATION_ERROR`, §10.4.1 Table 30) must surface
+    /// as [`SessionError::ErrorResponse`] rather than a silent success
+    /// or a panic.
     #[test]
     fn authenticate_aes_surfaces_picc_auth_error() {
         let key = [0u8; 16];
@@ -837,11 +871,13 @@ mod tests {
         }
     }
 
-    /// AN12321 §4, Table 2 — full `AuthenticateLRPFirst` transcript with key
-    /// 0x03 (all-zero default value). End-to-end integration test: drives
-    /// `Session::authenticate_lrp` against a mock PICC that asserts every
-    /// outgoing APDU byte-for-byte and replies with the exact bytes from the
-    /// application note.
+    /// Replay the AN12321 LRP-first transcript.
+    ///
+    /// AN12321 §4, Table 2 gives a full `AuthenticateLRPFirst`
+    /// transcript with key 0x03 (all-zero default value). This
+    /// end-to-end integration test drives `Session::authenticate_lrp`
+    /// against a mock PICC that asserts every outgoing APDU byte-for-
+    /// byte and replies with the exact bytes from the application note.
     ///
     /// Key vectors: pages 7–8 of AN12321.
     #[test]
@@ -891,9 +927,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// A Part 1 response carrying a non-LRP `AuthMode` byte (anything
-    /// other than `01h`, Table 38) must be rejected before any session
-    /// keys are derived or Part 2 is sent.
+    /// Reject a non-LRP `AuthMode` in Part 1.
+    ///
+    /// A response carrying anything other than `01h` (Table 38) must be
+    /// rejected before any session keys are derived or Part 2 is sent.
     #[test]
     fn authenticate_lrp_rejects_wrong_auth_mode() {
         let key = [0u8; 16];
@@ -925,7 +962,9 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Part 2 returning `91 AE` (`AUTHENTICATION_ERROR`) must surface as
+    /// Surface a PICC authentication error from LRP Part 2.
+    ///
+    /// `91 AE` (`AUTHENTICATION_ERROR`) must surface as
     /// [`SessionError::ErrorResponse`] rather than a silent success.
     #[test]
     fn authenticate_lrp_surfaces_picc_auth_error() {
@@ -1046,10 +1085,13 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Real NTAG 424 DNA hardware — full `AuthenticateEV2First` handshake
-    /// with Key 0 (all-zero factory default). Drives `Session::authenticate_aes`
-    /// against a mock PICC replaying actual on-wire APDU bytes. Verifies the
-    /// same TI the real PICC returned.
+    /// Replay a hardware-captured AES-first handshake.
+    ///
+    /// This uses a full `AuthenticateEV2First` exchange with Key 0
+    /// (all-zero factory default). The test drives
+    /// `Session::authenticate_aes` against a mock PICC replaying actual
+    /// on-wire APDU bytes and verifies the same TI the real PICC
+    /// returned.
     #[test]
     fn authenticate_aes_hw_key0_full_handshake() {
         let key = [0u8; 16];
@@ -1089,10 +1131,13 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Real NTAG 424 DNA hardware — full `AuthenticateLRPFirst` handshake
-    /// with Key 0 (all-zero factory default). Drives `Session::authenticate_lrp`
-    /// against a mock PICC replaying actual on-wire APDU bytes. Verifies the
-    /// same TI the real PICC returned.
+    /// Replay a hardware-captured LRP-first handshake.
+    ///
+    /// This uses a full `AuthenticateLRPFirst` exchange with Key 0
+    /// (all-zero factory default). The test drives
+    /// `Session::authenticate_lrp` against a mock PICC replaying actual
+    /// on-wire APDU bytes and verifies the same TI the real PICC
+    /// returned.
     #[test]
     fn authenticate_lrp_hw_key0_full_handshake() {
         let key = [0u8; 16];
@@ -1134,9 +1179,11 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Real NTAG 424 DNA hardware — full `AuthenticateLRPFirst` followed by
-    /// `AuthenticateLRPNonFirst` with Key 0. Verifies TI and CmdCtr
-    /// preservation across re-authentication.
+    /// Replay a hardware-captured LRP non-first re-authentication.
+    ///
+    /// Uses full `AuthenticateLRPFirst` and `AuthenticateLRPNonFirst`
+    /// handshakes with Key 0 and verifies TI and `CmdCtr` preservation
+    /// across re-authentication.
     ///
     /// The first session runs GetVersion + ReadSig + 5×GetKeyVersion +
     /// GetCardUID + GetFileSettings + ReadData = 10 commands, advancing

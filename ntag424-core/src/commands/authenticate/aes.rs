@@ -111,9 +111,10 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     finish_auth(key, &rnd_a, &rnd_b, &resp_enc)
 }
 
-/// Build the Part 2 APDU `90 AF 00 00 20 || E(Kx, RndA || RndB') || 00`
-/// from a decrypted `RndB` and caller-supplied `RndA`. `RndB'` is `RndB`
-/// rotated left by one byte (§9.1.5).
+/// Build the AES authentication Part 2 APDU.
+///
+/// The wire form is `90 AF 00 00 20 || E(Kx, RndA || RndB') || 00`.
+/// `RndB'` is `RndB` rotated left by one byte (§9.1.5).
 fn build_part2_apdu(key: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> [u8; 38] {
     let mut ct = [0u8; 32];
     ct[..16].copy_from_slice(rnd_a);

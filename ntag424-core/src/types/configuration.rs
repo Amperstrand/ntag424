@@ -31,8 +31,10 @@ impl Configuration {
         self
     }
 
-    /// Disable chained writing for the `WriteData` command in CommMode.MAC
-    /// and CommMode.Full (SMConfig bit 2).
+    /// Disable chained writes.
+    ///
+    /// Sets SMConfig bit 2 for `WriteData` in `CommMode.MAC` and
+    /// `CommMode.Full`.
     pub fn with_chained_writing_disabled(mut self) -> Self {
         let bytes = self.secure_messaging.get_or_insert([0; 2]);
         // SMConfig is two bytes; bit 2 lives in the low byte.
@@ -101,9 +103,10 @@ impl Configuration {
         self
     }
 
-    /// Yield the configured options as `(option_id, payload)` pairs in the
-    /// canonical order from Table 50. Options that were never set are
-    /// skipped.
+    /// Iterate over configured options in wire order.
+    ///
+    /// Yields `(option_id, payload)` pairs in the canonical Table 50
+    /// order. Options that were never set are skipped.
     pub(crate) fn build(&self) -> impl Iterator<Item = (u8, &[u8])> {
         [
             (0x00u8, self.picc.as_ref().map(|b| b.as_slice())),

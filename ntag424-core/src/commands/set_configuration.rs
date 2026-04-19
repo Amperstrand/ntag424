@@ -104,8 +104,10 @@ mod tests {
         state
     }
 
-    /// Build the 8-byte response MACt the PICC would send for a SetConfiguration
-    /// success (`RC=00 || (CmdCtr+1)(LE) || TI`, no encrypted ResponseData).
+    /// Build a successful `SetConfiguration` response MAC.
+    ///
+    /// This is the 8-byte `MACt` the PICC would send for
+    /// `RC=00 || (CmdCtr+1)(LE) || TI`, with no encrypted response data.
     fn response_mac(mac_key: [u8; 16], next_cmd_ctr: u16, ti: [u8; 4]) -> [u8; 8] {
         let suite = AesSuite::from_keys([0u8; 16], mac_key);
         let mut input = Vec::with_capacity(7);
@@ -175,8 +177,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// An empty `Configuration` must issue zero APDUs and leave `CmdCtr`
-    /// untouched — the iterator over `build()` is simply empty.
+    /// Skip I/O for an empty configuration.
+    ///
+    /// An empty `Configuration` must issue zero APDUs and leave
+    /// `CmdCtr` untouched because the iterator over `build()` is empty.
     #[test]
     fn set_configuration_no_options_sends_nothing() {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
@@ -195,9 +199,11 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// A configuration touching two independent options must emit two APDUs in
-    /// the canonical Table 50 order (PICC `00h` before Capability `05h`) and
-    /// advance `CmdCtr` once per APDU.
+    /// Preserve Table 50 option order.
+    ///
+    /// A configuration touching two independent options must emit two
+    /// APDUs in canonical order (PICC `00h` before Capability `05h`)
+    /// and advance `CmdCtr` once per APDU.
     #[test]
     fn set_configuration_multi_option_advances_counter_in_order() {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
@@ -239,10 +245,13 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// Helper: build a full `(C-APDU, R-APDU body)` pair for a given option
-    /// using the AES suite directly. Used by the multi-option test to avoid
-    /// hand-tabulating ciphertext / MAC bytes the application notes don't
-    /// publish for these specific `(TI, CmdCtr)` combinations.
+    /// Build a synthetic `SetConfiguration` APDU pair.
+    ///
+    /// This helper builds a full `(C-APDU, R-APDU body)` pair for a
+    /// given option using the AES suite directly. The multi-option test
+    /// uses it to avoid hand-tabulating ciphertext and MAC bytes the
+    /// application notes do not publish for these specific
+    /// `(TI, CmdCtr)` combinations.
     fn synthesise_set_config_apdu(
         enc_key: [u8; 16],
         mac_key: [u8; 16],

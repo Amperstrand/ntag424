@@ -1,7 +1,8 @@
 use super::ResponseStatus;
 
-/// Status word returned by the card or reader, tagged with the framing the
-/// caller used so `ok()` can pick the right success code.
+/// Status word tagged with its framing.
+///
+/// The framing tells `ok()` which success code to expect.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ResponseCode {
     /// ISO 7816 status word (CLA=`00` commands, PC/SC pseudo-APDUs). OK = `9000`.

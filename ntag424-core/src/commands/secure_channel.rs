@@ -36,8 +36,9 @@ use crate::types::{ResponseCode, ResponseStatus};
 /// `MACt` trailer length in bytes (§9.1.3).
 const MAC_LEN: usize = 8;
 
-/// Max body (`Lc` / response data) for short-form APDUs, which is all
-/// NT4H2421Gx supports (§8.4).
+/// Maximum short-APDU body length.
+///
+/// NT4H2421Gx only supports short-form APDUs (§8.4).
 const MAX_APDU_BODY: usize = 255;
 
 /// Scratch buffer for `Cmd || CmdCtr || TI || header || data`. Sized
@@ -120,11 +121,13 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
             .decrypt(Direction::Response, &ti, cmd_ctr, buf);
     }
 
-    /// Verify the response MAC, decrypt a fixed-size `CommMode.FULL`
-    /// ciphertext, strip ISO/IEC 9797-1 Method 2 padding, and return
-    /// the `P`-byte payload. `CT` is the expected ciphertext length
-    /// (must be a positive multiple of 16); `P` is the expected
-    /// plaintext payload length.
+    /// Verify and decrypt a fixed-size FULL-mode response.
+    ///
+    /// This verifies the response MAC, decrypts a fixed-size
+    /// `CommMode.FULL` ciphertext, strips ISO/IEC 9797-1 Method 2
+    /// padding, and returns the `P`-byte payload. `CT` is the expected
+    /// ciphertext length (must be a positive multiple of 16); `P` is
+    /// the expected plaintext payload length.
     ///
     /// Returns `Err(UnexpectedLength)` on a ciphertext-length mismatch,
     /// `Err(ResponseMacMismatch)` on a MAC failure or malformed padding.
@@ -157,10 +160,11 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         self.state.advance_counter();
     }
 
-    /// Verify the 8-byte `MACt` trailing `body` — MAC input is
-    /// `RC || (CmdCtr+1)(LE) || TI || RespData` (§9.1.9) — and, on
-    /// success, advance `CmdCtr` by one. Returns the slice with the
-    /// MAC stripped.
+    /// Verify a response `MACt`.
+    ///
+    /// The MAC input is `RC || (CmdCtr+1)(LE) || TI || RespData`
+    /// (§9.1.9). On success this advances `CmdCtr` by one and returns
+    /// the slice with the MAC stripped.
     pub(crate) fn verify_response_mac_and_advance<'b, E: Error + Debug>(
         &mut self,
         rc: u8,
@@ -181,9 +185,11 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         Ok(data)
     }
 
-    /// Drive a single-frame `CommMode.MAC` exchange: append `MACt` to
-    /// the outgoing APDU body, verify the response `MACt`, and advance
-    /// `CmdCtr`. Returns the response data with the MAC stripped.
+    /// Send a single-frame `CommMode.MAC` command.
+    ///
+    /// Appends `MACt` to the outgoing APDU body, verifies the response
+    /// `MACt`, and advances `CmdCtr`. Returns the response data with
+    /// the MAC stripped.
     ///
     /// Panics if `header.len() + data.len() + 8 > 255`.
     pub(crate) async fn send_mac<T: Transport>(
@@ -241,8 +247,10 @@ pub(crate) fn strip_m2_padding(plain: &[u8]) -> Option<usize> {
     Some(i - 1)
 }
 
-/// Assemble `prefix || ctr || ti || part1 || part2` into `buf` and
-/// return the written length. Shared between the command-MAC input
+/// Assemble a MAC input buffer.
+///
+/// Writes `prefix || ctr || ti || part1 || part2` into `buf` and
+/// returns the written length. Shared between the command-MAC input
 /// (`Cmd || CmdCtr || TI || Header || Data`) and the response-MAC
 /// input (`RC || (CmdCtr+1) || TI || RespData`).
 fn fill_mac_input(
@@ -305,10 +313,12 @@ mod tests {
         );
     }
 
-    /// AN12196 §5.20 Table 28 — `RC || (CmdCtr+1) || TI || RespData`
-    /// MAC input with the published response MAC. The ciphertext here
-    /// is CommMode.FULL payload, but `verify_response_mac_and_advance`
-    /// is oblivious to that — it just checks the trailing `MACt`.
+    /// Replay the AN12196 response-MAC example.
+    ///
+    /// AN12196 §5.20 Table 28 publishes the response MAC over
+    /// `RC || (CmdCtr+1) || TI || RespData`. The ciphertext here is a
+    /// `CommMode.FULL` payload, but `verify_response_mac_and_advance`
+    /// is oblivious to that and only checks the trailing `MACt`.
     #[test]
     fn verify_response_mac_matches_get_card_uid_vector() {
         let mut state = authenticated_aes(
@@ -328,8 +338,11 @@ mod tests {
         assert_eq!(ch.cmd_ctr(), 1);
     }
 
+    /// Reject a bad trailing response MAC.
+    ///
     /// Flipping a single byte of the trailing MAC must surface as
-    /// [`SessionError::ResponseMacMismatch`] and leave `CmdCtr` untouched.
+    /// [`SessionError::ResponseMacMismatch`] and leave `CmdCtr`
+    /// untouched.
     #[test]
     fn response_mac_mismatch_leaves_counter_untouched() {
         let mut state = authenticated_aes(
@@ -349,10 +362,11 @@ mod tests {
         assert_eq!(ch.cmd_ctr(), 0);
     }
 
-    /// Round-trip `send_mac` against a mocked transport: command APDU
-    /// embeds the GetFileSettings command MAC, the canned response
-    /// carries a hand-computed response MAC over `00 0100 7A21085E ||
-    /// 0040EEEE000100D1FE001F00 || <MAC>`.
+    /// Round-trip `send_mac` against a mocked transport.
+    ///
+    /// The command APDU embeds the `GetFileSettings` command MAC, and
+    /// the canned response carries a hand-computed response MAC over
+    /// `00 0100 7A21085E || 0040EEEE000100D1FE001F00 || <MAC>`.
     #[test]
     fn send_mac_roundtrip_advances_counter() {
         // Keys + TI as in the §5.4 vector; CmdCtr starts at 0.

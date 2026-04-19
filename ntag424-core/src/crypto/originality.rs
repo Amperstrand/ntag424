@@ -11,8 +11,10 @@
 use p224::ecdsa::signature::hazmat::PrehashVerifier;
 use p224::ecdsa::{Signature, VerifyingKey};
 
-/// NXP master public key for NTAG 424 DNA originality signatures, in SEC1
-/// uncompressed form (`0x04 ‖ xD ‖ yD`). Source: AN12196 §7.2, Table 30.
+/// NXP's NTAG 424 DNA originality public key.
+///
+/// Stored in SEC1 uncompressed form (`0x04 ‖ xD ‖ yD`). Source:
+/// AN12196 §7.2, Table 30.
 pub const NXP_ORIGINALITY_PUBLIC_KEY_SEC1: [u8; 57] = [
     0x04, 0x8A, 0x9B, 0x38, 0x0A, 0xF2, 0xEE, 0x1B, 0x98, 0xDC, 0x41, 0x7F, 0xEC, 0xC2, 0x63, 0xF8,
     0x44, 0x9C, 0x76, 0x25, 0xCE, 0xCE, 0x82, 0xD9, 0xB9, 0x16, 0xC9, 0x92, 0xDA, 0x20, 0x9D, 0x68,
@@ -36,8 +38,10 @@ pub enum OriginalityError {
     VerificationFailed,
 }
 
-/// Verify `signature` against `uid` using a caller-supplied public key
-/// (SEC1-encoded, compressed `0x02`/`0x03` or uncompressed `0x04`).
+/// Verify a signature with a caller-supplied public key.
+///
+/// `public_key_sec1` may be SEC1-encoded in compressed (`0x02`/`0x03`)
+/// or uncompressed (`0x04`) form.
 fn verify_with_key(
     public_key_sec1: &[u8],
     uid: &[u8],

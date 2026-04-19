@@ -79,8 +79,10 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// AN12196 §5.4 Table 7 / Table 10 — MACed `GetFileSettings` against
-    /// FileNo `02h`, using the published session keys, TI and response bytes.
+    /// Replay the AN12196 MACed `GetFileSettings` vector.
+    ///
+    /// This uses FileNo `02h` with the published session keys, TI, and
+    /// response bytes from AN12196 §5.4 Table 7 / Table 10.
     #[test]
     fn get_file_settings_mac_an12196_vector() {
         let mac_key = hex_array("8248134A386E86EB7FAF54A52E536CB6");

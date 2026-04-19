@@ -149,11 +149,12 @@ mod tests {
         assert_eq!(state.counter(), 0);
     }
 
-    /// Real NTAG 424 DNA hardware — `GetKeyVersion` for Key 0 at
-    /// `CmdCtr = 2` inside an AES session with Key 0 (all-zero factory
-    /// default). Derives session keys from the real `AuthenticateEV2First`
-    /// transcript, then verifies that the command MAC (sent to the PICC)
-    /// and response MAC (returned by the PICC) both match the wire data.
+    /// Replay a hardware-captured `GetKeyVersion` exchange.
+    ///
+    /// This covers Key 0 at `CmdCtr = 2` inside an AES session with Key
+    /// 0 (all-zero factory default). It derives session keys from the
+    /// real `AuthenticateEV2First` transcript, then verifies that both
+    /// the command MAC and response MAC match the wire data.
     #[test]
     fn get_key_version_hw_aes_key0_ctr2() {
         let key = [0u8; 16];
