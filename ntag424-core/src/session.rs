@@ -4,15 +4,16 @@ use thiserror::Error;
 
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
-    change_master_key, get_card_uid, get_version, get_version_mac, iso_read_binary,
-    iso_select_ef_by_fid, read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
+    change_master_key, get_card_uid, get_file_counters, get_file_settings, get_file_settings_mac,
+    get_key_version, get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid,
+    read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
     select_ndef_application, set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
-    CommMode, Configuration, File, KeyNumber, NonMasterKeyNumber, ResponseCode, ResponseStatus,
-    Uid, Version,
+    CommMode, Configuration, File, FileSettings, FileSettingsError, KeyNumber, NonMasterKeyNumber,
+    ResponseCode, ResponseStatus, Uid, Version,
 };
 use crate::{PseudoApduCapable, Transport};
 
@@ -24,6 +25,8 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     ErrorResponse(ResponseStatus),
     #[error("unexpected response length: {got}")]
     UnexpectedLength { got: usize },
+    #[error(transparent)]
+    FileSettings(FileSettingsError),
     #[error("originality verification failed: {0:?}")]
     OriginalityVerificationFailed(OriginalityError),
     /// A handshake validation step failed — the PICC's response did not
@@ -184,6 +187,23 @@ impl Session<Unauthenticated> {
 }
 
 impl Session<Unauthenticated> {
+    /// Retrieve a file's settings via `GetFileSettings` (INS `F5h`,
+    /// NT4H2421Gx §10.7.2) in `CommMode.Plain`.
+    ///
+    /// The NDEF application must be selected first; this method issues the
+    /// select automatically if needed and then parses the returned payload
+    /// into [`FileSettings`].
+    pub async fn get_file_settings<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+    ) -> Result<FileSettings, SessionError<T::Error>> {
+        self.select_ndef_application(transport).await?;
+        get_file_settings(transport, file.file_no()).await
+    }
+}
+
+impl Session<Unauthenticated> {
     /// Read software, hardware and production version information.
     ///
     /// Uses `GetVersion` (INS `60`, NT4H2421Gx §10.7) in `CommMode.Plain`.
@@ -283,6 +303,57 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ) -> Result<[u8; 7], SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         get_card_uid(transport, &mut channel).await
+    }
+
+    /// Retrieve the current key version of an application key via
+    /// `GetKeyVersion` (INS `64`, NT4H2421Gx §10.6.2) in `CommMode.MAC`
+    /// (§10.2 Table 21).
+    ///
+    /// Authentication with any application key must be established before
+    /// calling this. The PICC returns `00h` for disabled keys and for
+    /// `OriginalityKey`, and the full byte range otherwise (Table 67).
+    /// The response `MACt` is verified and `CmdCtr` advances on success.
+    pub async fn get_key_version<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+    ) -> Result<u8, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        get_key_version(transport, &mut channel, key_no).await
+    }
+
+    /// Retrieve a file's settings via `GetFileSettings` (INS `F5h`,
+    /// NT4H2421Gx §10.7.2) in `CommMode.MAC` (§10.2 Table 21).
+    ///
+    /// Authentication with any application key must be established before
+    /// calling this. The response `MACt` is verified, the secure-messaging
+    /// frame is stripped, and the remaining payload is decoded into
+    /// [`FileSettings`]. `CmdCtr` advances on success.
+    pub async fn get_file_settings<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+    ) -> Result<FileSettings, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        get_file_settings_mac(transport, &mut channel, file.file_no()).await
+    }
+
+    /// Retrieve the current `SDMReadCtr` for a file via `GetFileCounters`
+    /// (INS `F6h`, NT4H2421Gx §10.7.3) in `CommMode.MAC`.
+    ///
+    /// The file must have SDM enabled and the `SDMCtrRet` access right
+    /// must be set to a key number other than `Fh` (free). The response
+    /// `MACt` is verified and `CmdCtr` advances on success.
+    ///
+    /// The 24-bit `SDMReadCtr` is returned as a `u32` (zero-extended from
+    /// the 3 wire bytes, LSB first, per NT4H2421Gx §10.7.3 Table 76).
+    pub async fn get_file_counters<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+    ) -> Result<u32, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        get_file_counters(transport, &mut channel, file.file_no()).await
     }
 
     /// Apply tag configuration changes via `SetConfiguration` (INS `5C`,
