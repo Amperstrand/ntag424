@@ -120,6 +120,36 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
             .decrypt(Direction::Response, &ti, cmd_ctr, buf);
     }
 
+    /// Verify the response MAC, decrypt a fixed-size `CommMode.FULL`
+    /// ciphertext, strip ISO/IEC 9797-1 Method 2 padding, and return
+    /// the `P`-byte payload. `CT` is the expected ciphertext length
+    /// (must be a positive multiple of 16); `P` is the expected
+    /// plaintext payload length.
+    ///
+    /// Returns `Err(UnexpectedLength)` on a ciphertext-length mismatch,
+    /// `Err(ResponseMacMismatch)` on a MAC failure or malformed padding.
+    pub(crate) fn decrypt_full_fixed<const CT: usize, const P: usize, E: Error + Debug>(
+        &mut self,
+        rc: u8,
+        body: &[u8],
+    ) -> Result<[u8; P], SessionError<E>> {
+        let ciphertext = self.verify_response_mac_and_advance(rc, body)?;
+        if ciphertext.len() != CT {
+            return Err(SessionError::UnexpectedLength {
+                got: ciphertext.len(),
+            });
+        }
+        let mut buf = [0u8; CT];
+        buf.copy_from_slice(ciphertext);
+        self.decrypt_response(&mut buf);
+        if strip_m2_padding(&buf) != Some(P) {
+            return Err(SessionError::ResponseMacMismatch);
+        }
+        let mut out = [0u8; P];
+        out.copy_from_slice(&buf[..P]);
+        Ok(out)
+    }
+
     /// Advance `CmdCtr` without verifying a response MAC. Use only for
     /// commands where the PICC sends no `MACt` (e.g. `ChangeKey` when
     /// changing the currently authenticated key, §10.6.1).
@@ -196,6 +226,19 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         let plain = self.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
         Ok(plain.to_vec())
     }
+}
+
+/// Strip ISO/IEC 9797-1 Method 2 padding (`0x80` followed by `0x00`s).
+/// Returns the original message length, or `None` if the padding is malformed.
+pub(crate) fn strip_m2_padding(plain: &[u8]) -> Option<usize> {
+    let mut i = plain.len();
+    while i > 0 && plain[i - 1] == 0x00 {
+        i -= 1;
+    }
+    if i == 0 || plain[i - 1] != 0x80 {
+        return None;
+    }
+    Some(i - 1)
 }
 
 /// Assemble `prefix || ctr || ti || part1 || part2` into `buf` and
@@ -353,5 +396,18 @@ mod tests {
         .expect("roundtrip must succeed");
         assert_eq!(plain, resp_data);
         assert_eq!(state.counter(), 1);
+    }
+
+    #[test]
+    fn strip_m2_padding_edge_cases() {
+        // Normal: data || 0x80 || 0x00..
+        assert_eq!(strip_m2_padding(&[1, 2, 3, 0x80, 0, 0, 0, 0]), Some(3));
+        // Padding is exactly one 0x80 at the last boundary — a full
+        // extra block of 0x80 00..00 appended to already-aligned data.
+        assert_eq!(strip_m2_padding(&[0x80, 0, 0, 0, 0, 0, 0, 0]), Some(0));
+        // No 0x80 → malformed.
+        assert_eq!(strip_m2_padding(&[1, 2, 3, 0, 0, 0]), None);
+        // Empty → malformed.
+        assert_eq!(strip_m2_padding(&[]), None);
     }
 }

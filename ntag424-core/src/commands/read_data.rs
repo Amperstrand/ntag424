@@ -22,6 +22,7 @@
 use crate::{
     Transport,
     commands::SecureChannel,
+    commands::secure_channel::strip_m2_padding,
     crypto::suite::SessionSuite,
     session::SessionError,
     types::{ResponseCode, ResponseStatus},
@@ -246,27 +247,10 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
     Ok(pad_start)
 }
 
-/// Strip ISO/IEC 9797-1 Method 2 padding (`0x80` followed by `0x00`s).
-/// Returns the original message length, or `None` if the padding is
-/// malformed. The PICC always appends padding — so a valid `FULL`
-/// response can never end in anything but zero-or-more `0x00` bytes
-/// preceded by a single `0x80`.
-fn strip_m2_padding(plain: &[u8]) -> Option<usize> {
-    // Walk backwards skipping 0x00, then expect exactly one 0x80.
-    let mut i = plain.len();
-    while i > 0 && plain[i - 1] == 0x00 {
-        i -= 1;
-    }
-    if i == 0 || plain[i - 1] != 0x80 {
-        return None;
-    }
-    Some(i - 1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::{AesSuite, Direction, SessionSuite as _};
+    use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
@@ -565,19 +549,5 @@ mod tests {
             other => panic!("expected UnexpectedLength, got {other:?}"),
         }
         assert_eq!(state.counter(), 1, "counter must track PICC state");
-    }
-
-    /// Unit-test the padding stripper around its edge cases.
-    #[test]
-    fn strip_m2_padding_edge_cases() {
-        // Normal: data || 0x80 || 0x00..
-        assert_eq!(strip_m2_padding(&[1, 2, 3, 0x80, 0, 0, 0, 0]), Some(3));
-        // Padding is exactly one 0x80 at the last boundary — a full
-        // extra block of 0x80 00..00 appended to already-aligned data.
-        assert_eq!(strip_m2_padding(&[0x80, 0, 0, 0, 0, 0, 0, 0]), Some(0));
-        // No 0x80 → malformed.
-        assert_eq!(strip_m2_padding(&[1, 2, 3, 0, 0, 0]), None);
-        // Empty → malformed.
-        assert_eq!(strip_m2_padding(&[]), None);
     }
 }

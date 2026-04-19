@@ -70,23 +70,11 @@ pub(crate) async fn read_sig_mac<T: Transport, S: SessionSuite>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    let ciphertext = channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
-    if ciphertext.len() != READ_SIG_CT_LEN {
-        return Err(SessionError::UnexpectedLength {
-            got: ciphertext.len(),
-        });
-    }
-    let mut buf = [0u8; READ_SIG_CT_LEN];
-    buf.copy_from_slice(ciphertext);
-    channel.decrypt_response(&mut buf);
-
-    // ISO/IEC 9797-1 Method 2: sig (56 B) || 80 || 00..00 (7 B).
-    if buf[SIGNATURE_LEN] != 0x80 || buf[SIGNATURE_LEN + 1..].iter().any(|&b| b != 0) {
-        return Err(SessionError::ResponseMacMismatch);
-    }
-    let mut sig = [0u8; SIGNATURE_LEN];
-    sig.copy_from_slice(&buf[..SIGNATURE_LEN]);
-    Ok(sig)
+    // 64 B ciphertext = sig (56 B) || ISO/IEC 9797-1 M2 pad to 64 B.
+    channel.decrypt_full_fixed::<READ_SIG_CT_LEN, SIGNATURE_LEN, T::Error>(
+        resp.sw2,
+        resp.data.as_ref(),
+    )
 }
 
 #[cfg(test)]

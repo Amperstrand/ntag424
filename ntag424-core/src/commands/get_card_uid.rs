@@ -6,10 +6,6 @@ use crate::{
     types::{ResponseCode, ResponseStatus},
 };
 
-/// Ciphertext length for a 7-byte UID padded per ISO/IEC 9797-1 Method 2
-/// (append `80` then zero-pad) to the next 16-byte AES/LRICB block boundary.
-const GET_CARD_UID_CT_LEN: usize = 16;
-
 /// `GetCardUID` (INS `51`, NT4H2421Gx §10.5.3) in `CommMode.FULL`.
 ///
 /// Wire: `90 51 00 00 08 <MACt(8)> 00`, response
@@ -32,23 +28,8 @@ pub(crate) async fn get_card_uid<T: Transport, S: SessionSuite>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    let ciphertext = channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
-    if ciphertext.len() != GET_CARD_UID_CT_LEN {
-        return Err(SessionError::UnexpectedLength {
-            got: ciphertext.len(),
-        });
-    }
-    let mut buf = [0u8; GET_CARD_UID_CT_LEN];
-    buf.copy_from_slice(ciphertext);
-    channel.decrypt_response(&mut buf);
-
-    // ISO/IEC 9797-1 Method 2: UID (7 B) || 80 || 00..00 (8 B).
-    if buf[7] != 0x80 || buf[8..].iter().any(|&b| b != 0) {
-        return Err(SessionError::ResponseMacMismatch);
-    }
-    let mut uid = [0u8; 7];
-    uid.copy_from_slice(&buf[..7]);
-    Ok(uid)
+    // 16 B ciphertext = UID (7 B) || ISO/IEC 9797-1 M2 pad to 16 B.
+    channel.decrypt_full_fixed::<16, 7, T::Error>(resp.sw2, resp.data.as_ref())
 }
 
 #[cfg(test)]
