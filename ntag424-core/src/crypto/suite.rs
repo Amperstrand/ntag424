@@ -171,6 +171,12 @@ impl AesSuite {
         Self { enc_key, mac_key }
     }
 
+    /// Return `(enc_key, mac_key)` for test assertions.
+    #[cfg(test)]
+    pub(crate) fn session_keys(&self) -> ([u8; 16], [u8; 16]) {
+        (self.enc_key, self.mac_key)
+    }
+
     /// `IV = E(SesAuthENCKey, label || TI || CmdCtr(LSB) || 0…0)` per
     /// §9.1.4. `label` is `A5 5A` for commands, `5A A5` for responses.
     fn iv(&self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16) -> [u8; 16] {

@@ -70,9 +70,16 @@ async fn set_configuration_one<T: Transport, S: SessionSuite>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    // §10.5.1 Table 51: response data is empty; CommMode.FULL still appends
-    // an 8-byte MACt over `RC || (CmdCtr+1) || TI` (AN12196 §6.2 step 19).
-    channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
+    // NT4H2421Gx §10.5.1 Table 51 and hardware both show the PICC returning
+    // just `9100` with no data bytes — no response MACt is appended.
+    // AN12196 §6.2 Table 27 (Option 00h) shows an 8-byte MACt so we still
+    // verify it when present; on real hardware Option 05h (and likely others)
+    // returns an empty body (AN12321 §5 Table 3, confirmed on hardware).
+    if resp.data.as_ref().is_empty() {
+        channel.advance_counter();
+    } else {
+        channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
+    }
     Ok(())
 }
 
@@ -139,9 +146,8 @@ mod tests {
     }
 
     /// AN12321 §5 Table 3 — `SetConfiguration` Option `05h` (Capability) enabling
-    /// LRP. The published table only shows `9100` for the R-APDU (no MACt
-    /// breakdown), so we synthesise the response MAC from the published session
-    /// keys; this still pins the C-APDU bytes against step 27.
+    /// LRP. The published table shows `9100` with no data bytes — confirmed on
+    /// hardware. The C-APDU bytes are pinned against step 27.
     #[test]
     fn set_configuration_enable_lrp_an12321_vector() {
         // Steps 2–3 / 7.
@@ -152,11 +158,10 @@ mod tests {
         // Step 27 — full C-APDU.
         let expected_apdu =
             hex_bytes("905C0000190541B2BA963075730426D0858D2AA6C4982F579E77FAB49F8300");
-        // Synthesised response (the published table omits the MACt).
-        let resp_body = response_mac(mac_key, 1, ti);
+        // R-APDU: 9100 with no data bytes (AN12321 §5 Table 3, confirmed on hardware).
 
         let mut transport =
-            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+            TestTransport::new([Exchange::new(&expected_apdu, &[], 0x91, 0x00)]);
 
         let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
         let configuration = Configuration::new().with_lrp_enabled();
