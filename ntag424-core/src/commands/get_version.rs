@@ -27,21 +27,14 @@ pub(crate) async fn get_version<T: Transport>(
 }
 
 /// `GetVersion` inside an authenticated session — `CommMode.MAC`
-/// (§10.2 Table 21 footnote [1]: "MAC on command and returned with the
-/// last response, calculated over all 3 responses").
+/// (NT4H2421Gx §10.2 Table 21).
 ///
-/// The first frame carries the 8-byte command `MACt` as its data field
-/// (§9.1.9: MAC over `Cmd || CmdCtr || TI`); without it a real PICC
-/// answers `91 7E LENGTH_ERROR`. The two follow-on `AF` frames are
-/// plain — §9.1.2 treats the chain as a single command, so only the
-/// head carries the command MAC and `CmdCtr` advances once for the
-/// whole chain. The last response appends an 8-byte `MACt` over the
-/// concatenated `RespData` of all three frames.
+/// Wire: `90 60 00 00 08 <MACt(8)> 00`, three chained frames.
+/// The response `MACt` on the last frame covers all three response parts.
 pub(crate) async fn get_version_mac<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
 ) -> Result<Version, SessionError<T::Error>> {
-    // Head frame: 90 60 00 00 08 <MACt> 00.
     let cmd_mac = channel.compute_cmd_mac(0x60, &[], &[]);
     let mut head = [0u8; 5 + 8 + 1];
     head[..5].copy_from_slice(&[0x90, 0x60, 0x00, 0x00, 0x08]);
@@ -73,10 +66,10 @@ pub(crate) async fn get_version_mac<T: Transport, S: SessionSuite>(
 }
 
 /// Drive the three-frame GetVersion chain and return `(part1, part2, part3_full)`.
-/// `head` is the first APDU — plain `90 60 00 00 00` for `CommMode.Plain`, or
-/// `90 60 00 00 08 <MACt> 00` for `CommMode.MAC`. Follow-on frames are always
-/// the plain `91 AF` continuation; the caller decodes any trailing `MACt` on
-/// the third response.
+/// `head` is the first APDU — `90 60 00 00 08 <MACt(8)> 00` for `CommMode.MAC`
+/// (authenticated) or plain `90 60 00 00 00` for `CommMode.Plain`. Follow-on
+/// frames are always the plain `91 AF` continuation; the caller decodes any
+/// trailing `MACt` on the third response.
 async fn drive_chain<T: Transport>(
     transport: &mut T,
     head: &[u8],
@@ -126,32 +119,50 @@ mod tests {
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
 
-    /// Assemble `90 60 00 00 08 <MACt> 00` with the command MAC the PICC
-    /// expects on the head frame of an authenticated GetVersion chain
-    /// (§9.1.9: MAC over `Cmd || CmdCtr(LE) || TI`).
-    fn head_apdu(suite: &AesSuite, ti: [u8; 4], cmd_ctr: u16) -> Vec<u8> {
-        let mut input = Vec::new();
-        input.push(0x60);
-        input.extend_from_slice(&cmd_ctr.to_le_bytes());
-        input.extend_from_slice(&ti);
-        let mac = suite.mac(&input);
-        let mut apdu = Vec::with_capacity(5 + 8 + 1);
-        apdu.extend_from_slice(&[0x90, 0x60, 0x00, 0x00, 0x08]);
-        apdu.extend_from_slice(&mac);
-        apdu.push(0x00);
+    /// Build the GetVersion head APDU with command MAC at the given counter.
+    fn head_apdu(suite: &AesSuite, ti: [u8; 4], ctr: u16) -> Vec<u8> {
+        let mut mac_input = Vec::new();
+        mac_input.push(0x60u8); // INS
+        mac_input.extend_from_slice(&ctr.to_le_bytes());
+        mac_input.extend_from_slice(&ti);
+        let cmd_mac = suite.mac(&mac_input);
+        let mut apdu = Vec::from([0x90u8, 0x60, 0x00, 0x00, 0x08]);
+        apdu.extend_from_slice(&cmd_mac);
+        apdu.push(0x00); // Le
         apdu
     }
 
-    /// Authenticated `GetVersion` round-trip. The test reuses the
-    /// AN12196 §5.6 session keys (key 0x00 handshake) so the session
-    /// material is a published vector; the response data parts are
-    /// from AN12196 §5.5 (GetVersion transcript). The expected command
-    /// and response `MACt` are derived here from the very same
-    /// `AesSuite::mac` implementation, so this test pins the framing
-    /// contract (cmd-MAC on head frame; response MAC over
-    /// `RC || CmdCtr+1 || TI || part1||part2||part3` on the tail frame)
-    /// rather than a published MAC vector — the spec gives no worked
-    /// authenticated GetVersion example.
+    /// Plain (unauthenticated) `GetVersion` round-trip using bytes captured
+    /// from a real NTAG 424 DNA tag. The three response parts contain hardware
+    /// and software version info (parts 1–2, 7 B each) and production data
+    /// (part 3, 14 B including the 7-byte UID). No trailing MAC is present.
+    #[test]
+    fn get_version_plain_roundtrip() {
+        let part1 = [0x04u8, 0x04, 0x08, 0x30, 0x00, 0x11, 0x05];
+        let part2 = [0x04u8, 0x04, 0x02, 0x01, 0x02, 0x11, 0x05];
+        let part3 = hex_array::<14>("04984C7A0B1090CF5D9045104621");
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&[0x90, 0x60, 0x00, 0x00, 0x00], &part1, 0x91, 0xAF),
+            Exchange::new(&[0x90, 0xAF, 0x00, 0x00, 0x00], &part2, 0x91, 0xAF),
+            Exchange::new(&[0x90, 0xAF, 0x00, 0x00, 0x00], &part3, 0x91, 0x00),
+        ]);
+
+        let version = block_on(get_version(&mut transport)).expect("plain GetVersion must succeed");
+
+        assert_eq!(version.part1, part1);
+        assert_eq!(version.part2, part2);
+        assert_eq!(version.part3, part3);
+        assert_eq!(*version.uid(), [0x04, 0x98, 0x4C, 0x7A, 0x0B, 0x10, 0x90]);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Authenticated `GetVersion` round-trip. Session keys are from AN12196 §5.6
+    /// (key 0x00 handshake — a published vector); response parts are from AN12196
+    /// §5.5. The response MAC is derived by the test so its correctness is only as
+    /// good as the MAC implementation — but the wire format (8-byte command MAC
+    /// in Lc, 8-byte response `MACt` on the last frame) is confirmed on hardware:
+    /// a real PICC accepts the command and returns a valid `MACt`.
     #[test]
     fn get_version_mac_roundtrip() {
         let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
@@ -199,7 +210,9 @@ mod tests {
     }
 
     /// Tampering with the trailing `MACt` on the last frame surfaces as
-    /// [`SessionError::ResponseMacMismatch`] and leaves `CmdCtr` alone.
+    /// [`SessionError::ResponseMacMismatch`]. `CmdCtr` must not advance on
+    /// failure — the caller can retry or abort, and a stale counter would
+    /// de-sync the session.
     #[test]
     fn get_version_mac_rejects_bad_trailer() {
         let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");

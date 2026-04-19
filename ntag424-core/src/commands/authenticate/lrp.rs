@@ -13,6 +13,81 @@ const PCDCAP2: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
 /// response (§10.4.3 Table 38).
 const AUTH_MODE_LRP: u8 = 0x01;
 
+/// `AuthenticateLRPNonFirst` (NT4H2421Gx §9.2.6, §10.4.4).
+///
+/// Re-authenticates within an already-active LRP session, deriving fresh
+/// session keys while the PICC preserves TI and `CmdCtr`. `EncCtr` is reset
+/// to 0 after NonFirst (§9.2.4, p. 30); `LrpSuite::derive` already
+/// initialises `enc_ctr = 0`, so this happens naturally.
+///
+/// INS = `77h` (consistent with the First=`71h` / NonFirst=`77h` pattern;
+/// see Table 22, p. 44). No `PCDcap2` or `LenCap` is exchanged (§9.2.6,
+/// p. 32: "PCDCap2 and PDCap2 are not exchanged and validated").
+///
+/// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
+pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
+    transport: &mut T,
+    key_no: KeyNumber,
+    key: &[u8; 16],
+    rnd_a: [u8; 16],
+) -> Result<LrpSuite, SessionError<T::Error>> {
+    // Part 1: CLA=90 CMD=77 P1=00 P2=00 Lc=01 [KeyNo] Le=00.
+    // No LenCap or PCDcap2 (§10.4.4, Table 43, p. 53).
+    let part1_apdu = [0x90, 0x77, 0x00, 0x00, 0x01, key_no.as_byte(), 0x00];
+    let r1 = transport.transmit(&part1_apdu).await?;
+    let code = ResponseCode::desfire(r1.sw1, r1.sw2);
+    if !matches!(code.status(), ResponseStatus::AdditionalFrame) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+
+    // Response: AuthMode (1, 01h = LRP) || RndB (16), plain (Table 44, p. 53).
+    let data1 = r1.data.as_ref();
+    if data1.len() != 17 {
+        return Err(SessionError::UnexpectedLength { got: data1.len() });
+    }
+    if data1[0] != AUTH_MODE_LRP {
+        return Err(SessionError::AuthenticationMismatch);
+    }
+    let rnd_b: [u8; 16] = data1[1..17].try_into().unwrap();
+
+    // Derive the new session suite; enc_ctr = 0 (§9.2.4, p. 30).
+    let suite = LrpSuite::derive(key, &rnd_a, &rnd_b);
+
+    // PCDResponse = MAC_LRP(SesAuthMACKey; RndA || RndB), untruncated
+    // (Table 46, p. 54; §9.2.5: "MACs are not truncated during authentication").
+    let mut mac_input = [0u8; 32];
+    mac_input[..16].copy_from_slice(&rnd_a);
+    mac_input[16..].copy_from_slice(&rnd_b);
+    let pcd_response = suite.mac_full(&mac_input);
+
+    let part2_apdu = build_part2_apdu(&rnd_a, &pcd_response);
+    let r2 = transport.transmit(&part2_apdu).await?;
+    let code = ResponseCode::desfire(r2.sw1, r2.sw2);
+    if !code.ok() {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+
+    // Response: PICCResponse [16 bytes] only — no PICCData block unlike First
+    // (Table 47, p. 54; §9.2.6: "TI is not reset and not exchanged").
+    let picc_response: [u8; 16] =
+        r2.data
+            .as_ref()
+            .try_into()
+            .map_err(|_| SessionError::UnexpectedLength {
+                got: r2.data.as_ref().len(),
+            })?;
+
+    // Verify: MAC_LRP(SesAuthMACKey; RndB || RndA) == PICCResponse.
+    let mut verify_input = [0u8; 32];
+    verify_input[..16].copy_from_slice(&rnd_b);
+    verify_input[16..].copy_from_slice(&rnd_a);
+    if suite.mac_full(&verify_input) != picc_response {
+        return Err(SessionError::AuthenticationMismatch);
+    }
+
+    Ok(suite)
+}
+
 /// `AuthenticateLRPFirst` (NT4H2421Gx §9.2.5, §10.4.3).
 ///
 /// Drives the two-part challenge/response handshake with the PICC using

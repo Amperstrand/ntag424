@@ -3,6 +3,61 @@ use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt, aes_cbc_encr
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
 
+/// `AuthenticateEV2NonFirst` for AES secure messaging (NT4H2421Gx §9.1.6,
+/// §10.4.2).
+///
+/// Re-authenticates within an already-active AES session, deriving fresh
+/// session keys (`SesAuthMACKey`, `SesAuthENCKey`) while the PICC preserves
+/// TI and `CmdCtr` (p. 25–26). The caller is responsible for preserving those
+/// values from the prior session and updating the [`Session`] accordingly.
+///
+/// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy so this
+/// method stays deterministic in tests.
+pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
+    transport: &mut T,
+    key_no: KeyNumber,
+    key: &[u8; 16],
+    rnd_a: [u8; 16],
+) -> Result<AesSuite, SessionError<T::Error>> {
+    // Part 1: CLA=90 CMD=77 P1=00 P2=00 Lc=01 [KeyNo] Le=00.
+    // INS=77h (NonFirst); no LenCap/PCDcap2 (§10.4.2, Table 31, p. 49).
+    let part1_apdu = [0x90, 0x77, 0x00, 0x00, 0x01, key_no.as_byte(), 0x00];
+    let r1 = transport.transmit(&part1_apdu).await?;
+    let code = ResponseCode::desfire(r1.sw1, r1.sw2);
+    if !matches!(code.status(), ResponseStatus::AdditionalFrame) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    let rnd_b_enc: [u8; 16] =
+        r1.data
+            .as_ref()
+            .try_into()
+            .map_err(|_| SessionError::UnexpectedLength {
+                got: r1.data.as_ref().len(),
+            })?;
+
+    // Decrypt RndB (§9.1.4: IV is all zero during authentication).
+    let mut rnd_b = rnd_b_enc;
+    aes_cbc_decrypt(key, &[0u8; 16], &mut rnd_b);
+
+    let part2_apdu = build_part2_apdu(key, &rnd_a, &rnd_b);
+    let r2 = transport.transmit(&part2_apdu).await?;
+    let code = ResponseCode::desfire(r2.sw1, r2.sw2);
+    if !code.ok() {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    // Response is only 16 bytes — no TI or cap fields (p. 26: "TI is not
+    // reset and not exchanged").
+    let resp_enc: [u8; 16] =
+        r2.data
+            .as_ref()
+            .try_into()
+            .map_err(|_| SessionError::UnexpectedLength {
+                got: r2.data.as_ref().len(),
+            })?;
+
+    finish_auth_non_first(key, &rnd_a, &rnd_b, &resp_enc)
+}
+
 /// `AuthenticateEV2First` for AES secure messaging (NT4H2421Gx §9.1.5,
 /// §10.4.1).
 ///
@@ -104,6 +159,31 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     Ok((AesSuite::derive(key, rnd_a, rnd_b), ti))
 }
 
+/// Verify the 16-byte NonFirst Part 2 response and derive the new session suite.
+///
+/// The response carries only `E(Kx, RndA')` — no TI, no cap fields (§10.4.2,
+/// Table 34–35, p. 50). Verifies `rotate_right(RndA', 1) == RndA`, then
+/// derives the new [`AesSuite`] via the same KDF as First (§9.1.7).
+fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
+    key: &[u8; 16],
+    rnd_a: &[u8; 16],
+    rnd_b: &[u8; 16],
+    enc: &[u8; 16],
+) -> Result<AesSuite, SessionError<E>> {
+    let mut plain = *enc;
+    aes_cbc_decrypt(key, &[0u8; 16], &mut plain);
+
+    // Rotate right by one to recover RndA; must equal what we sent.
+    let mut rnd_a_received = [0u8; 16];
+    rnd_a_received[0] = plain[15];
+    rnd_a_received[1..].copy_from_slice(&plain[..15]);
+    if &rnd_a_received != rnd_a {
+        return Err(SessionError::AuthenticationMismatch);
+    }
+
+    Ok(AesSuite::derive(key, rnd_a, rnd_b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +268,55 @@ mod tests {
         match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Err(SessionError::AuthenticationMismatch) => (),
             Ok(_) => panic!("finish_auth accepted a corrupted transcript"),
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+
+    /// AN12196 §5.14, Table 23 (p. 36) — `AuthenticateEV2NonFirst` with key
+    /// 0x00 (all-zero). Verifies the Part 2 APDU bytes, RndA' check, and
+    /// derived session keys.
+    #[test]
+    fn non_first_finish_auth_an12196_table23() {
+        let key = [0u8; 16];
+        // From Table 23: RndB decrypted from R-APDU1.
+        let rnd_b_enc: [u8; 16] = hex_array("A6A2B3C572D06C097BB8DB70463E22DC");
+        let mut rnd_b = rnd_b_enc;
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        assert_eq!(rnd_b, hex_array("6924E8D09722659A2E7DEC68E66312B8"));
+
+        let rnd_a: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
+
+        // C-APDU2 data: E(K0, RndA || RndB') — the 32-byte ciphertext from Table 23.
+        let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
+        assert_eq!(
+            part2,
+            hex_array::<38>(
+                "90AF000020BE7D45753F2CAB85F34BC60CE58B940763FE969658A532DF6D95EA2773F6E99100"
+            ),
+        );
+
+        // R-APDU2: E(K0, RndA') [16 bytes].
+        let resp_enc: [u8; 16] = hex_array("B888349C24B315EAB5B589E279C8263E");
+        let suite = finish_auth_non_first::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc)
+            .expect("valid transcript should verify");
+
+        // Session keys from Table 23.
+        let (enc_key, mac_key) = suite.session_keys();
+        assert_eq!(enc_key, hex_array("4CF3CB41A22583A61E89B158D252FC53"));
+        assert_eq!(mac_key, hex_array("5529860B2FC5FB6154B7F28361D30BF9"));
+    }
+
+    /// A corrupted 16-byte NonFirst Part 2 response must be rejected.
+    #[test]
+    fn non_first_finish_auth_detects_wrong_rnd_a() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
+        let rnd_b: [u8; 16] = hex_array("6924E8D09722659A2E7DEC68E66312B8");
+        let mut resp_enc: [u8; 16] = hex_array("B888349C24B315EAB5B589E279C8263E");
+        resp_enc[0] ^= 0x01;
+        match finish_auth_non_first::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
+            Err(SessionError::AuthenticationMismatch) => (),
+            Ok(_) => panic!("non_first finish_auth accepted a corrupted transcript"),
             Err(e) => panic!("unexpected error: {e:?}"),
         }
     }

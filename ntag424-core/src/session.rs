@@ -3,11 +3,12 @@ use core::error::Error;
 use thiserror::Error;
 
 use crate::commands::{
-    SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp, change_key,
-    change_master_key, get_card_uid, get_file_counters, get_file_settings, get_file_settings_mac,
-    get_key_version, get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid,
-    read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
-    select_ndef_application, set_configuration,
+    SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
+    authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_key, change_master_key,
+    get_card_uid, get_file_counters, get_file_settings, get_file_settings_mac, get_key_version,
+    get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid, read_data_full,
+    read_data_mac, read_data_plain, read_sig, read_sig_mac, select_ndef_application,
+    set_configuration,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
@@ -365,6 +366,12 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// the canonical Table 50 order; `CmdCtr` advances once per APDU on
     /// success. A configuration with no options is a no-op.
     ///
+    /// Enabling LRP is intentionally not reachable through this method —
+    /// the PICC tears down the secure channel as part of the switch, so
+    /// mixing it with other options would leave the session in an invalid
+    /// state. Use [`Session::enable_lrp`] instead, which consumes the
+    /// authenticated AES session and returns a fresh unauthenticated one.
+    ///
     /// Several options are irreversible — see [`Configuration`] for the
     /// individual `with_*` builder methods.
     pub async fn set_configuration<T: Transport>(
@@ -431,7 +438,93 @@ impl Session<Unauthenticated> {
             ef_selected,
         })
     }
+}
 
+impl Session<Authenticated<AesSuite>> {
+    /// Enable LRP mode on the PICC via `SetConfiguration` Option `05h`
+    /// (NT4H2421Gx §10.5.1, AN12321 §5).
+    ///
+    /// Consumes the authenticated AES session: enabling LRP tears down the
+    /// secure channel on the PICC (the PICC returns `9100` without a
+    /// response `MACt`, and any subsequent secure-messaging APDU on the
+    /// same channel fails with `LENGTH_ERROR` / `PERMISSION_DENIED`). The
+    /// returned [`Session<Unauthenticated>`] keeps the NDEF application /
+    /// EF selection state — plain commands still work on it — but the
+    /// next authentication must be [`Session::authenticate_lrp`] (which
+    /// runs `AuthenticateLRPFirst`), because AES First is rejected with
+    /// `PERMISSION_DENIED` once LRP is on.
+    ///
+    /// The switch is **permanent** (NT4H2421Gx §8).
+    pub async fn enable_lrp<T: Transport>(
+        mut self,
+        transport: &mut T,
+    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
+        let configuration = Configuration::new().with_lrp_enabled();
+        {
+            let mut channel = SecureChannel::new(&mut self.state);
+            set_configuration(transport, &mut channel, &configuration).await?;
+        }
+        Ok(Session {
+            state: Unauthenticated,
+            ndef_selected: self.ndef_selected,
+            ef_selected: self.ef_selected,
+        })
+    }
+}
+
+impl Session<Authenticated<AesSuite>> {
+    /// Re-authenticate within an existing AES session (`AuthenticateEV2NonFirst`,
+    /// NT4H2421Gx §9.1.6, §10.4.2).
+    ///
+    /// Derives fresh session keys (`SesAuthMACKey`, `SesAuthENCKey`) while the
+    /// PICC preserves TI and `CmdCtr` (p. 25–26). Returns `self` with the suite
+    /// replaced by the newly derived one. The `TI` and `CmdCtr` values carried by
+    /// the returned session match those of the original session.
+    ///
+    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
+    pub async fn authenticate_aes_non_first<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let ti = *self.state.ti_bytes();
+        let cmd_counter = self.state.counter();
+        let suite = authenticate_ev2_non_first_aes(transport, key_no, key, rnd_a).await?;
+        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        Ok(self)
+    }
+}
+
+impl Session<Authenticated<LrpSuite>> {
+    /// Re-authenticate within an existing LRP session (`AuthenticateLRPNonFirst`,
+    /// NT4H2421Gx §9.2.6, §10.4.4).
+    ///
+    /// Derives fresh session keys while the PICC preserves TI and `CmdCtr` and
+    /// resets `EncCtr` to 0 (§9.2.4, p. 30). Returns `self` with the suite
+    /// replaced by the newly derived one.
+    ///
+    /// AES NonFirst is not available on an LRP session — LRP mode is not
+    /// reversible.
+    ///
+    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
+    pub async fn authenticate_lrp_non_first<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let ti = *self.state.ti_bytes();
+        let cmd_counter = self.state.counter();
+        let suite = authenticate_ev2_non_first_lrp(transport, key_no, key, rnd_a).await?;
+        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        Ok(self)
+    }
+}
+
+impl Session<Unauthenticated> {
     /// Verify tag originality by its UID, using `Read_Sig` in
     /// `CommMode.Plain`.
     ///
@@ -551,6 +644,17 @@ impl<S: SessionSuite> Authenticated<S> {
         Self {
             suite,
             cmd_counter: 0,
+            ti,
+        }
+    }
+
+    /// Re-authentication constructor: preserves `ti` and `cmd_counter` from
+    /// the prior session while replacing the suite with newly derived keys.
+    /// Used by NonFirst auth (§9.1.6, §9.2.6).
+    pub(crate) fn non_first(suite: S, ti: [u8; 4], cmd_counter: u16) -> Self {
+        Self {
+            suite,
+            cmd_counter,
             ti,
         }
     }
@@ -819,5 +923,82 @@ mod tests {
             Err(other) => panic!("unexpected error: {other:?}"),
             Ok(_) => panic!("91 AE must not authenticate"),
         }
+    }
+
+    /// AN12196 §5.14, Table 23 — full `AuthenticateEV2NonFirst` transcript
+    /// with Key 0x00. Drives `Session::authenticate_aes_non_first` against a
+    /// mock PICC after establishing an AES session via `AuthenticateEV2First`
+    /// (§5.6 vectors). Verifies that TI and CmdCtr are preserved from the
+    /// prior session.
+    #[test]
+    fn authenticate_aes_non_first_an12196_table23_full_handshake() {
+        let key = [0u8; 16];
+        // RndA for First — AN12196 §5.6 step 10.
+        let rnd_a_first: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
+        // RndA for NonFirst — AN12196 §5.14 Table 23 step 10.
+        let rnd_a_non_first: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
+
+        let mut transport = TestTransport::new([
+            // ISOSelectFile(NDEF app).
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            // First Part 1 (§5.6 step 5 / step 6–8).
+            Exchange::new(
+                &hex_bytes("9071000002000000"),
+                &hex_bytes("A04C124213C186F22399D33AC2A30215"),
+                0x91,
+                0xAF,
+            ),
+            // First Part 2 (§5.6 step 14 / step 15–17).
+            Exchange::new(
+                &hex_bytes(
+                    "90AF00002035C3E05A752E0144BAC0DE51C1F22C56B34408A23D8AEA266CAB947EA8E0118D00",
+                ),
+                &hex_bytes("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663"),
+                0x91,
+                0x00,
+            ),
+            // NonFirst Part 1 (Table 23 step 5 / step 6–8):
+            //   90 77 00 00 01 KeyNo=00 00  →  E(K0,RndB) || 91AF
+            Exchange::new(
+                &hex_bytes("90770000010000"),
+                &hex_bytes("A6A2B3C572D06C097BB8DB70463E22DC"),
+                0x91,
+                0xAF,
+            ),
+            // NonFirst Part 2 (Table 23 step 14 / step 15–17):
+            //   90 AF 00 00 20 || E(K0,RndA||RndB') || 00  →  E(K0,RndA') || 9100
+            Exchange::new(
+                &hex_bytes(
+                    "90AF000020BE7D45753F2CAB85F34BC60CE58B940763FE969658A532DF6D95EA2773F6E99100",
+                ),
+                &hex_bytes("B888349C24B315EAB5B589E279C8263E"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        // Establish the initial AES session (TI = 9D00C4DF, CmdCtr = 0).
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a_first,
+        ))
+        .expect("first handshake should succeed");
+        assert_eq!(session.ti(), &hex_array::<4>("9D00C4DF"));
+        assert_eq!(session.cmd_counter(), 0);
+
+        // NonFirst: TI and CmdCtr must survive the re-authentication.
+        let session = block_on(session.authenticate_aes_non_first(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a_non_first,
+        ))
+        .expect("non_first handshake should succeed");
+
+        assert_eq!(session.ti(), &hex_array::<4>("9D00C4DF"), "TI must be preserved");
+        assert_eq!(session.cmd_counter(), 0, "CmdCtr must be preserved");
+        assert_eq!(transport.remaining(), 0);
     }
 }

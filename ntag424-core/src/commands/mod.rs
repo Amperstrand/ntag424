@@ -12,7 +12,10 @@ mod read_sig;
 mod secure_channel;
 mod set_configuration;
 
-pub(crate) use authenticate::{authenticate_ev2_first_aes, authenticate_ev2_first_lrp};
+pub(crate) use authenticate::{
+    authenticate_ev2_first_aes, authenticate_ev2_first_lrp, authenticate_ev2_non_first_aes,
+    authenticate_ev2_non_first_lrp,
+};
 pub(crate) use change_key::{change_key, change_master_key};
 pub(crate) use get_card_uid::get_card_uid;
 pub(crate) use get_file_counters::get_file_counters;

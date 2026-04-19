@@ -46,19 +46,19 @@ impl Configuration {
     /// (NT4H2421Gx §8, "After this switch, it is not possible to revert back
     /// to AES mode").
     ///
-    /// The switch does **not** take effect within the current secure session:
-    /// AES vs. LRP is negotiated only on First Authentication via
-    /// `PCDCap2.1` / `PDCap2.1` (NT4H2421Gx §9.1.4, Table 19), so the
-    /// remainder of this session — including further `SetConfiguration`
-    /// options sent after this one — continues to use the AES session keys.
-    /// AN12321 §5 Table 3 confirms this: step 28 right after enabling LRP
-    /// still uses the AES `SesAuthMACKey` for the response MAC.
+    /// The switch is exposed only to the crate because it must not be mixed
+    /// with other `SetConfiguration` options: enabling LRP tears down the
+    /// current secure channel on the PICC (the PICC returns `9100` without
+    /// a response `MACt`, and any subsequent secure-messaging command fails
+    /// with `LENGTH_ERROR` / `PERMISSION_DENIED`). Callers go through
+    /// `Session<Authenticated<AesSuite>>::enable_lrp`, which performs the
+    /// single-option APDU and yields a fresh unauthenticated session.
     ///
-    /// The new mode applies the next time the PCD performs a First
-    /// Authentication (typically after RF reset). At that point the PICC
-    /// will reject `AuthenticateEV2First` with `PERMISSION_DENIED` and only
-    /// accept `AuthenticateLRPFirst`.
-    pub fn with_lrp_enabled(mut self) -> Self {
+    /// AES vs. LRP is negotiated only on First Authentication via
+    /// `PCDCap2.1` / `PDCap2.1` (NT4H2421Gx §9.1.4, Table 19); after the
+    /// session is reset the PICC rejects `AuthenticateEV2First` with
+    /// `PERMISSION_DENIED` and only accepts `AuthenticateLRPFirst`.
+    pub(crate) fn with_lrp_enabled(mut self) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[4] |= 1 << 1;
         self
