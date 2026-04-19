@@ -1,0 +1,539 @@
+//! `WriteData` command — NT4H2421Gx §10.8.2.
+//!
+//! The command writes bytes to a StandardData file. Its CommMode is
+//! defined per file (§8.2.3.5, Table 13), so three framings are
+//! exposed here:
+//!
+//! - [`write_data_plain`] — no secure messaging. Used either without
+//!   an authenticated session at all, or, per §8.2.3.3, inside an
+//!   authenticated session when the only satisfied access condition is
+//!   the free-access one (`Eh`).
+//! - [`write_data_mac`] — `CommMode.MAC` (§9.1.9): command gets an
+//!   8-byte `MACt` trailer, response is `MACt(8)` only (no data).
+//! - [`write_data_full`] — `CommMode.FULL` (§9.1.10): command data is
+//!   encrypted with ISO/IEC 9797-1 Method 2 padding, MAC'd, and the
+//!   response is `MACt(8)` only (no data).
+//!
+//! In all variants the command header is `FileNo(1) || Offset(3 LE) ||
+//! Length(3 LE)`. Unlike `ReadData`, `Length = 0` is **not** valid
+//! (Table 81: `000001h .. (FileSize - Offset)`).
+
+use crate::{
+    Transport,
+    commands::SecureChannel,
+    crypto::suite::SessionSuite,
+    session::SessionError,
+    types::{ResponseCode, ResponseStatus},
+};
+
+/// AES / LRP block size, used for FULL-mode padding arithmetic.
+const BLOCK: usize = 16;
+
+/// `MACt` trailer length (§9.1.3).
+const MAC_LEN: usize = 8;
+
+/// Max addressable file offset/length: 24-bit field per §10.8.2 Table 81.
+const U24_MAX: u32 = 0x00FF_FFFF;
+
+/// Maximum plaintext data bytes per single `WriteData` frame.
+///
+/// Table 81: "up to 248 byte including secure messaging". In `CommMode.Plain`
+/// all 248 bytes carry user data. In MAC/FULL mode the 8-byte MACt and
+/// potential cipher padding eat into this budget.
+const WRITE_DATA_MAX_BODY: usize = 248;
+
+/// Maximum short-APDU body length.
+const MAX_APDU_BODY: usize = 255;
+
+/// Build the 7-byte command header `FileNo || Offset(3 LE) || Length(3 LE)`.
+///
+/// Panics if `file_no > 0x1F` (bits 7–5 are RFU per §10.8.2), if either
+/// `offset` or `length` exceeds 24 bits, or if `length` is zero.
+fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
+    assert!(
+        file_no <= 0x1F,
+        "write_data: file_no must fit 5 bits (got {file_no:#04x})",
+    );
+    assert!(
+        offset <= U24_MAX,
+        "write_data: offset must fit 24 bits (got {offset:#010x})",
+    );
+    assert!(
+        length > 0 && length <= U24_MAX,
+        "write_data: length must be 1..FFFFFFh (got {length:#010x})",
+    );
+    let o = offset.to_le_bytes();
+    let l = length.to_le_bytes();
+    [file_no, o[0], o[1], o[2], l[0], l[1], l[2]]
+}
+
+/// `WriteData` (INS `8D`, §10.8.2) in `CommMode.Plain`.
+///
+/// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) Data 00`.
+/// Does not require or touch any secure-messaging state.
+///
+/// Panics if `data` is empty or exceeds 248 bytes, or if `data.len()`
+/// does not equal `length`.
+pub(crate) async fn write_data_plain<T: Transport>(
+    transport: &mut T,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Result<(), SessionError<T::Error>> {
+    assert!(!data.is_empty(), "write_data_plain: data must be non-empty");
+    assert!(
+        data.len() <= WRITE_DATA_MAX_BODY,
+        "write_data_plain: data exceeds 248 bytes",
+    );
+
+    let header = build_header(file_no, offset, data.len() as u32);
+    let lc = (7 + data.len()) as u8;
+    let mut apdu = [0u8; 5 + 7 + WRITE_DATA_MAX_BODY + 1];
+    apdu[..5].copy_from_slice(&[0x90, 0x8D, 0x00, 0x00, lc]);
+    apdu[5..12].copy_from_slice(&header);
+    apdu[12..12 + data.len()].copy_from_slice(data);
+    let end = 12 + data.len();
+    apdu[end] = 0x00; // Le
+
+    let resp = transport.transmit(&apdu[..end + 1]).await?;
+    let code = ResponseCode::desfire(resp.sw1, resp.sw2);
+    if !matches!(code.status(), ResponseStatus::OperationOk) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+    Ok(())
+}
+
+/// `WriteData` in `CommMode.MAC` (§9.1.9).
+///
+/// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) Data MACt(8) 00`.
+/// Response: `MACt(8)`, `91 00`. Verifies the trailing `MACt` and advances
+/// `CmdCtr` on success.
+///
+/// Panics if `data` is empty or `header + data + MAC` exceeds 255 bytes.
+pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Result<(), SessionError<T::Error>> {
+    assert!(!data.is_empty(), "write_data_mac: data must be non-empty");
+    let header = build_header(file_no, offset, data.len() as u32);
+
+    let body = channel
+        .send_mac(transport, 0x8D, 0x00, 0x00, &header, data)
+        .await?;
+    // WriteData response carries no encrypted data — only the MACt
+    // which send_mac already verified and stripped.
+    if !body.is_empty() {
+        return Err(SessionError::UnexpectedLength { got: body.len() });
+    }
+    Ok(())
+}
+
+/// `WriteData` in `CommMode.FULL` (§9.1.10).
+///
+/// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) E(Data||pad) MACt(8) 00`.
+/// Response: `MACt(8)`, `91 00` — no encrypted data in the response
+/// (§10.8.2 Table 82: "No response data").
+///
+/// Encryption is applied to `CmdData` only (§9.1.10 Figure 9): the
+/// header (`FileNo Offset Length`) is sent in the clear and included in
+/// the MAC input, while the `Data` portion is padded with ISO/IEC 9797-1
+/// Method 2, encrypted with `SesAuthENCKey`, and then MAC'd together
+/// with the header.
+///
+/// Panics if `data` is empty or if the resulting APDU body (header +
+/// ciphertext + MAC) exceeds 255 bytes.
+pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Result<(), SessionError<T::Error>> {
+    assert!(!data.is_empty(), "write_data_full: data must be non-empty",);
+
+    let header = build_header(file_no, offset, data.len() as u32);
+
+    // ISO/IEC 9797-1 Method 2 padding: data || 0x80 || 0x00..
+    let padded_len = (data.len() + 1).div_ceil(BLOCK) * BLOCK;
+    assert!(
+        7 + padded_len + MAC_LEN <= MAX_APDU_BODY,
+        "write_data_full: payload too large for short APDU",
+    );
+
+    // Build padded plaintext in a stack buffer. Max plaintext limited by
+    // the 255-byte APDU body: 255 - 7(header) - 8(MAC) = 240 bytes of
+    // ciphertext, i.e. 240 bytes padded (15 full blocks).
+    let mut padded = [0u8; 240];
+    padded[..data.len()].copy_from_slice(data);
+    padded[data.len()] = 0x80;
+    // Rest is already 0x00.
+
+    let ct = &mut padded[..padded_len];
+    channel.encrypt_command(ct);
+
+    // MAC over Cmd || CmdCtr || TI || CmdHeader || E(CmdData).
+    let mac = channel.compute_cmd_mac(0x8D, &header, ct);
+
+    // Assemble APDU.
+    let lc = (7 + ct.len() + MAC_LEN) as u8;
+    let apdu_len = 5 + 7 + ct.len() + MAC_LEN + 1;
+    let mut apdu = [0u8; 5 + MAX_APDU_BODY + 1];
+    apdu[..5].copy_from_slice(&[0x90, 0x8D, 0x00, 0x00, lc]);
+    apdu[5..12].copy_from_slice(&header);
+    let mut pos = 12;
+    apdu[pos..pos + ct.len()].copy_from_slice(ct);
+    pos += ct.len();
+    apdu[pos..pos + MAC_LEN].copy_from_slice(&mac);
+    pos += MAC_LEN;
+    apdu[pos] = 0x00; // Le
+    debug_assert_eq!(pos + 1, apdu_len);
+
+    let resp = transport.transmit(&apdu[..apdu_len]).await?;
+    let code = ResponseCode::desfire(resp.sw1, resp.sw2);
+    if !matches!(code.status(), ResponseStatus::OperationOk) {
+        return Err(SessionError::ErrorResponse(code.status()));
+    }
+
+    // Response is MACt(8) only — no encrypted RespData (§10.8.2 Table 82).
+    channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::suite::{AesSuite, Direction};
+    use crate::session::Authenticated;
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use alloc::vec::Vec;
+
+    fn authenticated_aes(
+        enc_key: [u8; 16],
+        mac_key: [u8; 16],
+        ti: [u8; 4],
+        cmd_counter: u16,
+    ) -> Authenticated<AesSuite> {
+        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        for _ in 0..cmd_counter {
+            state.advance_counter();
+        }
+        state
+    }
+
+    /// Plain `WriteData` frames header and data correctly.
+    ///
+    /// Writes 4 bytes to file 02h at offset 0.
+    /// `90 8D 00 00 0B 02 000000 04000000 DEADBEEF 00`.
+    #[test]
+    fn write_data_plain_frames_header_and_data() {
+        let data = [0xDE, 0xAD, 0xBE, 0xEF];
+        let expected = hex_bytes("908D00000B02000000040000DEADBEEF00");
+        let mut transport = TestTransport::new([Exchange::new(&expected, &[], 0x91, 0x00)]);
+        block_on(write_data_plain(&mut transport, 0x02, 0, &data)).expect("plain write");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Offset and length are encoded 3-byte little-endian per Table 81.
+    #[test]
+    fn write_data_plain_encodes_offset_and_length_le() {
+        // offset = 0x000010, length = 2 → header = 03 100000 020000
+        let data = [0x55, 0xAA];
+        let expected = hex_bytes("908D0000090310000002000055AA00");
+        let mut transport = TestTransport::new([Exchange::new(&expected, &[], 0x91, 0x00)]);
+        block_on(write_data_plain(&mut transport, 0x03, 0x10, &data)).expect("plain write");
+    }
+
+    /// PERMISSION_DENIED (`91 9D`, Table 83) surfaces as `ErrorResponse`.
+    #[test]
+    fn write_data_plain_surfaces_permission_denied() {
+        let data = [0x01];
+        let expected = hex_bytes("908D000008020000000100000100");
+        let mut transport = TestTransport::new([Exchange::new(&expected, &[], 0x91, 0x9D)]);
+        match block_on(write_data_plain(&mut transport, 0x02, 0, &data)) {
+            Err(SessionError::ErrorResponse(ResponseStatus::PermissionDenied)) => (),
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+    }
+
+    /// `CommMode.MAC` round-trip with hand-computed command + response MACs.
+    ///
+    /// Pins the framing: `90 8D 00 00 <Lc> Header Data MACt(8) 00`,
+    /// response `MACt(8)`.
+    #[test]
+    fn write_data_mac_roundtrip_advances_counter() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let data: Vec<u8> = (0..16u8).collect();
+        let header = build_header(0x02, 0, 16);
+
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0x8D);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            input.extend_from_slice(&data);
+            suite.mac(&input)
+        };
+
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00); // RC
+            input.extend_from_slice(&1u16.to_le_bytes()); // CmdCtr+1
+            input.extend_from_slice(&ti);
+            // No RespData for WriteData
+            suite.mac(&input)
+        };
+
+        // Lc = 7(header) + 16(data) + 8(MAC) = 31 = 0x1F
+        let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, 0x1F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&data);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_mac, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_mac(&mut transport, &mut ch, 0x02, 0, &data).await
+        })
+        .expect("MAC write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Reject a bad `WriteData` response MAC.
+    #[test]
+    fn write_data_mac_rejects_bad_trailer() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let data = [0xAAu8; 4];
+        let header = build_header(0x02, 0, 4);
+
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0x8D);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            input.extend_from_slice(&data);
+            suite.mac(&input)
+        };
+
+        let mut bad_resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            suite.mac(&input)
+        };
+        bad_resp_mac[0] ^= 0x01;
+
+        let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, 0x13]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&data);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &bad_resp_mac, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let result = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_mac(&mut transport, &mut ch, 0x02, 0, &data).await
+        });
+        match result {
+            Err(SessionError::ResponseMacMismatch) => (),
+            other => panic!("expected ResponseMacMismatch, got {other:?}"),
+        }
+        assert_eq!(state.counter(), 0);
+    }
+
+    /// Replay the AN12196 §5.8.2 `WriteData` `CommMode.FULL` vector.
+    ///
+    /// AN12196 Table 17 writes 128 bytes to file 02h at offset 0: the
+    /// 83-byte NDEF record followed by 45 zero bytes. Session keys and
+    /// TI are carried over from the §5.6 `AuthenticateEV2First`
+    /// transcript; `CmdCtr` starts at 0.
+    ///
+    /// All hex values are taken verbatim from AN12196 rev 2.0.
+    #[test]
+    fn write_data_full_an12196_vector() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti: [u8; 4] = hex_array("9D00C4DF");
+
+        // Step 7: 128 bytes of file data (83-byte NDEF record + 45 zero
+        // bytes). CmdHeader Length = 0x80 = 128.
+        let mut data = hex_bytes(
+            "0051D1014D550463686F6F73652E75726C2E636F6D2F6E7461673432343F653D\
+             3030303030303030303030303030303030303030303030303030303030303030\
+             26633D30303030303030303030303030303030",
+        );
+        data.resize(128, 0x00);
+        assert_eq!(data.len(), 128);
+
+        // Step 15: expected C-APDU.
+        let expected_apdu = hex_bytes(
+            "908D00009F02000000800000\
+             421C73A27D827658AF481FDFF20A5025B559D0E3AA21E58D347F343CFFC768BF\
+             E596C706BC00F2176781D4B0242642A0FF5A42C461AAF894D9A1284B8C76BCFA\
+             658ACD40555D362E08DB15CF421B51283F9064BCBE20E96CAE545B407C9D651A\
+             3315B27373772E5DA2367D2064AE054AF996C6F1F669170FA88CE8C4E3A4A7BB\
+             BEF0FD971FF532C3A802AF745660F2B4D1D9A8499661EBF300",
+        );
+
+        // Step 17: R-APDU body (MACt before 9100).
+        let resp_body = hex_bytes("FC222E5F7A542452");
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(&mut transport, &mut ch, 0x02, 0, &data).await
+        })
+        .expect("FULL write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// FULL-mode round-trip with a small payload that needs padding.
+    ///
+    /// 4 bytes of user data → 16 bytes after M2 padding → one cipher
+    /// block. Exercises the padding + encrypt + MAC path for a sub-block
+    /// payload.
+    #[test]
+    fn write_data_full_roundtrip_small_payload() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let data = [0xDE, 0xAD, 0xBE, 0xEF];
+        let header = build_header(0x03, 0, 4);
+
+        // Pad: DEADBEEF 80 000000 00000000 00000000
+        let mut padded = [0u8; 16];
+        padded[..4].copy_from_slice(&data);
+        padded[4] = 0x80;
+        let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+        enc_suite.encrypt(Direction::Command, &ti, 0, &mut padded);
+        let ciphertext = padded;
+
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0x8D);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            input.extend_from_slice(&ciphertext);
+            suite.mac(&input)
+        };
+
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            suite.mac(&input)
+        };
+
+        // Lc = 7 + 16 + 8 = 31 = 0x1F
+        let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, 0x1F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&ciphertext);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_mac, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(&mut transport, &mut ch, 0x03, 0, &data).await
+        })
+        .expect("FULL write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// FULL mode with exactly 16 bytes of data (block-aligned).
+    ///
+    /// 16 bytes of data + M2 padding → 32 bytes of ciphertext (padding
+    /// adds a full extra block when the plaintext is already aligned).
+    #[test]
+    fn write_data_full_block_aligned_gets_extra_padding_block() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let data: Vec<u8> = (0..16u8).collect();
+        let header = build_header(0x02, 0, 16);
+
+        // 16 bytes + 0x80 + 15 zeros = 32 bytes
+        let mut padded = [0u8; 32];
+        padded[..16].copy_from_slice(&data);
+        padded[16] = 0x80;
+        let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+        enc_suite.encrypt(Direction::Command, &ti, 0, &mut padded);
+        let ciphertext = padded;
+
+        let cmd_mac = {
+            let mut input = Vec::new();
+            input.push(0x8D);
+            input.extend_from_slice(&0u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            input.extend_from_slice(&header);
+            input.extend_from_slice(&ciphertext);
+            suite.mac(&input)
+        };
+
+        let resp_mac = {
+            let mut input = Vec::new();
+            input.push(0x00);
+            input.extend_from_slice(&1u16.to_le_bytes());
+            input.extend_from_slice(&ti);
+            suite.mac(&input)
+        };
+
+        // Lc = 7 + 32 + 8 = 47 = 0x2F
+        let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, 0x2F]);
+        expected_apdu.extend_from_slice(&header);
+        expected_apdu.extend_from_slice(&ciphertext);
+        expected_apdu.extend_from_slice(&cmd_mac);
+        expected_apdu.push(0x00);
+
+        let mut transport =
+            TestTransport::new([Exchange::new(&expected_apdu, &resp_mac, 0x91, 0x00)]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(&mut transport, &mut ch, 0x02, 0, &data).await
+        })
+        .expect("FULL write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+}

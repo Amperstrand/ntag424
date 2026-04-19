@@ -7,10 +7,12 @@ mod get_key_version;
 mod get_version;
 mod iso_read_binary;
 mod iso_select_file;
+mod iso_update_binary;
 mod read_data;
 mod read_sig;
 mod secure_channel;
 mod set_configuration;
+mod write_data;
 
 pub(crate) use authenticate::{
     authenticate_ev2_first_aes, authenticate_ev2_first_lrp, authenticate_ev2_non_first_aes,
@@ -24,7 +26,9 @@ pub(crate) use get_key_version::get_key_version;
 pub(crate) use get_version::{get_version, get_version_mac};
 pub(crate) use iso_read_binary::iso_read_binary;
 pub(crate) use iso_select_file::{iso_select_ef_by_fid, select_ndef_application};
+pub(crate) use iso_update_binary::iso_update_binary;
 pub(crate) use read_data::{read_data_full, read_data_mac, read_data_plain};
 pub(crate) use read_sig::{read_sig, read_sig_mac};
 pub(crate) use secure_channel::SecureChannel;
 pub(crate) use set_configuration::set_configuration;
+pub(crate) use write_data::{write_data_full, write_data_mac, write_data_plain};

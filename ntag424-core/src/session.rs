@@ -6,9 +6,9 @@ use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
     authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_key, change_master_key,
     get_card_uid, get_file_counters, get_file_settings, get_file_settings_mac, get_key_version,
-    get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid, read_data_full,
-    read_data_mac, read_data_plain, read_sig, read_sig_mac, select_ndef_application,
-    set_configuration,
+    get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid, iso_update_binary,
+    read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
+    select_ndef_application, set_configuration, write_data_full, write_data_mac, write_data_plain,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
@@ -191,6 +191,37 @@ impl Session<Unauthenticated> {
             self.ef_selected = Some(file.file_id());
         }
         iso_read_binary(transport, None, offset, buf).await
+    }
+
+    /// Write bytes to a StandardData file via `ISOUpdateBinary`.
+    ///
+    /// `CLA=00 INS=D6`, NT4H2421Gx §10.9.3. Always `CommMode.Plain` —
+    /// the command has no secure-messaging variant and never advances
+    /// `CmdCtr`. `Write` or `ReadWrite` access on the targeted file
+    /// must be set to free (`Eh`) for the call to succeed.
+    ///
+    /// Restricted to `Session<Unauthenticated>`: per NT4H2421Gx §10.9.3,
+    /// while the PICC is in `AuthenticatedEV2` / `AuthenticatedLRP` state
+    /// `ISOUpdateBinary` is rejected with `SW=6982h` ("security status
+    /// not satisfied"). Use the native `WriteData` command (available on
+    /// `Session<Authenticated<_>>`) instead for writes inside a secure
+    /// channel.
+    ///
+    /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
+    /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
+    pub async fn write_unauthenticated<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u16,
+        data: &[u8],
+    ) -> Result<(), SessionError<T::Error>> {
+        self.select_ndef_application(transport).await?;
+        if self.ef_selected != Some(file.file_id()) {
+            iso_select_ef_by_fid(transport, file.file_id()).await?;
+            self.ef_selected = Some(file.file_id());
+        }
+        iso_update_binary(transport, None, offset, data).await
     }
 }
 
@@ -685,6 +716,78 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
                     read_data_full(transport, &mut channel, file.file_no(), offset, length, buf)
                         .await?;
                 Ok((n, self))
+            }
+        }
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Write file bytes in `CommMode.Plain`.
+    ///
+    /// Uses `WriteData` (INS `8D`) under an active session
+    /// (NT4H2421Gx §10.8.2).
+    ///
+    /// Per §8.2.3.3, `CommMode.Plain` must be used when the only access
+    /// condition granting the current session access is free access (`Eh`).
+    ///
+    /// Does **not** use secure messaging, so a PICC error does **not**
+    /// invalidate the authenticated session — the session is borrowed,
+    /// not consumed. `CmdCtr` is advanced on success (§9.1.2, §9.1.8).
+    pub async fn write_plain<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        data: &[u8],
+    ) -> Result<(), SessionError<T::Error>> {
+        write_data_plain(transport, file.file_no(), offset, data).await?;
+        self.state.advance_counter();
+        Ok(())
+    }
+
+    /// Write file bytes with an explicit CommMode.
+    ///
+    /// Writes `data` to `file` starting at `offset`, using the
+    /// caller-supplied `mode` as the command's effective CommMode
+    /// (NT4H2421Gx §10.8.2 `WriteData`, INS `8D`).
+    ///
+    /// The effective CommMode is determined by the file's configuration
+    /// (§8.2.3.5, Table 13), with one override from §8.2.3.3: when the
+    /// only access condition granting the current session access to the
+    /// targeted right (`Write` / `ReadWrite`) is free access (`Eh`),
+    /// `CommMode.Plain` must be used even though the session is
+    /// authenticated. In that case the PICC expects a plain APDU with
+    /// no MAC trailer — prefer [`Self::write_plain`] which borrows
+    /// instead of consuming the session.
+    ///
+    /// Consumes the session: a PICC error on `CommMode::Mac` or
+    /// `CommMode::Full` invalidates the authenticated state
+    /// (§9.1.9/§9.1.10) and the session cannot be reused.
+    /// `CmdCtr` is advanced on success in all three modes (§9.1.2,
+    /// §9.1.8).
+    pub async fn write_with_mode<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        data: &[u8],
+        mode: CommMode,
+    ) -> Result<Self, SessionError<T::Error>> {
+        match mode {
+            CommMode::Plain => {
+                write_data_plain(transport, file.file_no(), offset, data).await?;
+                self.state.advance_counter();
+                Ok(self)
+            }
+            CommMode::Mac => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                write_data_mac(transport, &mut channel, file.file_no(), offset, data).await?;
+                Ok(self)
+            }
+            CommMode::Full => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                write_data_full(transport, &mut channel, file.file_no(), offset, data).await?;
+                Ok(self)
             }
         }
     }
