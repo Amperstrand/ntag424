@@ -221,12 +221,16 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// `CommMode.MAC` (§10.2 Table 21 footnote 1). Verifies the
     /// trailing `MACt` on the last chained response and advances
     /// `CmdCtr` on success.
+    ///
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.9) and the session cannot be reused.
     pub async fn get_version<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
-    ) -> Result<Version, SessionError<T::Error>> {
+    ) -> Result<(Version, Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        get_version_mac(transport, &mut channel).await
+        let version = get_version_mac(transport, &mut channel).await?;
+        Ok((version, self))
     }
 }
 
@@ -243,14 +247,16 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// To change the Application Master Key (`Key0`), use
     /// [`Session::change_master_key`] instead — it has different
     /// cryptogram/response semantics and invalidates the session.
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.10) and the session cannot be reused.
     pub async fn change_key<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         key_no: NonMasterKeyNumber,
         new_key: &[u8; 16],
         new_key_version: u8,
         old_key: &[u8; 16],
-    ) -> Result<(), SessionError<T::Error>> {
+    ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         change_key(
             transport,
@@ -260,7 +266,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
             new_key_version,
             old_key,
         )
-        .await
+        .await?;
+        Ok(self)
     }
 
     /// Change the Application Master Key `Key0` (`ChangeKey` Case 2,
@@ -298,12 +305,15 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// the tag is configured for Random ID at activation (§10.5.3). Verifies
     /// the response `MACt`, decrypts the payload, checks ISO/IEC 9797-1
     /// Method 2 padding, and advances `CmdCtr` on success.
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.10) and the session cannot be reused.
     pub async fn get_card_uid<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
-    ) -> Result<[u8; 7], SessionError<T::Error>> {
+    ) -> Result<([u8; 7], Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        get_card_uid(transport, &mut channel).await
+        let uid = get_card_uid(transport, &mut channel).await?;
+        Ok((uid, self))
     }
 
     /// Retrieve the current key version of an application key via
@@ -314,13 +324,16 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// calling this. The PICC returns `00h` for disabled keys and for
     /// `OriginalityKey`, and the full byte range otherwise (Table 67).
     /// The response `MACt` is verified and `CmdCtr` advances on success.
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.9) and the session cannot be reused.
     pub async fn get_key_version<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         key_no: KeyNumber,
-    ) -> Result<u8, SessionError<T::Error>> {
+    ) -> Result<(u8, Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        get_key_version(transport, &mut channel, key_no).await
+        let version = get_key_version(transport, &mut channel, key_no).await?;
+        Ok((version, self))
     }
 
     /// Retrieve a file's settings via `GetFileSettings` (INS `F5h`,
@@ -330,13 +343,17 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// calling this. The response `MACt` is verified, the secure-messaging
     /// frame is stripped, and the remaining payload is decoded into
     /// [`FileSettings`]. `CmdCtr` advances on success.
+    ///
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.9) and the session cannot be reused.
     pub async fn get_file_settings<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         file: File,
-    ) -> Result<FileSettings, SessionError<T::Error>> {
+    ) -> Result<(FileSettings, Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        get_file_settings_mac(transport, &mut channel, file.file_no()).await
+        let settings = get_file_settings_mac(transport, &mut channel, file.file_no()).await?;
+        Ok((settings, self))
     }
 
     /// Retrieve the current `SDMReadCtr` for a file via `GetFileCounters`
@@ -348,13 +365,16 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ///
     /// The 24-bit `SDMReadCtr` is returned as a `u32` (zero-extended from
     /// the 3 wire bytes, LSB first, per NT4H2421Gx §10.7.3 Table 76).
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.9) and the session cannot be reused.
     pub async fn get_file_counters<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         file: File,
-    ) -> Result<u32, SessionError<T::Error>> {
+    ) -> Result<(u32, Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        get_file_counters(transport, &mut channel, file.file_no()).await
+        let counter = get_file_counters(transport, &mut channel, file.file_no()).await?;
+        Ok((counter, self))
     }
 
     /// Apply tag configuration changes via `SetConfiguration` (INS `5C`,
@@ -374,13 +394,16 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ///
     /// Several options are irreversible — see [`Configuration`] for the
     /// individual `with_*` builder methods.
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.10) and the session cannot be reused.
     pub async fn set_configuration<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         configuration: &Configuration,
-    ) -> Result<(), SessionError<T::Error>> {
+    ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
-        set_configuration(transport, &mut channel, configuration).await
+        set_configuration(transport, &mut channel, configuration).await?;
+        Ok(self)
     }
 }
 
@@ -546,18 +569,47 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// `CommMode.MAC` (§9.1.9). Verifies the response `MACt` and
     /// advances `CmdCtr` before running the ECDSA check against the
     /// NXP master public key (AN12196 §7.2).
+    ///
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.9) and the session cannot be reused.
     pub async fn verify_originality<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         uid: &[u8; 7],
-    ) -> Result<(), SessionError<T::Error>> {
+    ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         let sig = read_sig_mac(transport, &mut channel).await?;
-        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
+        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)?;
+        Ok(self)
     }
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Read bytes from `file` in `CommMode.Plain` under an active session
+    /// (NT4H2421Gx §10.8.1, `ReadData` INS `AD`).
+    ///
+    /// Per §8.2.3.3, `CommMode.Plain` must be used when the only access
+    /// condition granting the current session access is free access (`Eh`).
+    ///
+    /// Does **not** use secure messaging, so a PICC error does **not**
+    /// invalidate the authenticated session — the session is borrowed,
+    /// not consumed. `CmdCtr` is advanced on success (§9.1.2, §9.1.8).
+    ///
+    /// `length = 0` means "entire file from `offset`". Returns the
+    /// number of bytes copied into `buf`.
+    pub async fn read_plain<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        length: u32,
+        buf: &mut [u8],
+    ) -> Result<usize, SessionError<T::Error>> {
+        let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
+        self.state.advance_counter();
+        Ok(n)
+    }
+
     /// Read `length` bytes from `file` starting at `offset`, using the
     /// caller-supplied `mode` as the command's effective CommMode
     /// (NT4H2421Gx §10.8.1 `ReadData`, INS `AD`).
@@ -568,58 +620,46 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// targeted right (`Read` / `ReadWrite` / `SDMFileRead`) is free
     /// access (`Eh`), `CommMode.Plain` must be used even though the
     /// session is authenticated. In that case the PICC expects a plain
-    /// APDU with no MAC trailer.
-    ///
-    /// The caller is responsible for picking `mode`. A convenience
-    /// wrapper that looks the mode up via `GetFileSettings` is not yet
-    /// implemented — once it is, it will call into this method.
+    /// APDU with no MAC trailer — prefer [`Self::read_plain`] which
+    /// borrows instead of consuming the session.
     ///
     /// `length = 0` means "entire file from `offset`", capped at the
     /// 256-byte short-`Le` response limit (§10.8.1 Table 78). When
     /// `length != 0`, `buf.len()` must be at least `length`.
     ///
-    /// Returns the number of bytes copied into `buf`. `CmdCtr` is
-    /// advanced on successful completion in **all three modes** —
-    /// §9.1.2 and §9.1.8 require that under active authentication every
-    /// command, including Plain ones, increments the counter, so that
-    /// insertion or deletion of Plain commands can be detected by the
-    /// next MAC/Full exchange.
-    ///
-    /// Counter behaviour on failure:
-    /// - Transport error or PICC-reported `ErrorResponse` (SW ≠ `91 00`):
-    ///   counter stays put (PICC rejected the command, so it didn't
-    ///   advance either).
-    /// - MAC verification failure: counter stays put (session is in
-    ///   practice unrecoverable; caller should re-authenticate).
-    /// - `UnexpectedLength` / malformed padding after a `91 00`: the
-    ///   PICC accepted the command and advanced; the counter is also
-    ///   advanced on the PCD side to stay in sync.
+    /// Consumes the session: a PICC error on `CommMode::Mac` or
+    /// `CommMode::Full` invalidates the authenticated state
+    /// (§9.1.9/§9.1.10) and the session cannot be reused. Returns the
+    /// number of bytes copied into `buf` together with the session.
+    /// `CmdCtr` is advanced on success in all three modes (§9.1.2,
+    /// §9.1.8).
     pub async fn read_with_mode<T: Transport>(
-        &mut self,
+        mut self,
         transport: &mut T,
         file: File,
         offset: u32,
         length: u32,
         mode: CommMode,
         buf: &mut [u8],
-    ) -> Result<usize, SessionError<T::Error>> {
+    ) -> Result<(usize, Self), SessionError<T::Error>> {
         match mode {
             CommMode::Plain => {
                 let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
-                // §9.1.2 + §9.1.8: under active authentication the PICC
-                // advances CmdCtr for every accepted command regardless
-                // of CommMode — mirror that here or the next MAC/Full
-                // command will fail with IntegrityError.
                 self.state.advance_counter();
-                Ok(n)
+                Ok((n, self))
             }
             CommMode::Mac => {
                 let mut channel = SecureChannel::new(&mut self.state);
-                read_data_mac(transport, &mut channel, file.file_no(), offset, length, buf).await
+                let n = read_data_mac(transport, &mut channel, file.file_no(), offset, length, buf)
+                    .await?;
+                Ok((n, self))
             }
             CommMode::Full => {
                 let mut channel = SecureChannel::new(&mut self.state);
-                read_data_full(transport, &mut channel, file.file_no(), offset, length, buf).await
+                let n =
+                    read_data_full(transport, &mut channel, file.file_no(), offset, length, buf)
+                        .await?;
+                Ok((n, self))
             }
         }
     }
