@@ -482,4 +482,24 @@ mod tests {
             assert_eq!(ac.to_byte(), byte, "byte {byte:#04x} did not round-trip");
         }
     }
+
+    /// Parse the full 32-byte CC file as read from a real NTAG 424 DNA tag
+    /// via `ISOReadBinary` (EF `E103h`). The first 23 bytes are the CC data
+    /// (matching [`NTAG424_DEFAULT_CC`]); remaining bytes are zero padding.
+    #[test]
+    fn decode_full_cc_file_from_hardware() {
+        #[rustfmt::skip]
+        let cc_file: [u8; 32] = [
+            0x00, 0x17, 0x20, 0x01, 0x00, 0x00, 0xFF, 0x04,
+            0x06, 0xE1, 0x04, 0x01, 0x00, 0x00, 0x00, 0x05,
+            0x06, 0xE1, 0x05, 0x00, 0x80, 0x82, 0x83, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        // The CC length field says 23 bytes — parsing should use exactly that.
+        assert_eq!(&cc_file[..23], &NTAG424_DEFAULT_CC);
+
+        let cc = CapabilityContainer::from_bytes(&cc_file[..23]).unwrap();
+        assert_eq!(cc, CapabilityContainer::default());
+        assert_eq!(cc.to_bytes(), NTAG424_DEFAULT_CC);
+    }
 }

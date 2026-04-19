@@ -31,8 +31,11 @@ mod tests {
     use super::*;
     use crate::crypto::suite::AesSuite;
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array};
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
+
+    // Also need aes_cbc_decrypt for deriving RndB from the encrypted wire value.
+    use crate::crypto::suite::{SessionSuite, aes_cbc_decrypt};
 
     /// Hand-built round-trip for GetKeyVersion. AN12196 does not carry a
     /// published `GetKeyVersion` transcript, so the test reuses the
@@ -144,5 +147,46 @@ mod tests {
             other => panic!("expected ResponseMacMismatch, got {other:?}"),
         }
         assert_eq!(state.counter(), 0);
+    }
+
+    /// Real NTAG 424 DNA hardware — `GetKeyVersion` for Key 0 at
+    /// `CmdCtr = 2` inside an AES session with Key 0 (all-zero factory
+    /// default). Derives session keys from the real `AuthenticateEV2First`
+    /// transcript, then verifies that the command MAC (sent to the PICC)
+    /// and response MAC (returned by the PICC) both match the wire data.
+    #[test]
+    fn get_key_version_hw_aes_key0_ctr2() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("A5F7C97067CC7C6B0C373F15028021EE");
+        let rnd_b_enc: [u8; 16] = hex_array("457B8458856FA7D114513E5A65A37405");
+        let mut rnd_b = rnd_b_enc;
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+
+        let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
+        let ti = hex_array::<4>("704B5F99");
+
+        // The PICC ran GetVersion (CmdCtr 0→1) and ReadSig (CmdCtr 1→2)
+        // before this GetKeyVersion, so CmdCtr = 2 at command time.
+        let mut state = Authenticated::new(suite, ti);
+        state.advance_counter(); // 0→1  (GetVersion)
+        state.advance_counter(); // 1→2  (ReadSig)
+
+        // Wire: 90 64 00 00 09 00 <MACt(8)> 00 → 00 <MACt(8)> 91 00
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("906400000900600A780E16380F5600"),
+            &hex_bytes("00D5FE9814F81EF504"),
+            0x91,
+            0x00,
+        )]);
+
+        let result = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_key_version(&mut transport, &mut ch, KeyNumber::Key0).await
+        })
+        .expect("GetKeyVersion should succeed");
+
+        assert_eq!(result, 0x00, "factory key version is 0x00");
+        assert_eq!(state.counter(), 3, "CmdCtr must advance to 3");
+        assert_eq!(transport.remaining(), 0);
     }
 }

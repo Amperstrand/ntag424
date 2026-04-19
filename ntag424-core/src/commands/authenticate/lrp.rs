@@ -283,6 +283,51 @@ mod tests {
         assert_eq!(suite.enc_ctr(), 1);
     }
 
+    /// Real NTAG 424 DNA hardware — `AuthenticateLRPFirst` with Key 0
+    /// (all-zero factory default). Verifies the Part 2 APDU bytes
+    /// (RndA || PCDResponse), the PICCResponse MAC check, TI extraction,
+    /// and `EncCtr = 1` post-auth against an actual on-wire transcript.
+    #[test]
+    fn part2_apdu_and_verify_hw_key0() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("D1D85ACB0A57299BFEED443D832DAD0C");
+        let rnd_b: [u8; 16] = hex_array("B40643A537D6B0ACD8E7816168CD85C1");
+
+        // PCDResponse from wire (second 16 bytes of Part 2 data).
+        let pcd_response: [u8; 16] = hex_array("23A13B80F26E481E4FAD3F3D75B14B7B");
+        let part2 = build_part2_apdu(&rnd_a, &pcd_response);
+        assert_eq!(
+            part2,
+            hex_array::<38>(
+                "90AF000020D1D85ACB0A57299BFEED443D832DAD0C23A13B80F26E481E4FAD3F3D75B14B7B00"
+            ),
+        );
+
+        // PICCData || PICCResponse from Part 2 response.
+        let picc_data: [u8; 16] = hex_array("1C8EE9654067C50B188BD7652CEA8ABF");
+        let picc_response: [u8; 16] = hex_array("4DCAF2776C80ABACEC992D6DF2D6E4EE");
+
+        let mut suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
+
+        // Verify our PCDResponse computation matches the wire data.
+        let mut mac_input = [0u8; 32];
+        mac_input[..16].copy_from_slice(&rnd_a);
+        mac_input[16..].copy_from_slice(&rnd_b);
+        assert_eq!(suite.mac_full(&mac_input), pcd_response);
+
+        let ti = verify_and_extract_ti::<NeverError>(
+            &mut suite,
+            &rnd_a,
+            &rnd_b,
+            &picc_data,
+            &picc_response,
+        )
+        .expect("valid hardware transcript should verify");
+
+        assert_eq!(ti, hex_array::<4>("9D96C13C"));
+        assert_eq!(suite.enc_ctr(), 1);
+    }
+
     /// A corrupted `PICCResponse` must be rejected.
     #[test]
     fn verify_detects_bad_picc_response() {

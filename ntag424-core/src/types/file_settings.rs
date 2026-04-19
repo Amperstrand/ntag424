@@ -1020,4 +1020,80 @@ mod tests {
         let sdm = fs.sdm.expect("sdm");
         assert_eq!(sdm.offsets.read_ctr_limit, None);
     }
+
+    // -- Hardware-validated factory file settings --------------------------------
+    //
+    // The following three tests decode the `GetFileSettings` (plain) response
+    // for the three delivery-state files on an NTAG 424 DNA tag. Byte
+    // sequences captured from real hardware; both AES-mode and LRP-mode tags
+    // return identical payloads.
+
+    /// Factory `GetFileSettings` for the Capability Container file (FileNo 01h).
+    /// 32-byte StandardData, CommMode.Plain, ReadAccess=Free, others=Key0.
+    #[test]
+    fn decode_factory_file_settings_cc() {
+        let payload = [0x00, 0x00, 0x00, 0xE0, 0x20, 0x00, 0x00];
+        let fs = FileSettings::decode(&payload).expect("decode");
+        assert_eq!(fs.file_type, FileType::StandardData);
+        assert_eq!(fs.comm_mode, CommMode::Plain);
+        assert_eq!(fs.file_size, 32);
+        assert_eq!(fs.access_rights.read, AccessCondition::Free);
+        assert_eq!(
+            fs.access_rights.write,
+            AccessCondition::Key(KeyNumber::Key0)
+        );
+        assert_eq!(
+            fs.access_rights.read_write,
+            AccessCondition::Key(KeyNumber::Key0)
+        );
+        assert_eq!(
+            fs.access_rights.change,
+            AccessCondition::Key(KeyNumber::Key0)
+        );
+        assert!(fs.sdm.is_none());
+    }
+
+    /// Factory `GetFileSettings` for the NDEF file (FileNo 02h).
+    /// 256-byte StandardData, CommMode.Plain, all access free except Change=Key0.
+    #[test]
+    fn decode_factory_file_settings_ndef() {
+        let payload = [0x00, 0x00, 0xE0, 0xEE, 0x00, 0x01, 0x00];
+        let fs = FileSettings::decode(&payload).expect("decode");
+        assert_eq!(fs.file_type, FileType::StandardData);
+        assert_eq!(fs.comm_mode, CommMode::Plain);
+        assert_eq!(fs.file_size, 256);
+        assert_eq!(fs.access_rights.read, AccessCondition::Free);
+        assert_eq!(fs.access_rights.write, AccessCondition::Free);
+        assert_eq!(fs.access_rights.read_write, AccessCondition::Free);
+        assert_eq!(
+            fs.access_rights.change,
+            AccessCondition::Key(KeyNumber::Key0)
+        );
+        assert!(fs.sdm.is_none());
+    }
+
+    /// Factory `GetFileSettings` for the Proprietary file (FileNo 03h).
+    /// 128-byte StandardData, CommMode.Full, Read=Key2, Write=Key3, RW=Key3, Change=Key0.
+    #[test]
+    fn decode_factory_file_settings_proprietary() {
+        let payload = [0x00, 0x03, 0x30, 0x23, 0x80, 0x00, 0x00];
+        let fs = FileSettings::decode(&payload).expect("decode");
+        assert_eq!(fs.file_type, FileType::StandardData);
+        assert_eq!(fs.comm_mode, CommMode::Full);
+        assert_eq!(fs.file_size, 128);
+        assert_eq!(fs.access_rights.read, AccessCondition::Key(KeyNumber::Key2));
+        assert_eq!(
+            fs.access_rights.write,
+            AccessCondition::Key(KeyNumber::Key3)
+        );
+        assert_eq!(
+            fs.access_rights.read_write,
+            AccessCondition::Key(KeyNumber::Key3)
+        );
+        assert_eq!(
+            fs.access_rights.change,
+            AccessCondition::Key(KeyNumber::Key0)
+        );
+        assert!(fs.sdm.is_none());
+    }
 }

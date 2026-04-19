@@ -79,6 +79,7 @@ mod tests {
     use crate::testing::{Exchange, TestTransport, block_on};
     use crate::types::ResponseStatus;
 
+    /// APDU and `90 00` response validated on real NTAG 424 DNA hardware.
     #[test]
     fn select_ndef_application_issues_spec_apdu() {
         let mut transport = TestTransport::new([Exchange::new(

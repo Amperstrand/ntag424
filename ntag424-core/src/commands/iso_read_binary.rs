@@ -83,9 +83,16 @@ mod tests {
     use crate::types::ResponseStatus;
 
     /// No short FileID, offset 0, 32-byte read → `00 B0 00 00 20`.
+    /// Payload is the factory CC file content from a real NTAG 424 DNA tag.
     #[test]
     fn reads_current_file_with_explicit_length() {
-        let payload = [0x11u8; 32];
+        #[rustfmt::skip]
+        let payload: [u8; 32] = [
+            0x00, 0x17, 0x20, 0x01, 0x00, 0x00, 0xFF, 0x04,
+            0x06, 0xE1, 0x04, 0x01, 0x00, 0x00, 0x00, 0x05,
+            0x06, 0xE1, 0x05, 0x00, 0x80, 0x82, 0x83, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         let mut transport = TestTransport::new([Exchange::new(
             &[0x00, 0xB0, 0x00, 0x00, 0x20],
             &payload,
@@ -137,9 +144,10 @@ mod tests {
 
     /// Buffers larger than 256 bytes are clamped to the short-Le cap; the
     /// extra space past byte 256 is left untouched.
+    /// Real NTAG 424 DNA NDEF file (factory state) returns 256 zero bytes.
     #[test]
     fn clamps_oversized_buffer_to_256() {
-        let payload = [0x77u8; 256];
+        let payload = [0x00u8; 256];
         let mut transport = TestTransport::new([Exchange::new(
             &[0x00, 0xB0, 0x00, 0x00, 0x00],
             &payload,
@@ -147,11 +155,11 @@ mod tests {
             0x00,
         )]);
 
-        let mut buf = [0x00u8; 300];
+        let mut buf = [0xFFu8; 300];
         let n = block_on(iso_read_binary(&mut transport, None, 0, &mut buf)).expect("read ok");
         assert_eq!(n, 256);
         assert_eq!(&buf[..256], &payload);
-        assert!(buf[256..].iter().all(|&b| b == 0x00));
+        assert!(buf[256..].iter().all(|&b| b == 0xFF));
     }
 
     /// PICC returning `6A 82` (file/application not found, Table 89)
@@ -187,6 +195,26 @@ mod tests {
         match block_on(iso_read_binary(&mut transport, None, 0, &mut buf)) {
             Err(SessionError::UnexpectedLength { got: 5 }) => (),
             other => panic!("expected UnexpectedLength {{ got: 5 }}, got {other:?}"),
+        }
+    }
+
+    /// PICC returning `69 82` (security status not satisfied, Table 89)
+    /// when reading a key-protected file without authentication.
+    /// Confirmed on real NTAG 424 DNA hardware: Proprietary file (E105h)
+    /// with ReadAccess=Key2 returns `69 82` for an unauthenticated read.
+    #[test]
+    fn security_status_not_satisfied_surfaces_as_error() {
+        let mut transport = TestTransport::new([Exchange::new(
+            &[0x00, 0xB0, 0x00, 0x00, 0x10],
+            &[],
+            0x69,
+            0x82,
+        )]);
+
+        let mut buf = [0u8; 16];
+        match block_on(iso_read_binary(&mut transport, None, 0, &mut buf)) {
+            Err(SessionError::ErrorResponse(ResponseStatus::SecurityStatusNotSatisfied)) => (),
+            other => panic!("expected SecurityStatusNotSatisfied, got {other:?}"),
         }
     }
 }

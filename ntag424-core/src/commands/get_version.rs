@@ -136,6 +136,9 @@ mod tests {
     /// from a real NTAG 424 DNA tag. The three response parts contain hardware
     /// and software version info (parts 1–2, 7 B each) and production data
     /// (part 3, 14 B including the 7-byte UID). No trailing MAC is present.
+    ///
+    /// APDUs and responses validated on real NTAG 424 DNA hardware — both AES
+    /// and LRP tags return identical part1/part2; part3 varies only in the UID.
     #[test]
     fn get_version_plain_roundtrip() {
         let part1 = [0x04u8, 0x04, 0x08, 0x30, 0x00, 0x11, 0x05];

@@ -997,8 +997,198 @@ mod tests {
         ))
         .expect("non_first handshake should succeed");
 
-        assert_eq!(session.ti(), &hex_array::<4>("9D00C4DF"), "TI must be preserved");
+        assert_eq!(
+            session.ti(),
+            &hex_array::<4>("9D00C4DF"),
+            "TI must be preserved"
+        );
         assert_eq!(session.cmd_counter(), 0, "CmdCtr must be preserved");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Real NTAG 424 DNA hardware — full `AuthenticateEV2First` handshake
+    /// with Key 0 (all-zero factory default). Drives `Session::authenticate_aes`
+    /// against a mock PICC replaying actual on-wire APDU bytes. Verifies the
+    /// same TI the real PICC returned.
+    #[test]
+    fn authenticate_aes_hw_key0_full_handshake() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("A5F7C97067CC7C6B0C373F15028021EE");
+
+        let mut transport = TestTransport::new([
+            // ISOSelectFile(NDEF app).
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            // Part 1: 90 71 00 00 02 00 00 00  →  E(K0,RndB) || 91 AF
+            Exchange::new(
+                &hex_bytes("9071000002000000"),
+                &hex_bytes("457B8458856FA7D114513E5A65A37405"),
+                0x91,
+                0xAF,
+            ),
+            // Part 2: 90 AF 00 00 20 <ciphertext(32)> 00  →  <response(32)> 91 00
+            Exchange::new(
+                &hex_bytes(
+                    "90AF000020BD8315EF8B1AFF79FB51287D1E93DCE49EE4EC2EEFD5285A499B9EDC5921992200",
+                ),
+                &hex_bytes("94A3D20D1035D7FF691B611360578F7765EC56EC456739A4533FDBA50F9CDFBB"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a,
+        ))
+        .expect("handshake should succeed");
+
+        assert_eq!(session.ti(), &hex_array::<4>("704B5F99"));
+        assert_eq!(session.cmd_counter(), 0);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Real NTAG 424 DNA hardware — full `AuthenticateLRPFirst` handshake
+    /// with Key 0 (all-zero factory default). Drives `Session::authenticate_lrp`
+    /// against a mock PICC replaying actual on-wire APDU bytes. Verifies the
+    /// same TI the real PICC returned.
+    #[test]
+    fn authenticate_lrp_hw_key0_full_handshake() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("D1D85ACB0A57299BFEED443D832DAD0C");
+
+        let mut transport = TestTransport::new([
+            // ISOSelectFile(NDEF app).
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            // Part 1: 90 71 00 00 08 00 06 02 00 00 00 00 00 00
+            //       → AuthMode=01 || RndB(16) || 91 AF
+            Exchange::new(
+                &hex_bytes("9071000008000602000000000000"),
+                &hex_bytes("01B40643A537D6B0ACD8E7816168CD85C1"),
+                0x91,
+                0xAF,
+            ),
+            // Part 2: 90 AF 00 00 20 RndA(16) || PCDResponse(16) || 00
+            //       → PICCData(16) || PICCResponse(16) || 91 00
+            Exchange::new(
+                &hex_bytes(
+                    "90AF000020D1D85ACB0A57299BFEED443D832DAD0C23A13B80F26E481E4FAD3F3D75B14B7B00",
+                ),
+                &hex_bytes("1C8EE9654067C50B188BD7652CEA8ABF4DCAF2776C80ABACEC992D6DF2D6E4EE"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a,
+        ))
+        .expect("handshake should succeed");
+
+        assert_eq!(session.ti(), &hex_array::<4>("9D96C13C"));
+        assert_eq!(session.cmd_counter(), 0);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Real NTAG 424 DNA hardware — full `AuthenticateLRPFirst` followed by
+    /// `AuthenticateLRPNonFirst` with Key 0. Verifies TI and CmdCtr
+    /// preservation across re-authentication.
+    ///
+    /// The first session runs GetVersion + ReadSig + 5×GetKeyVersion +
+    /// GetCardUID + GetFileSettings + ReadData = 10 commands, advancing
+    /// CmdCtr to 10. The NonFirst re-auth preserves TI and CmdCtr = 10.
+    #[test]
+    fn authenticate_lrp_non_first_hw_key0_full_handshake() {
+        let key = [0u8; 16];
+        let rnd_a_first: [u8; 16] = hex_array("D1D85ACB0A57299BFEED443D832DAD0C");
+        let rnd_a_non_first: [u8; 16] = hex_array("24F37E0C719E5CA42A3CBFAC3F7C0106");
+
+        let mut transport = TestTransport::new([
+            // --- AuthenticateLRPFirst Key0 ---
+            Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+            Exchange::new(
+                &hex_bytes("9071000008000602000000000000"),
+                &hex_bytes("01B40643A537D6B0ACD8E7816168CD85C1"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes(
+                    "90AF000020D1D85ACB0A57299BFEED443D832DAD0C23A13B80F26E481E4FAD3F3D75B14B7B00",
+                ),
+                &hex_bytes("1C8EE9654067C50B188BD7652CEA8ABF4DCAF2776C80ABACEC992D6DF2D6E4EE"),
+                0x91,
+                0x00,
+            ),
+            // --- AuthenticateLRPNonFirst Key0 ---
+            // Part 1: 90 77 00 00 01 00 00  →  AuthMode=01 || RndB(16) || 91 AF
+            Exchange::new(
+                &hex_bytes("90770000010000"),
+                &hex_bytes("016819838A1BFA254A00E1F43DEC0BC0C7"),
+                0x91,
+                0xAF,
+            ),
+            // Part 2: 90 AF 00 00 20 RndA(16) || PCDResponse(16) || 00
+            //       → PICCResponse(16) || 91 00
+            Exchange::new(
+                &hex_bytes(
+                    "90AF00002024F37E0C719E5CA42A3CBFAC3F7C0106FB57806564FCD46D58685C08419825E200",
+                ),
+                &hex_bytes("3C157B2F2A8CC0C9431E64CCF71DD8B4"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        // First auth.
+        let session = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a_first,
+        ))
+        .expect("first handshake should succeed");
+        assert_eq!(session.ti(), &hex_array::<4>("9D96C13C"));
+        assert_eq!(session.cmd_counter(), 0);
+
+        // Simulate the 10 commands that ran between First and NonFirst by
+        // advancing the counter via the crate-visible state accessor.
+        let session = {
+            let Session {
+                mut state,
+                ndef_selected,
+                ef_selected,
+            } = session;
+            for _ in 0..10 {
+                state.advance_counter();
+            }
+            Session {
+                state,
+                ndef_selected,
+                ef_selected,
+            }
+        };
+        assert_eq!(session.cmd_counter(), 10);
+
+        // NonFirst re-auth: TI and CmdCtr must survive.
+        let session = block_on(session.authenticate_lrp_non_first(
+            &mut transport,
+            KeyNumber::Key0,
+            &key,
+            rnd_a_non_first,
+        ))
+        .expect("non_first handshake should succeed");
+
+        assert_eq!(
+            session.ti(),
+            &hex_array::<4>("9D96C13C"),
+            "TI must be preserved"
+        );
+        assert_eq!(session.cmd_counter(), 10, "CmdCtr must be preserved");
         assert_eq!(transport.remaining(), 0);
     }
 }

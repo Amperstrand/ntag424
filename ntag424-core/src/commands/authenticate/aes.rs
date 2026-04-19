@@ -306,6 +306,60 @@ mod tests {
         assert_eq!(mac_key, hex_array("5529860B2FC5FB6154B7F28361D30BF9"));
     }
 
+    /// Real NTAG 424 DNA hardware — `AuthenticateEV2First` with Key 0
+    /// (all-zero factory default). Verifies the Part 2 APDU bytes and
+    /// TI extraction against an actual on-wire transcript.
+    #[test]
+    fn part2_apdu_and_finish_auth_hw_key0() {
+        let key = [0u8; 16];
+        let rnd_a: [u8; 16] = hex_array("A5F7C97067CC7C6B0C373F15028021EE");
+        let rnd_b_enc: [u8; 16] = hex_array("457B8458856FA7D114513E5A65A37405");
+        let mut rnd_b = rnd_b_enc;
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+
+        let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
+        assert_eq!(
+            part2,
+            hex_array::<38>(
+                "90AF000020BD8315EF8B1AFF79FB51287D1E93DCE49EE4EC2EEFD5285A499B9EDC5921992200"
+            ),
+        );
+
+        let resp_enc: [u8; 32] =
+            hex_array("94A3D20D1035D7FF691B611360578F7765EC56EC456739A4533FDBA50F9CDFBB");
+        let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
+            Ok(v) => v,
+            Err(e) => panic!("finish_auth rejected a valid hardware transcript: {e:?}"),
+        };
+        assert_eq!(ti, hex_array::<4>("704B5F99"));
+    }
+
+    /// Real NTAG 424 DNA hardware — `AuthenticateEV2NonFirst` with Key 0
+    /// (all-zero factory default). Verifies the Part 2 APDU bytes,
+    /// RndA' verification, and derived session keys against an actual
+    /// on-wire transcript.
+    #[test]
+    fn non_first_finish_auth_hw_key0() {
+        let key = [0u8; 16];
+        let rnd_b_enc: [u8; 16] = hex_array("01E9CB96C9EE3873B4135A6E08DED325");
+        let mut rnd_b = rnd_b_enc;
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+
+        let rnd_a: [u8; 16] = hex_array("1AC618A15F5CB19BF10E5F649DC98764");
+
+        let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
+        assert_eq!(
+            part2,
+            hex_array::<38>(
+                "90AF00002075577A7FFEA719AE781951B1F9298FC947FA5A0AE2BC99CCF11A89C88D27709B00"
+            ),
+        );
+
+        let resp_enc: [u8; 16] = hex_array("2E54DF5D25A366C03DF7A07F4B85301C");
+        let _suite = finish_auth_non_first::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc)
+            .expect("valid hardware transcript should verify");
+    }
+
     /// A corrupted 16-byte NonFirst Part 2 response must be rejected.
     #[test]
     fn non_first_finish_auth_detects_wrong_rnd_a() {

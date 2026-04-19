@@ -304,6 +304,7 @@ mod tests {
     }
 
     /// PERMISSION_DENIED (`91 9D`, Table 80) surfaces as `ErrorResponse`.
+    /// Status code confirmed on real NTAG 424 DNA hardware.
     #[test]
     fn read_data_plain_surfaces_permission_denied() {
         let expected = hex_bytes("90AD0000070200000010000000");

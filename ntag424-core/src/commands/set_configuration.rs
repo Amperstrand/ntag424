@@ -160,8 +160,7 @@ mod tests {
             hex_bytes("905C0000190541B2BA963075730426D0858D2AA6C4982F579E77FAB49F8300");
         // R-APDU: 9100 with no data bytes (AN12321 §5 Table 3, confirmed on hardware).
 
-        let mut transport =
-            TestTransport::new([Exchange::new(&expected_apdu, &[], 0x91, 0x00)]);
+        let mut transport = TestTransport::new([Exchange::new(&expected_apdu, &[], 0x91, 0x00)]);
 
         let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
         let configuration = Configuration::new().with_lrp_enabled();
