@@ -48,9 +48,10 @@ pub(crate) async fn get_file_counters<T: Transport, S: SessionSuite>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::{AesSuite, Direction};
+    use crate::crypto::suite::{AesSuite, Direction, LrpSuite, aes_cbc_decrypt};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array};
+    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use crate::types::ResponseStatus;
     use alloc::vec::Vec;
 
     /// Round-trip `GetFileCounters` for file 0x02 (NDEF). Session keys
@@ -291,5 +292,130 @@ mod tests {
         .expect("GetFileCounters must succeed");
 
         assert_eq!(ctr, sdm_read_ctr);
+    }
+
+    fn aes_key0_suite_085bc941() -> (AesSuite, [u8; 4]) {
+        let key = [0u8; 16];
+        let rnd_a = hex_array::<16>("C4028B41E6F497099C7087768E78A191");
+        let mut rnd_b = hex_array::<16>("7858A0B9DBC468F0FF1B2F773D6DF9FC");
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        (
+            AesSuite::derive(&key, &rnd_a, &rnd_b),
+            hex_array("085BC941"),
+        )
+    }
+
+    fn lrp_key0_suite_bbe12900() -> (LrpSuite, [u8; 4]) {
+        let key = [0u8; 16];
+        let rnd_a = hex_array::<16>("0272F1390C4B8EC7D3E43308D4B41EC3");
+        // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+        let rnd_b = hex_array::<16>("57E5BF7AF415C4C8B330442EC1F265E9");
+        // enc_ctr=1: AuthenticateLRPFirst decrypts one block during the handshake.
+        (
+            LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(1),
+            hex_array("BBE12900"),
+        )
+    }
+
+    /// Replay five consecutive hardware-captured `GetFileCounters` (AES session).
+    ///
+    /// TI=085BC941, CmdCtr = 9 at first call (after ReadDataPlain). File 0x02
+    /// (NDEF) has `SDMCtrRet` configured, so responses are Full-mode (16B
+    /// ciphertext + 8B MAC). All five reads return SDMReadCtr = 12 (0x00000C),
+    /// reflecting the tag's NDEF-file SUN-URL read count.
+    #[test]
+    fn get_file_counters_hw_aes_ndef_five_reads() {
+        let (suite, ti) = aes_key0_suite_085bc941();
+        let mut state = Authenticated::new(suite, ti);
+        for _ in 0..9 {
+            state.advance_counter();
+        }
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex_bytes("90F600000902FE69E108B5FEF6B300"),
+                &hex_bytes("AEB9CDD5ABC5E319009CC0754F771AD9723D70B3DF0BBE40"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("90F600000902A2DCC158917BED2700"),
+                &hex_bytes("F94D745DA23CAD20D0F93C583BAF6890F550E64513948403"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("90F600000902B115DD7321CDC6F300"),
+                &hex_bytes("6B865F92661A9913AB747C723CCE61F1F48443DC35E40083"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("90F600000902AE7455ACE3AB8EED00"),
+                &hex_bytes("DBE717243C7DFE23528C138250B0F473182196E519438B3B"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("90F600000902A8E2C7D15D647D9C00"),
+                &hex_bytes("9DB5CF3A537A80B26115EF9516208F740968AA238D787B33"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let ctrs: alloc::vec::Vec<u32> = block_on(async {
+            let mut out = alloc::vec::Vec::new();
+            for _ in 0..5 {
+                let mut ch = SecureChannel::new(&mut state);
+                out.push(
+                    get_file_counters(&mut transport, &mut ch, 0x02)
+                        .await
+                        .expect("must succeed"),
+                );
+            }
+            out
+        });
+
+        assert_eq!(
+            ctrs,
+            alloc::vec![12u32; 5],
+            "SDMReadCtr must be 12 in all five reads"
+        );
+        assert_eq!(state.counter(), 14);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured `GetFileCounters` that returns PermissionDenied (LRP session).
+    ///
+    /// TI=BBE12900, CmdCtr = 10 at call time. The LRP tag had no SDM
+    /// configured, so the PICC returns `91 9D` (PermissionDenied). CmdCtr
+    /// must not advance on error.
+    #[test]
+    fn get_file_counters_hw_lrp_permission_denied() {
+        let (suite, ti) = lrp_key0_suite_bbe12900();
+        let mut state = Authenticated::new(suite, ti);
+        for _ in 0..10 {
+            state.advance_counter();
+        }
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90F6000009028367BD609AA9550500"),
+            &[],
+            0x91,
+            0x9D,
+        )]);
+
+        let result = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_file_counters(&mut transport, &mut ch, 0x02).await
+        });
+
+        match result {
+            Err(SessionError::ErrorResponse(ResponseStatus::PermissionDenied)) => (),
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+        assert_eq!(state.counter(), 10, "CmdCtr must not advance on error");
+        assert_eq!(transport.remaining(), 0);
     }
 }

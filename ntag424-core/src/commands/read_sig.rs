@@ -83,7 +83,10 @@ mod tests {
     use super::*;
     use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array};
+    use crate::testing::{
+        Exchange, TestTransport, aes_key0_suite_085bc941, block_on, hex_array, hex_bytes,
+        lrp_key0_suite_bbe12900,
+    };
     use alloc::vec::Vec;
 
     /// Build an authenticated `Read_Sig` ciphertext.
@@ -215,5 +218,111 @@ mod tests {
             other => panic!("expected ResponseMacMismatch, got {other:?}"),
         }
         assert_eq!(state.counter(), 0);
+    }
+
+    /// Replay a hardware-captured `ReadSig` in plain mode (AES tag).
+    ///
+    /// No session state required — CommMode.Plain returns the 56-byte ECC
+    /// signature directly. SW2 = 0x90 is an NTAG-specific status code for
+    /// this command. UID = 04A9707A0B1090.
+    #[test]
+    fn read_sig_plain_hw_aes() {
+        let sig = hex_bytes(
+            "03F0A17889E3063D2D01CD8750734601BC031C26812705A1BD3B75361604B19B762DC285DCE303A5B6DE5F2814F0449BA64AB445A7AEC4CF",
+        );
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("903C0000010000"),
+            &sig,
+            0x91,
+            0x90,
+        )]);
+
+        let got = block_on(read_sig(&mut transport)).expect("hw plain Read_Sig must succeed");
+
+        assert_eq!(got.len(), 56);
+        assert_eq!(got.as_slice(), sig.as_slice());
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured `ReadSig` in plain mode (LRP tag).
+    ///
+    /// Plain mode, SW2 = 0x90. UID = 04407A7A0B1090.
+    #[test]
+    fn read_sig_plain_hw_lrp() {
+        let sig = hex_bytes(
+            "5F019173DA747943318455D4DD9413858C8D335D4B488DC52A606386115C5C796CE79E95A499C430B6DD5D1CD41BF23F258C678070DBD42C",
+        );
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("903C0000010000"),
+            &sig,
+            0x91,
+            0x90,
+        )]);
+
+        let got = block_on(read_sig(&mut transport)).expect("hw plain Read_Sig must succeed");
+
+        assert_eq!(got.len(), 56);
+        assert_eq!(got.as_slice(), sig.as_slice());
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured authenticated `ReadSig` (AES session).
+    ///
+    /// TI=085BC941, CmdCtr = 1 at call time (after GetVersion). SW2 = 0x90
+    /// (NTAG-specific status for this command).
+    #[test]
+    fn read_sig_mac_hw_aes() {
+        let (suite, ti) = aes_key0_suite_085bc941();
+        let mut state = Authenticated::new(suite, ti);
+        state.advance_counter(); // 0→1 (GetVersion)
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("903C0000090032E6A647B984427F00"),
+            &hex_bytes(
+                "C2907EA2100DA5336DDDF17EE7AD70A240915DCD38E6319A663445D69E14825AF42F6AC725487F163ECC696B504F90390DF67BC5D8C0DBFCE2158FFB5A2A427AE1E8BDA4D293F528",
+            ),
+            0x91,
+            0x90,
+        )]);
+
+        let sig = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_sig_mac(&mut transport, &mut ch).await
+        })
+        .expect("hw AES Read_Sig must succeed");
+
+        assert_eq!(sig.len(), 56);
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured authenticated `ReadSig` (LRP session).
+    ///
+    /// TI=BBE12900, CmdCtr = 1 at call time (after GetVersion). SW2 = 0x90
+    /// (NTAG-specific status for this command).
+    #[test]
+    fn read_sig_mac_hw_lrp() {
+        let (suite, ti) = lrp_key0_suite_bbe12900();
+        let mut state = Authenticated::new(suite, ti);
+        state.advance_counter(); // 0→1 (GetVersion)
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("903C000009000C525883EFF7777400"),
+            &hex_bytes(
+                "E6DD25572D69A8D89C705AAC541BAD3D6DC5E50FCC8BE583E6487A07AB283F0A8CFD0A5097ACE24DB86C80C6D41A93C3FE1F1144D8E5D1873E1D50F10362E3F63766345847D34250",
+            ),
+            0x91,
+            0x90,
+        )]);
+
+        let sig = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_sig_mac(&mut transport, &mut ch).await
+        })
+        .expect("hw LRP Read_Sig must succeed");
+
+        assert_eq!(sig.len(), 56);
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
     }
 }

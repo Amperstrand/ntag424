@@ -118,7 +118,7 @@ fn extract_part3<E: Error + core::fmt::Debug>(data: &[u8]) -> Result<[u8; 14], S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::AesSuite;
+    use crate::crypto::suite::{AesSuite, LrpSuite, aes_cbc_decrypt};
     use crate::session::Authenticated;
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
@@ -262,5 +262,110 @@ mod tests {
             other => panic!("expected ResponseMacMismatch, got {other:?}"),
         }
         assert_eq!(state.counter(), 0);
+    }
+
+    fn aes_key0_suite_085bc941() -> (AesSuite, [u8; 4]) {
+        let key = [0u8; 16];
+        let rnd_a = hex_array::<16>("C4028B41E6F497099C7087768E78A191");
+        let mut rnd_b = hex_array::<16>("7858A0B9DBC468F0FF1B2F773D6DF9FC");
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        (
+            AesSuite::derive(&key, &rnd_a, &rnd_b),
+            hex_array("085BC941"),
+        )
+    }
+
+    fn lrp_key0_suite_bbe12900() -> (LrpSuite, [u8; 4]) {
+        let key = [0u8; 16];
+        let rnd_a = hex_array::<16>("0272F1390C4B8EC7D3E43308D4B41EC3");
+        // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+        let rnd_b = hex_array::<16>("57E5BF7AF415C4C8B330442EC1F265E9");
+        // enc_ctr=1: AuthenticateLRPFirst decrypts one block during the handshake.
+        (
+            LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(1),
+            hex_array("BBE12900"),
+        )
+    }
+
+    /// Replay a hardware-captured `GetVersion` in MAC mode (AES session).
+    ///
+    /// From the AES hw capture (TI=085BC941): CmdCtr = 0 at call time
+    /// (first command after Key0 authentication). UID = 04A9707A0B1090.
+    #[test]
+    fn get_version_mac_hw_aes() {
+        let (suite, ti) = aes_key0_suite_085bc941();
+        let mut state = Authenticated::new(suite, ti);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex_bytes("90600000087EB6309891B11B2400"),
+                &hex_bytes("04040830001105"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes("90AF000000"),
+                &hex_bytes("04040201021105"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes("90AF000000"),
+                &hex_bytes("04A9707A0B1090CF5D9045104621EB9482FFE8BB7761"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let version = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_version_mac(&mut transport, &mut ch).await
+        })
+        .expect("hw AES GetVersion must succeed");
+
+        assert_eq!(*version.uid(), [0x04, 0xA9, 0x70, 0x7A, 0x0B, 0x10, 0x90]);
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured `GetVersion` in MAC mode (LRP session).
+    ///
+    /// From the LRP hw capture (TI=BBE12900): CmdCtr = 0 at call time
+    /// (first command after Key0 authentication). UID = 04407A7A0B1090.
+    #[test]
+    fn get_version_mac_hw_lrp() {
+        let (suite, ti) = lrp_key0_suite_bbe12900();
+        let mut state = Authenticated::new(suite, ti);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex_bytes("906000000855C76087DF2A8F9000"),
+                &hex_bytes("04040830001105"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes("90AF000000"),
+                &hex_bytes("04040201021105"),
+                0x91,
+                0xAF,
+            ),
+            Exchange::new(
+                &hex_bytes("90AF000000"),
+                &hex_bytes("04407A7A0B1090CF5D90451046210C084938BB57C2CA"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let version = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_version_mac(&mut transport, &mut ch).await
+        })
+        .expect("hw LRP GetVersion must succeed");
+
+        assert_eq!(*version.uid(), [0x04, 0x40, 0x7A, 0x7A, 0x0B, 0x10, 0x90]);
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
     }
 }

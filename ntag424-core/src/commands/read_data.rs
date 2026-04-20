@@ -256,7 +256,10 @@ mod tests {
     use super::*;
     use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use crate::testing::{
+        Exchange, TestTransport, aes_key3_mac_state_hw, aes_key3_state_hw, block_on, hex_array,
+        hex_bytes, lrp_key3_mac_state_hw, lrp_key3_state_hw,
+    };
     use alloc::vec::Vec;
 
     fn authenticated_aes(
@@ -562,5 +565,234 @@ mod tests {
             other => panic!("expected UnexpectedLength, got {other:?}"),
         }
         assert_eq!(state.counter(), 1, "counter must track PICC state");
+    }
+
+    /// Replay a hardware-captured plain `ReadData` for the NDEF file (AES session).
+    ///
+    /// Plain-mode reads bypass secure channel framing, so no session state is
+    /// needed. The 256-byte NDEF payload is returned verbatim.
+    #[test]
+    fn read_data_plain_hw_aes() {
+        let payload = hex_bytes(
+            "0047D1014355046578616D706C652E636F6D2F3F703D303030303030303030303030303030303030303030303030303030303030303026633D30303030303030303030303030303030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        );
+        assert_eq!(payload.len(), 256);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD0000070200000000000000"),
+            &payload,
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 256];
+        let n =
+            block_on(read_data_plain(&mut transport, 0x02, 0, 0, &mut buf)).expect("must succeed");
+
+        assert_eq!(n, 256);
+        assert_eq!(&buf[..4], &[0x00, 0x47, 0xD1, 0x01]);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured plain `ReadData` for the NDEF file (LRP session).
+    ///
+    /// Plain-mode reads bypass secure channel framing; no session state needed.
+    /// The 256-byte proprietary payload starts with `DEADBEEF`.
+    #[test]
+    fn read_data_plain_hw_lrp() {
+        let payload = hex_bytes(
+            "DEADBEEF000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        );
+        assert_eq!(payload.len(), 256);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD0000070200000000000000"),
+            &payload,
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 256];
+        let n =
+            block_on(read_data_plain(&mut transport, 0x02, 0, 0, &mut buf)).expect("must succeed");
+
+        assert_eq!(n, 256);
+        assert_eq!(&buf[..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `ReadData` (AES Key3 session).
+    ///
+    /// TI=085BC941, CmdCtr = 14 (Key3 nonfirst auth preserved the counter
+    /// from the Key0 session). Reads 128 bytes from the proprietary file 0x03.
+    /// Plaintext starts with `DEADBEEF01020304` followed by zero bytes.
+    #[test]
+    fn read_data_full_hw_aes() {
+        let mut state = aes_key3_state_hw(14);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F03000000000000BBF64ADCF21BC5B900"),
+            &hex_bytes(
+                "C294BFF08106E2E92B7CCEE58C68C4D069E4B11F2922619CD15D61FB4169BADC9C0E7FFF3FFE4B3520B903157EED92FEFA517DC5E3EAAFDE94191DC9536DA8B5DBAEB57AC127D94FD2504FB137C3275B3EACDEC378708A1FC607636AC29F88CC6E25361BDD3F37733D0215888F91F8DC0C4298476469025C299B0E749A170B3894A0176AE285EEEABE522C834BF41C3598EFC29F5E3ABF67",
+            ),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 128];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
+        })
+        .expect("hw AES full read must succeed");
+
+        assert_eq!(n, 128);
+        assert_eq!(&buf[..8], &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(&buf[8..], &[0u8; 120]);
+        assert_eq!(state.counter(), 15);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `ReadData` 8-byte readback (AES Key3 session).
+    ///
+    /// TI=085BC941, CmdCtr = 16 (after the write at counter 15). Verifies the
+    /// written `DEADBEEF01020304` payload survived the write.
+    #[test]
+    fn read_data_full_readback_hw_aes() {
+        let mut state = aes_key3_state_hw(16);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F030000000800008705F20A9AF5957800"),
+            &hex_bytes("71DAFA7A0012584D37F8C9F3F656738FF345494D0F114867"),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 8];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 8, &mut buf).await
+        })
+        .expect("hw AES readback must succeed");
+
+        assert_eq!(n, 8);
+        assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(state.counter(), 17);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `ReadData` (LRP Key3 session).
+    ///
+    /// TI=AFF75859, CmdCtr = 0 (fresh Key3 session). Reads 128 bytes from
+    /// proprietary file 0x03. Plaintext starts with `DEADBEEF01020304`.
+    #[test]
+    fn read_data_full_hw_lrp() {
+        let mut state = lrp_key3_state_hw(0, 0);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F030000000000004346E1444E7A4B2600"),
+            &hex_bytes(
+                "C0D13D2E78879C91D6E52DD735DE47D3E9A5BD06D1D6B43C5992CB65FA9257AB430EC34DB3F380BA58026762AAE1C38ABED3C6AF50325C18D61F67342B878AF5583F8EFD4293B30BB911BD542AFC92E0D45FF26893282421D5D660EBE8C61C87D4A2D9EBEDE206D5D93ECCD9687E38CA20CE98AAC748B0927E786134815B7C4984FF3A86083FF52898176CE33AD81DFED2D76386A7B2F9B1",
+            ),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 128];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
+        })
+        .expect("hw LRP full read must succeed");
+
+        assert_eq!(n, 128);
+        assert_eq!(&buf[..8], &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(&buf[8..], &[0u8; 120]);
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `ReadData` 8-byte readback (LRP Key3 session).
+    ///
+    /// TI=AFF75859, CmdCtr = 2 (after the write at counter 1). Verifies the
+    /// written `DEADBEEF01020304` payload survived the write.
+    #[test]
+    fn read_data_full_readback_hw_lrp() {
+        let mut state = lrp_key3_state_hw(2, 10);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F030000000800002086BC2A3CBAB30000"),
+            &hex_bytes("A8F86E5BE27A1B0BA7D0CEF39092D585F38F94FB3F8275C2"),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 8];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 8, &mut buf).await
+        })
+        .expect("hw LRP readback must succeed");
+
+        assert_eq!(n, 8);
+        assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(state.counter(), 3);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured MAC-mode `ReadData` 8-byte readback (AES Key3 session).
+    ///
+    /// TI=59237C63, CmdCtr = 1 (after the MAC write at counter 0). Verifies the
+    /// written `DEADBEEF01020304` payload survived the write.
+    #[test]
+    fn read_data_mac_hw_aes() {
+        let mut state = aes_key3_mac_state_hw(1);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F03000000080000D92404817565D2A900"),
+            &hex_bytes("DEADBEEF010203042F36F240E65DB6CF"),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 8];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x03, 0, 8, &mut buf).await
+        })
+        .expect("hw AES MAC read must succeed");
+
+        assert_eq!(n, 8);
+        assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured MAC-mode `ReadData` 8-byte readback (LRP Key3 session).
+    ///
+    /// TI=4F4B4865, CmdCtr = 1 (after the MAC write at counter 0). Verifies the
+    /// written `DEADBEEF01020304` payload survived the write.
+    #[test]
+    fn read_data_mac_hw_lrp() {
+        let mut state = lrp_key3_mac_state_hw(1);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90AD00000F03000000080000B79542988C83E5C700"),
+            &hex_bytes("DEADBEEF01020304BC7C18EB8C8ECA66"),
+            0x91,
+            0x00,
+        )]);
+
+        let mut buf = [0u8; 8];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x03, 0, 8, &mut buf).await
+        })
+        .expect("hw LRP MAC read must succeed");
+
+        assert_eq!(n, 8);
+        assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
     }
 }

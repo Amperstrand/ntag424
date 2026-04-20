@@ -284,6 +284,17 @@ impl LrpSuite {
         self.enc_ctr
     }
 
+    /// Set `EncCtr` to a specific value and return `self`. Used in
+    /// tests that construct a mid-session suite without replaying the
+    /// full authentication handshake. For example, `AuthenticateLRPFirst`
+    /// decrypts one block during the handshake, so any test that uses the
+    /// resulting session must start with `enc_ctr = 1`.
+    #[cfg(test)]
+    pub(crate) fn with_enc_ctr(mut self, enc_ctr: u32) -> Self {
+        self.enc_ctr = enc_ctr;
+        self
+    }
+
     /// Full (untruncated) 16-byte `CMAC_LRP` over `data` with the session MAC
     /// key (§9.2.3). Used during the `AuthenticateLRPFirst` handshake where
     /// `PCDResponse` and `PICCResponse` are full-length MACs rather than the

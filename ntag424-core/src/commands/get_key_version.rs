@@ -29,13 +29,13 @@ pub(crate) async fn get_key_version<T: Transport, S: SessionSuite>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::AesSuite;
+    use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use crate::testing::{
+        Exchange, TestTransport, aes_key0_suite_085bc941, block_on, hex_array, hex_bytes,
+        lrp_key0_suite_bbe12900,
+    };
     use alloc::vec::Vec;
-
-    // Also need aes_cbc_decrypt for deriving RndB from the encrypted wire value.
-    use crate::crypto::suite::{SessionSuite, aes_cbc_decrypt};
 
     /// Hand-built round-trip for GetKeyVersion. AN12196 does not carry a
     /// published `GetKeyVersion` transcript, so the test reuses the
@@ -188,6 +188,150 @@ mod tests {
 
         assert_eq!(result, 0x00, "factory key version is 0x00");
         assert_eq!(state.counter(), 3, "CmdCtr must advance to 3");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay hardware-captured `GetKeyVersion` for Keys 0–4 in one test (AES session).
+    ///
+    /// TI=085BC941. After GetVersion (0→1) and ReadSig (1→2), CmdCtr = 2 at the
+    /// first call. All five factory-default keys return version 0x00.
+    #[test]
+    fn get_key_version_hw_aes_keys_0_to_4() {
+        let (suite, ti) = aes_key0_suite_085bc941();
+        let mut state = Authenticated::new(suite, ti);
+        state.advance_counter(); // 0→1 GetVersion
+        state.advance_counter(); // 1→2 ReadSig
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex_bytes("9064000009003C1E2F00B5C1C19D00"),
+                &hex_bytes("00148F7591612FD688"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("906400000901FDED11F2EF1B6FAA00"),
+                &hex_bytes("00B86EA49F47BA32B9"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("906400000902088D4D4ED349435000"),
+                &hex_bytes("00076FCC0E2C1FDAC3"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("9064000009031235FF1B57B7C8B100"),
+                &hex_bytes("00167A4B7A3AF984C9"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("90640000090493A9A0FD1274C6E500"),
+                &hex_bytes("002D70A596A7B0465D"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let versions: alloc::vec::Vec<u8> = block_on(async {
+            let mut out = alloc::vec::Vec::new();
+            for key_no in [
+                KeyNumber::Key0,
+                KeyNumber::Key1,
+                KeyNumber::Key2,
+                KeyNumber::Key3,
+                KeyNumber::Key4,
+            ] {
+                let mut ch = SecureChannel::new(&mut state);
+                out.push(
+                    get_key_version(&mut transport, &mut ch, key_no)
+                        .await
+                        .expect("must succeed"),
+                );
+            }
+            out
+        });
+
+        assert_eq!(
+            versions,
+            alloc::vec![0u8; 5],
+            "all factory keys must have version 0x00"
+        );
+        assert_eq!(state.counter(), 7);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay hardware-captured `GetKeyVersion` for Keys 0–4 in one test (LRP session).
+    ///
+    /// TI=BBE12900. After GetVersion (0→1) and ReadSig (1→2), CmdCtr = 2 at the
+    /// first call. All five factory-default keys return version 0x00.
+    #[test]
+    fn get_key_version_hw_lrp_keys_0_to_4() {
+        let (suite, ti) = lrp_key0_suite_bbe12900();
+        let mut state = Authenticated::new(suite, ti);
+        state.advance_counter(); // 0→1 GetVersion
+        state.advance_counter(); // 1→2 ReadSig
+
+        let mut transport = TestTransport::new([
+            Exchange::new(
+                &hex_bytes("9064000009001AA9BAA6BD4D8F9600"),
+                &hex_bytes("00C7E2A840BB7CE824"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("9064000009013117A470DF7784FE00"),
+                &hex_bytes("0035067A30F54419EF"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("9064000009021A2AB847E038F65F00"),
+                &hex_bytes("003468A518259DD835"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("906400000903DD3ADF713F38F1AB00"),
+                &hex_bytes("00AC6C0AC120C466D0"),
+                0x91,
+                0x00,
+            ),
+            Exchange::new(
+                &hex_bytes("9064000009042365CB5919E96CAA00"),
+                &hex_bytes("00BC476B62CB43A81D"),
+                0x91,
+                0x00,
+            ),
+        ]);
+
+        let versions: alloc::vec::Vec<u8> = block_on(async {
+            let mut out = alloc::vec::Vec::new();
+            for key_no in [
+                KeyNumber::Key0,
+                KeyNumber::Key1,
+                KeyNumber::Key2,
+                KeyNumber::Key3,
+                KeyNumber::Key4,
+            ] {
+                let mut ch = SecureChannel::new(&mut state);
+                out.push(
+                    get_key_version(&mut transport, &mut ch, key_no)
+                        .await
+                        .expect("must succeed"),
+                );
+            }
+            out
+        });
+
+        assert_eq!(
+            versions,
+            alloc::vec![0u8; 5],
+            "all factory keys must have version 0x00"
+        );
+        assert_eq!(state.counter(), 7);
         assert_eq!(transport.remaining(), 0);
     }
 }

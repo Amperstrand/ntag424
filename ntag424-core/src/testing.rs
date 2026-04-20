@@ -11,6 +11,8 @@ use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
 
+use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite, aes_cbc_decrypt};
+use crate::session::Authenticated;
 use crate::{Response, Transport};
 
 /// One expected request / canned response pair.
@@ -132,4 +134,86 @@ pub(crate) fn hex_bytes(s: &str) -> Vec<u8> {
     (0..b.len() / 2)
         .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
         .collect()
+}
+
+/// AES Key0 session from real hardware (TI=085BC941, factory-default all-zero key).
+pub(crate) fn aes_key0_suite_085bc941() -> (AesSuite, [u8; 4]) {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("C4028B41E6F497099C7087768E78A191");
+    let mut rnd_b = hex_array::<16>("7858A0B9DBC468F0FF1B2F773D6DF9FC");
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    (
+        AesSuite::derive(&key, &rnd_a, &rnd_b),
+        hex_array("085BC941"),
+    )
+}
+
+/// LRP Key0 session from real hardware (TI=BBE12900, factory-default all-zero key).
+pub(crate) fn lrp_key0_suite_bbe12900() -> (LrpSuite, [u8; 4]) {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("0272F1390C4B8EC7D3E43308D4B41EC3");
+    // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+    let rnd_b = hex_array::<16>("57E5BF7AF415C4C8B330442EC1F265E9");
+    // enc_ctr=1: AuthenticateLRPFirst decrypts one block during the handshake.
+    (
+        LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(1),
+        hex_array("BBE12900"),
+    )
+}
+
+/// AES Key3 `Authenticated` state from real hardware (TI=085BC941, factory-default all-zero key).
+pub(crate) fn aes_key3_state_hw(cmd_counter: u16) -> Authenticated<AesSuite> {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("30288E8925277FAC5A6D6144341C238E");
+    let mut rnd_b = hex_array::<16>("C8FC6F266D55CA43D3BBDE4CC8479AC2");
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
+    Authenticated::non_first(suite, hex_array("085BC941"), cmd_counter)
+}
+
+/// LRP Key3 `Authenticated` state from real hardware (TI=AFF75859, factory-default all-zero key).
+pub(crate) fn lrp_key3_state_hw(cmd_counter: u16, enc_ctr: u32) -> Authenticated<LrpSuite> {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("8177E38B5CF5969189F929D0BF63B60B");
+    // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+    let rnd_b = hex_array::<16>("37297005F8AE7E195634AB2C13BE1A8D");
+    // enc_ctr accumulates across commands in the same session:
+    // ReadData 128B + M2 pad = 9 blocks → enc_ctr 9; WriteData 8B + M2 pad = 1
+    // block → enc_ctr 10; ReadData readback 8B + M2 pad = 1 block → enc_ctr 11.
+    let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(enc_ctr);
+    Authenticated::non_first(suite, hex_array("AFF75859"), cmd_counter)
+}
+
+/// AES Key3 `Authenticated` state from real hardware for MAC-only proprietary-file captures.
+pub(crate) fn aes_key3_mac_state_hw(cmd_counter: u16) -> Authenticated<AesSuite> {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("24BF204C43B6941047265242A23724F8");
+    let mut rnd_b = hex_array::<16>("2FE216D6F86B1CBD8937C41D55073383");
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
+    Authenticated::new(suite, hex_array("59237C63")).tap_counter(cmd_counter)
+}
+
+/// LRP Key3 `Authenticated` state from real hardware for MAC-only proprietary-file captures.
+pub(crate) fn lrp_key3_mac_state_hw(cmd_counter: u16) -> Authenticated<LrpSuite> {
+    let key = [0u8; 16];
+    let rnd_a = hex_array::<16>("033444D60AC1ED31D2753FF86140D94F");
+    // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+    let rnd_b = hex_array::<16>("F344BE464EB5E84CB349EF0716C2DC06");
+    // enc_ctr=1: AuthenticateLRPFirst decrypts one block during the handshake.
+    let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(1);
+    Authenticated::new(suite, hex_array("4F4B4865")).tap_counter(cmd_counter)
+}
+
+trait TapCounter<S: SessionSuite> {
+    fn tap_counter(self, cmd_counter: u16) -> Self;
+}
+
+impl<S: SessionSuite> TapCounter<S> for Authenticated<S> {
+    fn tap_counter(mut self, cmd_counter: u16) -> Self {
+        for _ in 0..cmd_counter {
+            self.advance_counter();
+        }
+        self
+    }
 }

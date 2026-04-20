@@ -1,6 +1,9 @@
 use super::*;
 
-use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+use crate::testing::{
+    Exchange, TestTransport, aes_key0_suite_085bc941, block_on, hex_array, hex_bytes,
+    lrp_key0_suite_bbe12900,
+};
 
 /// Replay the AN12196 AES-first transcript.
 ///
@@ -497,5 +500,261 @@ fn authenticate_lrp_non_first_hw_key0_full_handshake() {
         "TI must be preserved"
     );
     assert_eq!(session.cmd_counter(), 10, "CmdCtr must be preserved");
+    assert_eq!(transport.remaining(), 0);
+}
+
+/// Replay the full AES `AuthenticateEV2First` handshake from the hw capture.
+///
+/// Second hardware session (TI=085BC941, RndA=C4028B41E6F497099C7087768E78A191).
+/// Verifies that the TI derived by our implementation matches what the PICC returned.
+#[test]
+fn authenticate_aes_hw_key0_full_handshake_b() {
+    let key = [0u8; 16];
+    let rnd_a: [u8; 16] = hex_array("C4028B41E6F497099C7087768E78A191");
+
+    let mut transport = TestTransport::new([
+        Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+        Exchange::new(
+            &hex_bytes("9071000002000000"),
+            &hex_bytes("7858A0B9DBC468F0FF1B2F773D6DF9FC"),
+            0x91,
+            0xAF,
+        ),
+        Exchange::new(
+            &hex_bytes(
+                "90AF0000203017D88B23577ECA67A58D82E1AA4CFC1F89142CE070FFBF4593D09DAEFEE96F00",
+            ),
+            &hex_bytes("973A3FCE138BAF3AE755BE492EF9C677913E4C5AF1A9D48B7149BF6C7E2804CC"),
+            0x91,
+            0x00,
+        ),
+    ]);
+
+    let session = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+        &mut transport,
+        KeyNumber::Key0,
+        &key,
+        rnd_a,
+    ))
+    .expect("hw AES Key0 first auth must succeed");
+
+    assert_eq!(session.ti(), &hex_array::<4>("085BC941"));
+    assert_eq!(session.cmd_counter(), 0);
+    assert_eq!(transport.remaining(), 0);
+}
+
+/// Replay the full AES `AuthenticateEV2NonFirst` handshake for Key3 from the hw capture.
+///
+/// Chains: Key0 first auth → advance counter 14× → Key3 nonfirst auth.
+/// Verifies that TI (085BC941) and CmdCtr (14) are preserved through nonfirst.
+#[test]
+fn authenticate_aes_non_first_hw_key3() {
+    let key = [0u8; 16];
+    let rnd_a_first: [u8; 16] = hex_array("C4028B41E6F497099C7087768E78A191");
+    let rnd_a_nonfirst: [u8; 16] = hex_array("30288E8925277FAC5A6D6144341C238E");
+
+    let mut transport = TestTransport::new([
+        // Key0 first auth (ISOSelectFile + Part1 + Part2)
+        Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+        Exchange::new(
+            &hex_bytes("9071000002000000"),
+            &hex_bytes("7858A0B9DBC468F0FF1B2F773D6DF9FC"),
+            0x91,
+            0xAF,
+        ),
+        Exchange::new(
+            &hex_bytes(
+                "90AF0000203017D88B23577ECA67A58D82E1AA4CFC1F89142CE070FFBF4593D09DAEFEE96F00",
+            ),
+            &hex_bytes("973A3FCE138BAF3AE755BE492EF9C677913E4C5AF1A9D48B7149BF6C7E2804CC"),
+            0x91,
+            0x00,
+        ),
+        // Key3 nonfirst auth (Part1 + Part2)
+        Exchange::new(
+            &hex_bytes("90770000010300"),
+            &hex_bytes("C8FC6F266D55CA43D3BBDE4CC8479AC2"),
+            0x91,
+            0xAF,
+        ),
+        Exchange::new(
+            &hex_bytes(
+                "90AF000020178277CE5780679662BFFE35E20B15FBBD3A712B9EE7C2438E3440F1122A25E700",
+            ),
+            &hex_bytes("602F908162B712B81B73E3060ED8FFBA"),
+            0x91,
+            0x00,
+        ),
+    ]);
+
+    let session = block_on(Session::<Unauthenticated>::new().authenticate_aes(
+        &mut transport,
+        KeyNumber::Key0,
+        &key,
+        rnd_a_first,
+    ))
+    .expect("Key0 first auth must succeed");
+
+    // Simulate 14 commands between first and nonfirst auth (matching the capture).
+    let session = {
+        let Session {
+            mut state,
+            ndef_selected,
+            ef_selected,
+        } = session;
+        for _ in 0..14 {
+            state.advance_counter();
+        }
+        Session {
+            state,
+            ndef_selected,
+            ef_selected,
+        }
+    };
+    assert_eq!(session.cmd_counter(), 14);
+
+    let session =
+        block_on(session.authenticate_aes(&mut transport, KeyNumber::Key3, &key, rnd_a_nonfirst))
+            .expect("Key3 nonfirst auth must succeed");
+
+    assert_eq!(
+        session.ti(),
+        &hex_array::<4>("085BC941"),
+        "TI must be preserved through nonfirst"
+    );
+    assert_eq!(
+        session.cmd_counter(),
+        14,
+        "CmdCtr must be preserved through nonfirst"
+    );
+    assert_eq!(transport.remaining(), 0);
+}
+
+/// Replay the full LRP `AuthenticateEV2First` handshake from the hw capture.
+///
+/// Second hardware session (TI=BBE12900, RndA=0272F1390C4B8EC7D3E43308D4B41EC3).
+/// Verifies that the TI derived by our implementation matches what the PICC returned.
+#[test]
+fn authenticate_lrp_hw_key0_full_handshake_b() {
+    let key = [0u8; 16];
+    let rnd_a: [u8; 16] = hex_array("0272F1390C4B8EC7D3E43308D4B41EC3");
+
+    let mut transport = TestTransport::new([
+        Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
+        Exchange::new(
+            &hex_bytes("9071000008000602000000000000"),
+            &hex_bytes("0157E5BF7AF415C4C8B330442EC1F265E9"),
+            0x91,
+            0xAF,
+        ),
+        Exchange::new(
+            &hex_bytes(
+                "90AF0000200272F1390C4B8EC7D3E43308D4B41EC31D39E0458CDF88946C387BAA0FF2023100",
+            ),
+            &hex_bytes("D2A195966F9C96C2C15DBED1ACF4F593475EE49283E5DD06ACB72D9FD0C099B4"),
+            0x91,
+            0x00,
+        ),
+    ]);
+
+    let session = block_on(Session::<Unauthenticated>::new().authenticate_lrp(
+        &mut transport,
+        KeyNumber::Key0,
+        &key,
+        rnd_a,
+    ))
+    .expect("hw LRP Key0 first auth must succeed");
+
+    assert_eq!(session.ti(), &hex_array::<4>("BBE12900"));
+    assert_eq!(session.cmd_counter(), 0);
+    assert_eq!(transport.remaining(), 0);
+}
+
+/// Replay a hardware-captured authenticated plain NDEF read through
+/// `Session::read_file_plain` (AES session).
+///
+/// This is the free-access edge case where the session remains authenticated
+/// but the command still uses plain communication. The on-wire APDU is
+/// identical to an unauthenticated plain read; the unique session-layer
+/// behavior is advancing `CmdCtr` from 8 to 9 after success.
+#[test]
+fn read_file_plain_hw_aes_advances_counter() {
+    let (suite, ti) = aes_key0_suite_085bc941();
+    let mut state = Authenticated::new(suite, ti);
+    for _ in 0..8 {
+        state.advance_counter();
+    }
+    let mut session = Session {
+        state,
+        ndef_selected: true,
+        ef_selected: None,
+    };
+
+    let payload = hex_bytes(
+        "0047D1014355046578616D706C652E636F6D2F3F703D303030303030303030303030303030303030303030303030303030303030303026633D30303030303030303030303030303030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    );
+    assert_eq!(payload.len(), 256);
+
+    let mut transport = TestTransport::new([Exchange::new(
+        &hex_bytes("90AD0000070200000000000000"),
+        &payload,
+        0x91,
+        0x00,
+    )]);
+
+    let mut buf = [0u8; 256];
+    let n = block_on(session.read_file_plain(&mut transport, File::Ndef, 0, 0, &mut buf))
+        .expect("authenticated plain read must succeed");
+
+    assert_eq!(n, 256);
+    assert_eq!(&buf[..n], payload.as_slice());
+    assert_eq!(session.cmd_counter(), 9);
+    assert_eq!(transport.remaining(), 0);
+}
+
+/// Replay a hardware-captured authenticated plain NDEF read through
+/// `Session::read_file_with_mode(CommMode::Plain)` (LRP session).
+///
+/// This covers the consuming session API for the same "authenticated but
+/// plain communication" case and verifies `CmdCtr` advances from 9 to 10.
+#[test]
+fn read_file_with_mode_plain_hw_lrp_advances_counter() {
+    let (suite, ti) = lrp_key0_suite_bbe12900();
+    let mut state = Authenticated::new(suite, ti);
+    for _ in 0..9 {
+        state.advance_counter();
+    }
+    let session = Session {
+        state,
+        ndef_selected: true,
+        ef_selected: None,
+    };
+
+    let payload = hex_bytes(
+        "DEADBEEF000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    );
+    assert_eq!(payload.len(), 256);
+
+    let mut transport = TestTransport::new([Exchange::new(
+        &hex_bytes("90AD0000070200000000000000"),
+        &payload,
+        0x91,
+        0x00,
+    )]);
+
+    let mut buf = [0u8; 256];
+    let (n, session) = block_on(session.read_file_with_mode(
+        &mut transport,
+        File::Ndef,
+        0,
+        0,
+        CommMode::Plain,
+        &mut buf,
+    ))
+    .expect("authenticated plain read-with-mode must succeed");
+
+    assert_eq!(n, 256);
+    assert_eq!(&buf[..n], payload.as_slice());
+    assert_eq!(session.cmd_counter(), 10);
     assert_eq!(transport.remaining(), 0);
 }

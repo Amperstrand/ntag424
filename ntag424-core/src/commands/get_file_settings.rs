@@ -46,7 +46,10 @@ mod tests {
     use super::*;
     use crate::crypto::suite::AesSuite;
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use crate::testing::{
+        Exchange, TestTransport, aes_key0_suite_085bc941, block_on, hex_array, hex_bytes,
+        lrp_key0_suite_bbe12900,
+    };
 
     const COMPLETE_SDM_PAYLOAD: &[u8] = &[
         0x00, 0x40, 0xEE, 0xEE, 0x00, 0x01, 0x00, 0xD1, 0xFE, 0x00, 0x1F, 0x00, 0x00, 0x44, 0x00,
@@ -107,6 +110,69 @@ mod tests {
         assert_eq!(fs.comm_mode, crate::types::CommMode::Plain);
         assert!(fs.sdm.is_some());
         assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured `GetFileSettings` in MAC mode (AES session).
+    ///
+    /// TI=085BC941, CmdCtr = 7 at call time (after GetVersion, ReadSig, and
+    /// GetKeyVersion for Keys 0–4). NDEF file 0x02 has SDM configured.
+    #[test]
+    fn get_file_settings_mac_hw_aes() {
+        let (suite, ti) = aes_key0_suite_085bc941();
+        let mut state = Authenticated::new(suite, ti);
+        for _ in 0..7 {
+            state.advance_counter();
+        }
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90F500000902E707ACA86C933B6C00"),
+            &hex_bytes("0040E0EE000100C1F00016000012000039000012C5522302E3D824"),
+            0x91,
+            0x00,
+        )]);
+
+        let fs = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_file_settings_mac(&mut transport, &mut ch, 0x02).await
+        })
+        .expect("hw AES GetFileSettings must succeed");
+
+        assert_eq!(fs.file_size, 256);
+        assert!(fs.sdm.is_some(), "NDEF file has SDM configured");
+        assert_eq!(state.counter(), 8);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured `GetFileSettings` in MAC mode (LRP session).
+    ///
+    /// TI=BBE12900, CmdCtr = 8 at call time (after GetVersion, ReadSig,
+    /// GetKeyVersion Keys 0–4, and GetCardUID). NDEF file 0x02 had no SDM
+    /// configured on this tag.
+    #[test]
+    fn get_file_settings_mac_hw_lrp() {
+        let (suite, ti) = lrp_key0_suite_bbe12900();
+        let mut state = Authenticated::new(suite, ti);
+        for _ in 0..8 {
+            state.advance_counter();
+        }
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90F50000090208182263432A195900"),
+            &hex_bytes("0000E0EE00010054FC00D5B53F9937"),
+            0x91,
+            0x00,
+        )]);
+
+        let fs = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_file_settings_mac(&mut transport, &mut ch, 0x02).await
+        })
+        .expect("hw LRP GetFileSettings must succeed");
+
+        assert_eq!(fs.file_size, 256);
+        assert!(fs.sdm.is_none(), "LRP tag had no SDM configured");
+        assert_eq!(state.counter(), 9);
         assert_eq!(transport.remaining(), 0);
     }
 }

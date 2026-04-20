@@ -207,7 +207,10 @@ mod tests {
     use super::*;
     use crate::crypto::suite::{AesSuite, Direction};
     use crate::session::Authenticated;
-    use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
+    use crate::testing::{
+        Exchange, TestTransport, aes_key3_mac_state_hw, aes_key3_state_hw, block_on, hex_array,
+        hex_bytes, lrp_key3_mac_state_hw, lrp_key3_state_hw,
+    };
     use alloc::vec::Vec;
 
     fn authenticated_aes(
@@ -532,6 +535,138 @@ mod tests {
             write_data_full(&mut transport, &mut ch, 0x02, 0, &data).await
         })
         .expect("FULL write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `WriteData` (AES Key3 session).
+    ///
+    /// TI=085BC941, CmdCtr = 15 (after the full read at counter 14). Writes
+    /// `DEADBEEF01020304` to proprietary file 0x03 at offset 0.
+    #[test]
+    fn write_data_full_hw_aes() {
+        let mut state = aes_key3_state_hw(15);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes(
+                "908D00001F03000000080000AA72F5E4A3E15A325D0D3E03D25850AF583D86603323DBE200",
+            ),
+            &hex_bytes("1311AC9B19446236"),
+            0x91,
+            0x00,
+        )]);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(
+                &mut transport,
+                &mut ch,
+                0x03,
+                0,
+                &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04],
+            )
+            .await
+        })
+        .expect("hw AES full write must succeed");
+
+        assert_eq!(state.counter(), 16);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured Full-mode `WriteData` (LRP Key3 session).
+    ///
+    /// TI=AFF75859, CmdCtr = 1 (after the full read at counter 0). Writes
+    /// `DEADBEEF01020304` to proprietary file 0x03 at offset 0.
+    #[test]
+    fn write_data_full_hw_lrp() {
+        let mut state = lrp_key3_state_hw(1, 9);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes(
+                "908D00001F030000000800000CE1C30B270CCA4C1CCAF19A2B76E115D9C09145D6E3B56A00",
+            ),
+            &hex_bytes("AA1EC0DD97474DB9"),
+            0x91,
+            0x00,
+        )]);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(
+                &mut transport,
+                &mut ch,
+                0x03,
+                0,
+                &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04],
+            )
+            .await
+        })
+        .expect("hw LRP full write must succeed");
+
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured MAC-mode `WriteData` (AES Key3 session).
+    ///
+    /// TI=59237C63, CmdCtr = 0. Writes `DEADBEEF01020304` to proprietary file
+    /// 0x03 at offset 0.
+    #[test]
+    fn write_data_mac_hw_aes() {
+        let mut state = aes_key3_mac_state_hw(0);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("908D00001703000000080000DEADBEEF0102030451648BF7E220359A00"),
+            &hex_bytes("D00E5F086A574F15"),
+            0x91,
+            0x00,
+        )]);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_mac(
+                &mut transport,
+                &mut ch,
+                0x03,
+                0,
+                &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04],
+            )
+            .await
+        })
+        .expect("hw AES MAC write must succeed");
+
+        assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Replay a hardware-captured MAC-mode `WriteData` (LRP Key3 session).
+    ///
+    /// TI=4F4B4865, CmdCtr = 0. Writes `DEADBEEF01020304` to proprietary file
+    /// 0x03 at offset 0.
+    #[test]
+    fn write_data_mac_hw_lrp() {
+        let mut state = lrp_key3_mac_state_hw(0);
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("908D00001703000000080000DEADBEEF01020304CDCA0B30BFF1176400"),
+            &hex_bytes("CF706129C172629E"),
+            0x91,
+            0x00,
+        )]);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_mac(
+                &mut transport,
+                &mut ch,
+                0x03,
+                0,
+                &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04],
+            )
+            .await
+        })
+        .expect("hw LRP MAC write must succeed");
 
         assert_eq!(state.counter(), 1);
         assert_eq!(transport.remaining(), 0);

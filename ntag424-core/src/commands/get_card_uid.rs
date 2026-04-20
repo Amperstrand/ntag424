@@ -35,7 +35,7 @@ pub(crate) async fn get_card_uid<T: Transport, S: SessionSuite>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::{AesSuite, Direction};
+    use crate::crypto::suite::{AesSuite, Direction, LrpSuite, aes_cbc_decrypt};
     use crate::session::Authenticated;
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
@@ -139,5 +139,42 @@ mod tests {
             other => panic!("expected ResponseMacMismatch, got {other:?}"),
         }
         assert_eq!(state.counter(), 0);
+    }
+
+    /// Replay a hardware-captured `GetCardUID` in Full mode (LRP session).
+    ///
+    /// TI=BBE12900, CmdCtr = 7 at call time (after GetVersion, ReadSig, and
+    /// GetKeyVersion for Keys 0–4). UID = 04407A7A0B1090.
+    #[test]
+    fn get_card_uid_hw_lrp() {
+        let key = [0u8; 16];
+        let rnd_a = hex_array::<16>("0272F1390C4B8EC7D3E43308D4B41EC3");
+        // LRP Part1 response = 01 || RndB; RndB is plaintext (no decrypt needed).
+        let rnd_b = hex_array::<16>("57E5BF7AF415C4C8B330442EC1F265E9");
+        let ti = hex_array::<4>("BBE12900");
+        // enc_ctr=5: 1 block from AuthFirst + 4 blocks from ReadSig (64 B).
+        // GetVersion and GetKeyVersion x5 are MAC-only (no encryption).
+        let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(5);
+        let mut state = Authenticated::new(suite, ti);
+        for _ in 0..7 {
+            state.advance_counter();
+        }
+
+        let mut transport = TestTransport::new([Exchange::new(
+            &hex_bytes("90510000087FE90A37B3B2DD3400"),
+            &hex_bytes("C732E15E0F16F3137F0B21E67353F24C69CC9942061CF229"),
+            0x91,
+            0x00,
+        )]);
+
+        let uid = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            get_card_uid(&mut transport, &mut ch).await
+        })
+        .expect("hw LRP GetCardUID must succeed");
+
+        assert_eq!(uid, [0x04, 0x40, 0x7A, 0x7A, 0x0B, 0x10, 0x90]);
+        assert_eq!(state.counter(), 8);
+        assert_eq!(transport.remaining(), 0);
     }
 }
