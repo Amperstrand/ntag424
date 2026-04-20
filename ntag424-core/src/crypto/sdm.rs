@@ -41,6 +41,7 @@ use super::suite::{aes_cbc_decrypt, cmac_aes, cmac_lrp, truncate_mac};
 
 /// Cryptographic suite used for SDM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CryptoMode {
     /// AES-128 based SDM (§9.3 AES path).
     Aes,
@@ -90,6 +91,7 @@ pub struct SdmVerification {
 
 /// How PICC metadata (UID, SDMReadCtr) is recovered from the NDEF file.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 enum PiccSource {
     /// Encrypted PICCData at the given file byte offset.
     /// AES: 32 hex chars (16 binary bytes). LRP: 48 hex chars (24 binary bytes).
@@ -125,6 +127,7 @@ enum PiccSource {
 /// println!("UID: {:?}, counter: {:?}", result.uid, result.read_ctr);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SecureDynamicMessageVerifier {
     mode: CryptoMode,
     picc_source: PiccSource,

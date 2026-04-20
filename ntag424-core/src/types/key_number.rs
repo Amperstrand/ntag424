@@ -5,6 +5,7 @@
 ///
 /// All keys should be overwritten even if not used.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum KeyNumber {
     /// Application Master Key.
     Key0,
