@@ -1,0 +1,115 @@
+use core::error::Error;
+
+use thiserror::Error;
+
+use crate::Transport;
+use crate::commands::{
+    SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
+    authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_file_settings,
+    change_key, change_master_key, get_card_uid, get_file_counters, get_file_settings,
+    get_file_settings_mac, get_key_version, get_version, get_version_mac, iso_read_binary,
+    iso_select_ef_by_fid, iso_update_binary, read_data_full, read_data_mac, read_data_plain,
+    read_sig, read_sig_mac, select_ndef_application, set_configuration, write_data_full,
+    write_data_mac, write_data_plain,
+};
+use crate::crypto::originality::{self, OriginalityError};
+use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
+use crate::types::{
+    CommMode, Configuration, File, FileSettings, FileSettingsError, KeyNumber, NonMasterKeyNumber,
+    ResponseStatus, Uid, Version,
+};
+
+mod authenticated;
+mod unauthenticated;
+
+pub use authenticated::Authenticated;
+pub use unauthenticated::Unauthenticated;
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Error, Debug)]
+pub enum SessionError<E: Error + core::fmt::Debug> {
+    #[error(transparent)]
+    Transport(#[from] E),
+    #[error("error response: {0:?}")]
+    ErrorResponse(ResponseStatus),
+    #[error("unexpected response length: {got}")]
+    UnexpectedLength { got: usize },
+    #[error(transparent)]
+    FileSettings(FileSettingsError),
+    #[error("originality verification failed: {0:?}")]
+    OriginalityVerificationFailed(OriginalityError),
+    /// Authentication validation failed.
+    ///
+    /// The PICC's response did not match what the PCD computed. Typical
+    /// causes: wrong key or tampered response, but can be command specific.
+    ///
+    /// - AES (§9.1.5): the decrypted `RndA'` did not match the `RndA`
+    ///   the PCD sent.
+    /// - LRP (§9.2.5, §10.4.3): the `AuthMode` byte in the Part 1
+    ///   response, the `PICCResponse` MAC, or the echoed `PCDCap2` in
+    ///   the decrypted Part 2 `PICCData` did not validate.
+    #[error("authentication mismatch")]
+    AuthenticationMismatch,
+    /// A response `MACt` did not verify.
+    ///
+    /// The trailing 8-byte `MACt` did not match the value the PCD
+    /// computed over `RC || (CmdCtr+1) || TI || RespData` (§9.1.9).
+    /// Wrong session keys, tampered response, or out-of-sync `CmdCtr`
+    /// can all cause this.
+    #[error("response MAC mismatch")]
+    ResponseMacMismatch,
+}
+
+/// An NTAG 424 DNA session.
+///
+/// A unauthenticated session can be initialized using [`Session::default()`].
+/// To get access to commands requiring authentication, call an authentication method,
+/// e.g. [`Session::authenticate_aes`], which performs the handshake and returns a new
+/// session in the authenticated state on success.
+pub struct Session<S> {
+    state: S,
+    /// Whether the NDEF application is selected.
+    ///
+    /// Tracks whether AID `D2760000850101` has been selected on the
+    /// transport since the last power-on or deselect.
+    ndef_selected: bool,
+    /// The currently selected EF File ID.
+    ///
+    /// `None` means no EF has been selected since the last application
+    /// select.
+    ef_selected: Option<u16>,
+}
+
+impl<S> Session<S> {
+    /// Read the UID as seen during card selection phase by the NFC reader.
+    ///
+    /// In random ID mode the value returned here is the randomized ID, not
+    /// the permanent one. The actual UID can be read using [`Session::get_uid`],
+    /// which returns the permanent UID even when the tag is in random-ID mode.
+    pub async fn get_selected_uid<T: Transport>(
+        &self,
+        transport: &mut T,
+    ) -> Result<Uid, SessionError<T::Error>> {
+        // This is implemented for all session states because
+        // the selected UID is retrieved from the reader, no communication with the PICC
+        // is done.
+
+        let data = transport.get_uid().await?;
+        let data = data.as_ref();
+        match data.len() {
+            7 => {
+                let mut uid = [0u8; 7];
+                uid.copy_from_slice(data);
+                Ok(Uid::Fixed(uid))
+            }
+            4 => {
+                let mut uid = [0u8; 4];
+                uid.copy_from_slice(data);
+                Ok(Uid::Random(uid))
+            }
+            got => Err(SessionError::UnexpectedLength { got }),
+        }
+    }
+}
