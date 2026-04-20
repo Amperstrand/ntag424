@@ -224,6 +224,16 @@ impl SecureDynamicMessageVerifier {
         }
 
         let enc_data = if settings.enc_file_data {
+            if !settings.uid_mirror {
+                return Err(SdmError::InvalidConfiguration(
+                    "enc_file_data requires UID mirroring",
+                ));
+            }
+            if !settings.read_ctr_mirror {
+                return Err(SdmError::InvalidConfiguration(
+                    "enc_file_data requires read_ctr mirroring",
+                ));
+            }
             Some(
                 settings
                     .offsets
@@ -237,10 +247,18 @@ impl SecureDynamicMessageVerifier {
         };
 
         if let Some(ref r) = enc_data {
+            if r.end < r.start {
+                return Err(SdmError::InvalidConfiguration("enc_data range end < start"));
+            }
             let ascii_len = (r.end - r.start) as usize;
             if ascii_len == 0 || !ascii_len.is_multiple_of(32) {
                 return Err(SdmError::InvalidConfiguration(
                     "enc_data ASCII length must be a positive multiple of 32",
+                ));
+            }
+            if mac_input_offset > r.start || mac_offset < r.end {
+                return Err(SdmError::InvalidConfiguration(
+                    "mac window must cover the full enc_data range",
                 ));
             }
         }
@@ -1069,6 +1087,112 @@ mod tests {
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(_)),
+        ));
+    }
+
+    #[test]
+    fn try_new_rejects_enc_file_data_without_uid_mirror() {
+        let settings = SdmSettings {
+            uid_mirror: false,
+            read_ctr_mirror: true,
+            enc_file_data: true,
+            access: SdmAccessRights {
+                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
+                file_read: SdmFileRead::Key(KeyNumber::Key0),
+                ctr_ret: SdmCtrRet::NoAccess,
+            },
+            offsets: SdmOffsets {
+                picc_data: Some(10),
+                enc_data: Some(42..74),
+                mac_input: Some(42),
+                mac: Some(74),
+                ..Default::default()
+            },
+        };
+        assert!(matches!(
+            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Err(SdmError::InvalidConfiguration(
+                "enc_file_data requires UID mirroring"
+            )),
+        ));
+    }
+
+    #[test]
+    fn try_new_rejects_enc_file_data_without_read_ctr_mirror() {
+        let settings = SdmSettings {
+            uid_mirror: true,
+            read_ctr_mirror: false,
+            enc_file_data: true,
+            access: SdmAccessRights {
+                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
+                file_read: SdmFileRead::Key(KeyNumber::Key0),
+                ctr_ret: SdmCtrRet::NoAccess,
+            },
+            offsets: SdmOffsets {
+                picc_data: Some(10),
+                enc_data: Some(42..74),
+                mac_input: Some(42),
+                mac: Some(74),
+                ..Default::default()
+            },
+        };
+        assert!(matches!(
+            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Err(SdmError::InvalidConfiguration(
+                "enc_file_data requires read_ctr mirroring"
+            )),
+        ));
+    }
+
+    #[test]
+    fn try_new_rejects_inverted_enc_data_range() {
+        let settings = SdmSettings {
+            uid_mirror: true,
+            read_ctr_mirror: true,
+            enc_file_data: true,
+            access: SdmAccessRights {
+                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
+                file_read: SdmFileRead::Key(KeyNumber::Key0),
+                ctr_ret: SdmCtrRet::NoAccess,
+            },
+            offsets: SdmOffsets {
+                picc_data: Some(10),
+                enc_data: Some(74..42),
+                mac_input: Some(42),
+                mac: Some(74),
+                ..Default::default()
+            },
+        };
+        assert!(matches!(
+            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Err(SdmError::InvalidConfiguration("enc_data range end < start")),
+        ));
+    }
+
+    #[test]
+    fn try_new_rejects_mac_window_that_does_not_cover_enc_data() {
+        let settings = SdmSettings {
+            uid_mirror: true,
+            read_ctr_mirror: true,
+            enc_file_data: true,
+            access: SdmAccessRights {
+                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
+                file_read: SdmFileRead::Key(KeyNumber::Key0),
+                ctr_ret: SdmCtrRet::NoAccess,
+            },
+            offsets: SdmOffsets {
+                picc_data: Some(10),
+                enc_data: Some(42..74),
+                mac_input: Some(43),
+                mac: Some(74),
+                ..Default::default()
+            },
+        };
+        assert!(matches!(
+            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Err(SdmError::InvalidConfiguration(
+                "mac window must cover the full enc_data range"
+            )),
         ));
     }
 
