@@ -1,7 +1,7 @@
+use super::secure_channel::strip_m2_padding;
 use crate::{
     Transport, commands::SecureChannel, crypto::suite::SessionSuite, session::SessionError,
 };
-use super::secure_channel::strip_m2_padding;
 
 /// Response payload (MAC stripped): SDMReadCtr (3 B) + Reserved (2 B).
 const RESP_LEN: usize = 5;

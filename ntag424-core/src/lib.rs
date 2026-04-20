@@ -159,6 +159,14 @@ mod testing;
 mod transport;
 pub mod types;
 
+#[cfg(feature = "key_diversification")]
+pub mod key_diversification {
+    //! AES-128 key diversification per AN10922 §2.2.
+    //!
+    //! See [`diversify_aes128`] for details.
+    pub use crate::crypto::key_diversification::*;
+}
+
 pub use transport::{PseudoApduCapable, Response, Transport};
 
 pub use session::{Session, SessionError};
