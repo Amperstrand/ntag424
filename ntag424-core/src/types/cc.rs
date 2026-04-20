@@ -1,8 +1,17 @@
 //! Capability Container (CC) file parsing and serialisation.
-use alloc::vec::Vec;
+use arrayvec::ArrayVec;
 use thiserror::Error;
 
 use super::KeyNumber;
+
+/// Maximum number of File Control entries in a Capability Container.
+///
+/// NTAG 424 DNA carries two entries (NDEF + proprietary). Three is a
+/// safe upper bound for this IC family.
+const MAX_CC_FILES: usize = 3;
+
+/// Maximum serialised CC size: 7-byte header + 8 bytes per entry.
+const MAX_CC_BYTES: usize = 7 + MAX_CC_FILES * 8;
 
 /// Parsed contents of the NTAG 424 DNA **Capability Container (CC) file**.
 ///
@@ -28,7 +37,7 @@ pub struct CapabilityContainer {
     t4t_version: u8,
     max_le: u16,
     max_lc: u16,
-    files: Vec<FileCtrl>,
+    files: ArrayVec<FileCtrl, MAX_CC_FILES>,
 }
 
 /// One File Control entry inside the Capability Container.
@@ -39,7 +48,7 @@ pub struct CapabilityContainer {
 ///
 /// Exposed read-only. To rebuild a CC with modified fields, use the
 /// `with_*` builder methods on [`CapabilityContainer`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct FileCtrl {
     kind: FileCtrlKind,
     file_id: u16,
@@ -124,27 +133,27 @@ impl Default for CapabilityContainer {
     /// write via key `3h`, mapping version 2.0, `MLe = 256`,
     /// `MLc = 255`.
     fn default() -> Self {
+        let mut files = ArrayVec::new();
+        files.push(FileCtrl {
+            kind: FileCtrlKind::Ndef,
+            file_id: 0xE104,
+            file_size: 0x0100,
+            read_access: AccessCondition::Open,
+            write_access: AccessCondition::Open,
+        });
+        files.push(FileCtrl {
+            kind: FileCtrlKind::Proprietary,
+            file_id: 0xE105,
+            file_size: 0x0080,
+            read_access: AccessCondition::ProprietaryKey(KeyNumber::Key2),
+            write_access: AccessCondition::ProprietaryKey(KeyNumber::Key3),
+        });
         Self {
             cc_len: 0x0017,
             t4t_version: 0x20,
             max_le: 0x0100,
             max_lc: 0x00FF,
-            files: Vec::from([
-                FileCtrl {
-                    kind: FileCtrlKind::Ndef,
-                    file_id: 0xE104,
-                    file_size: 0x0100,
-                    read_access: AccessCondition::Open,
-                    write_access: AccessCondition::Open,
-                },
-                FileCtrl {
-                    kind: FileCtrlKind::Proprietary,
-                    file_id: 0xE105,
-                    file_size: 0x0080,
-                    read_access: AccessCondition::ProprietaryKey(KeyNumber::Key2),
-                    write_access: AccessCondition::ProprietaryKey(KeyNumber::Key3),
-                },
-            ]),
+            files,
         }
     }
 }
@@ -165,7 +174,7 @@ impl CapabilityContainer {
         let max_le = u16::from_be_bytes([data[3], data[4]]);
         let max_lc = u16::from_be_bytes([data[5], data[6]]);
 
-        let mut files = Vec::new();
+        let mut files = ArrayVec::new();
         let mut offset = 7;
         let limit = (cc_len as usize).min(data.len());
 
@@ -193,13 +202,15 @@ impl CapabilityContainer {
             }
 
             let entry = &data[offset..offset + l];
-            files.push(FileCtrl {
-                kind,
-                file_id: u16::from_be_bytes([entry[0], entry[1]]),
-                file_size: u16::from_be_bytes([entry[2], entry[3]]),
-                read_access: AccessCondition::from_byte(entry[4]),
-                write_access: AccessCondition::from_byte(entry[5]),
-            });
+            files
+                .try_push(FileCtrl {
+                    kind,
+                    file_id: u16::from_be_bytes([entry[0], entry[1]]),
+                    file_size: u16::from_be_bytes([entry[2], entry[3]]),
+                    read_access: AccessCondition::from_byte(entry[4]),
+                    write_access: AccessCondition::from_byte(entry[5]),
+                })
+                .map_err(|_| CcError::TooManyEntries)?;
 
             offset += l;
         }
@@ -214,22 +225,27 @@ impl CapabilityContainer {
     }
 
     /// Serialise the CC back into its on-card byte representation.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.cc_len as usize);
+    pub fn to_bytes(&self) -> ArrayVec<u8, MAX_CC_BYTES> {
+        let mut out = ArrayVec::new();
 
-        out.extend_from_slice(&self.cc_len.to_be_bytes());
+        out.try_extend_from_slice(&self.cc_len.to_be_bytes())
+            .unwrap();
         out.push(self.t4t_version);
-        out.extend_from_slice(&self.max_le.to_be_bytes());
-        out.extend_from_slice(&self.max_lc.to_be_bytes());
+        out.try_extend_from_slice(&self.max_le.to_be_bytes())
+            .unwrap();
+        out.try_extend_from_slice(&self.max_lc.to_be_bytes())
+            .unwrap();
 
-        for file in &self.files {
+        for file in self.files() {
             out.push(match file.kind {
                 FileCtrlKind::Ndef => 0x04,
                 FileCtrlKind::Proprietary => 0x05,
             });
             out.push(0x06); // length is always 6
-            out.extend_from_slice(&file.file_id.to_be_bytes());
-            out.extend_from_slice(&file.file_size.to_be_bytes());
+            out.try_extend_from_slice(&file.file_id.to_be_bytes())
+                .unwrap();
+            out.try_extend_from_slice(&file.file_size.to_be_bytes())
+                .unwrap();
             out.push(file.read_access.to_byte());
             out.push(file.write_access.to_byte());
         }
@@ -391,6 +407,9 @@ pub enum CcError {
     /// A File Control entry did not carry the required 6-byte value.
     #[error("unexpected file entry length: {0}")]
     UnexpectedEntryLength(usize),
+    /// More file entries than the fixed-capacity buffer supports.
+    #[error("too many file entries")]
+    TooManyEntries,
 }
 
 #[cfg(test)]
@@ -451,15 +470,13 @@ mod tests {
     #[test]
     fn roundtrip() {
         let cc = CapabilityContainer::from_bytes(&NTAG424_DEFAULT_CC).unwrap();
-        assert_eq!(cc.to_bytes(), NTAG424_DEFAULT_CC);
+        assert_eq!(*cc.to_bytes(), NTAG424_DEFAULT_CC);
     }
 
     #[test]
     fn default_matches_delivery_bytes() {
-        assert_eq!(
-            CapabilityContainer::default().to_bytes(),
-            NTAG424_DEFAULT_CC
-        );
+        let cc = CapabilityContainer::default();
+        assert_eq!(*cc.to_bytes(), NTAG424_DEFAULT_CC,);
         assert_eq!(
             CapabilityContainer::default(),
             CapabilityContainer::from_bytes(&NTAG424_DEFAULT_CC).unwrap(),
@@ -511,6 +528,6 @@ mod tests {
 
         let cc = CapabilityContainer::from_bytes(&cc_file[..23]).unwrap();
         assert_eq!(cc, CapabilityContainer::default());
-        assert_eq!(cc.to_bytes(), NTAG424_DEFAULT_CC);
+        assert_eq!(*cc.to_bytes(), NTAG424_DEFAULT_CC);
     }
 }

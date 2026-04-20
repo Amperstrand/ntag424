@@ -24,9 +24,10 @@
 //! [`compute_cmd_mac`]: SecureChannel::compute_cmd_mac
 //! [`verify_response_mac_and_advance`]: SecureChannel::verify_response_mac_and_advance
 
-use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt::Debug;
+
+use arrayvec::ArrayVec;
 
 use crate::Transport;
 use crate::crypto::suite::{Direction, SessionSuite};
@@ -46,6 +47,15 @@ const MAX_APDU_BODY: usize = 255;
 /// frame (prefix + counter + TI + full `Lc` worth of bytes).
 const MAC_INPUT_CAP: usize = 1 + 2 + 4 + MAX_APDU_BODY;
 
+/// Maximum response-data bytes after stripping the 8-byte `MACt`.
+const MAX_RESPONSE_DATA: usize = MAX_APDU_BODY - MAC_LEN;
+
+/// Stack-allocated buffer returned by [`SecureChannel::send_mac`].
+///
+/// Holds up to [`MAX_RESPONSE_DATA`] (247) bytes — the largest
+/// MAC-stripped response body a short-APDU frame can carry.
+pub(crate) type MacResponse = ArrayVec<u8, MAX_RESPONSE_DATA>;
+
 pub(crate) struct SecureChannel<'a, S: SessionSuite> {
     state: &'a mut Authenticated<S>,
 }
@@ -61,18 +71,6 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
 
     pub(crate) fn cmd_ctr(&self) -> u16 {
         self.state.counter()
-    }
-
-    /// Pass `apdu` straight to the transport. Neither the request nor
-    /// the response is MAC'd; `CmdCtr` is left alone. This is the right
-    /// path for `CommMode.Plain` commands that are legal inside an
-    /// authenticated session (e.g. `ISOSelectFile`, §10.9.1).
-    pub(crate) async fn send_plain<T: Transport>(
-        &mut self,
-        transport: &mut T,
-        apdu: &[u8],
-    ) -> Result<crate::Response<T::Data>, SessionError<T::Error>> {
-        Ok(transport.transmit(apdu).await?)
     }
 
     /// Compute `MACt` over `Cmd || CmdCtr(LE) || TI || CmdHeader || CmdData`
@@ -200,7 +198,7 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         p2: u8,
         header: &[u8],
         data: &[u8],
-    ) -> Result<Vec<u8>, SessionError<T::Error>> {
+    ) -> Result<MacResponse, SessionError<T::Error>> {
         let body_len = header.len() + data.len() + MAC_LEN;
         assert!(
             body_len <= MAX_APDU_BODY,
@@ -230,7 +228,10 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
             return Err(SessionError::ErrorResponse(code.status()));
         }
         let plain = self.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
-        Ok(plain.to_vec())
+        let mut out = MacResponse::new();
+        out.try_extend_from_slice(plain)
+            .map_err(|_| SessionError::UnexpectedLength { got: plain.len() })?;
+        Ok(out)
     }
 }
 
@@ -278,6 +279,7 @@ mod tests {
     use crate::testing::{
         Exchange, TestTransport, TestTransportError, block_on, hex_array, hex_bytes,
     };
+    use alloc::vec::Vec;
 
     // AES session keys can't be constructed via the public API without
     // a full handshake, so tests go through a private constructor.
@@ -408,7 +410,7 @@ mod tests {
             }
         })
         .expect("roundtrip must succeed");
-        assert_eq!(plain, resp_data);
+        assert_eq!(plain.as_slice(), resp_data.as_slice());
         assert_eq!(state.counter(), 1);
     }
 
