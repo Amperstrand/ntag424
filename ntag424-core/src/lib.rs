@@ -206,6 +206,19 @@ pub mod key_diversification {
     pub use crate::crypto::key_diversification::*;
 }
 
+#[cfg(feature = "sdm")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sdm")))]
+pub mod sdm {
+    //! Secure Dynamic Messaging (SDM) server-side verification (§9.3).
+    //!
+    //! Build a [`SecureDynamicMessageVerifier`] from [`SdmSettings`] and call
+    //! [`verify`](SecureDynamicMessageVerifier::verify) with the raw NDEF file
+    //! bytes and application key.
+    //!
+    //! [`SdmSettings`]: crate::types::file_settings::SdmSettings
+    pub use crate::crypto::sdm::*;
+}
+
 pub use transport::{Response, Transport};
 
 pub use session::{Session, SessionError};

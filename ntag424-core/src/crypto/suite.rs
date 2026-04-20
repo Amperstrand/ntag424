@@ -110,7 +110,7 @@ pub trait SessionSuite: Sized {
 ///
 /// Per §9.1.3 / §9.2.3, keep the even-numbered (1-indexed) bytes in
 /// MSB-first order: 0-based indices 1, 3, 5, 7, 9, 11, 13, 15.
-fn truncate_mac(full: &[u8; 16]) -> [u8; 8] {
+pub(crate) fn truncate_mac(full: &[u8; 16]) -> [u8; 8] {
     core::array::from_fn(|i| full[2 * i + 1])
 }
 
@@ -145,13 +145,13 @@ fn session_vector_lrp(rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> [u8; 32] {
     sv
 }
 
-fn cmac_aes(key: &[u8; 16], data: &[u8]) -> [u8; 16] {
+pub(crate) fn cmac_aes(key: &[u8; 16], data: &[u8]) -> [u8; 16] {
     let mut mac = Cmac::<Aes128>::new_from_slice(key).expect("16-byte AES key");
     mac.update(data);
     mac.finalize().into_bytes().into()
 }
 
-fn cmac_lrp(lrp: Lrp, data: &[u8]) -> [u8; 16] {
+pub(crate) fn cmac_lrp(lrp: Lrp, data: &[u8]) -> [u8; 16] {
     let mut mac = Cmac::<Lrp>::inner_init(lrp);
     mac.update(data);
     mac.finalize().into_bytes().into()

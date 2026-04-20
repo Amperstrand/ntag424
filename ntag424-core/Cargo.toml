@@ -12,6 +12,7 @@ edition = "2024"
 default = ["alloc"]
 alloc = []
 key_diversification = []
+sdm = []
 
 [dependencies]
 aes = "0.9.0"
