@@ -24,7 +24,7 @@
 //!
 //! **Default access permissions out of the factory**:
 //!
-//! | File        | Read    | Write      | ReadWrite  | Change Permissions |
+//! | File        | Read Only    | Write Only      | Read / Write  | Change file settings |
 //! |-------------|---------|------------|------------|------------|
 //! | CC          | _Unauthenticated_   | Master Key | Master Key | Master Key |
 //! | NDEF        | _Unauthenticated_   | _Unauthenticated_      |  _Unauthenticated_     | Master Key |
@@ -36,7 +36,8 @@
 //!
 //! The NDEF file can define placeholders that are dynamically filled by the tag when read.
 //! Typically the NDEF encodes a URL with placeholders for the tag's unique identifier,
-//! and counter, usually encrypted and signed using one of the application keys.
+//! and counter, usually encrypted and signed using one of the application keys,
+//! as well as a [MAC](https://en.wikipedia.org/wiki/Message_authentication_code).
 //!
 //! This allows the tag to provide a _Secure Unique NFC_ (SUN) identifier that can be
 //! used for cases where a identifier fulfilling cryptographic properties is needed,
@@ -45,6 +46,23 @@
 //! By default the NDEF file is readable without authentication through standard NFC Type 4 commands
 //! allowing many NFC readers to read the SUN identifier without special support for the tag's cryptographic features.
 //! However, the NDEF file can also be configured to require authentication through one of the AES keys for reading.
+//!
+//! # Provisioning
+//!
+//! The implementation of the tag's initial setup should be carefully designed to match the
+//! application's needs. The following is a non-exhaustive list of steps that should be considered for a secure setup of the tag.
+//!
+//! - Generate and store strong random keys for all five application keys. You may use [key diversification](`key_diversification`)
+//!   to derive keys from a single master key if needed.
+//! - Review the [tag configuration](`crate::types::Configuration`) and decide on whether
+//!   to [enable LRP mode](`crate::Session::enable_lrp`)[^2]. *Attention*: enabling LRP mode is a
+//!   permanent change.
+//! - If SUN identifiers are needed, prepare the NDEF file:
+//!   - Write the NDEF file with the desired template, e.g. a URL with placeholders.
+//!   - Enable SDM via the [file settings](`crate::Session::change_file_settings`) for the NDEF file,
+//!     also configure the file permissions and cryptographic settings in this step.
+//! - Prepare the proprietary file, write an initial content if needed, and configure the file
+//!   permissions.
 //!
 //! ## Example
 //!
@@ -147,8 +165,27 @@
 //! # }
 //! ```
 //!
+//! # Sources
+//!
+//! The following sources were used to implement this crate:
+//!
+//! - [NTAG 424 DNA datasheet](https://www.nxp.com/docs/en/data-sheet/NT4H2421Gx.pdf)
+//! - [AN12196](https://www.nxp.com/docs/en/application-note/AN12196.pdf)
+//! - [AN12321](https://www.nxp.com/docs/en/application-note/AN12321.pdf)
+//! - [AN10922](https://www.nxp.com/docs/en/application-note/AN10922.pdf)
+//! - tests on real hardware tags
+//!
+//! Integration tests use a mock transport that simulates the tag's responses, and are based on the above sources,
+//! using either test vectors or collected responses from real hardware tags. Unit tests use the
+//! same sources.
+//!
+//! _Not tags were harmed during development of this crate._
+//!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
+//! [^2]: LRP mode is a AES based cipher that is more resistent against side-channel attacks, but is
+//! not supported by all NFC readers.  This crate supports both AES and LRP mode.
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

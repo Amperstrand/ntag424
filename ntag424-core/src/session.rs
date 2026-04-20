@@ -34,7 +34,7 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     /// Authentication validation failed.
     ///
     /// The PICC's response did not match what the PCD computed. Typical
-    /// causes: wrong key, tampered response, or a MitM.
+    /// causes: wrong key or tampered response, but can be command specific.
     ///
     /// - AES (§9.1.5): the decrypted `RndA'` did not match the `RndA`
     ///   the PCD sent.
@@ -55,7 +55,7 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 
 /// An NTAG 424 DNA session.
 ///
-/// A unauthenticated session can be initialized using `Session::default()`.
+/// A unauthenticated session can be initialized using [`Session::default()`].
 /// To get access to commands requiring authentication, call an authentication method,
 /// e.g. [`Session::authenticate_aes`], which performs the handshake and returns a new
 /// session in the authenticated state on success.
@@ -73,33 +73,20 @@ pub struct Session<S> {
     ef_selected: Option<u16>,
 }
 
-impl Session<Unauthenticated> {
-    pub fn new() -> Self {
-        Self {
-            state: Unauthenticated,
-            ndef_selected: false,
-            ef_selected: None,
-        }
-    }
-}
-
-impl Default for Session<Unauthenticated> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct Unauthenticated;
-
 impl<S> Session<S> {
-    /// Read the UID as seen during collision resolution at activation.
+    /// Read the UID as seen during card selection phase by the NFC reader.
     ///
-    /// In random-ID mode the value returned here is the randomized UID, not
-    /// the permanent one.
-    pub async fn get_uid_from_reader<T: Transport>(
+    /// In random ID mode the value returned here is the randomized ID, not
+    /// the permanent one. The actual UID can be read using [`Session::get_uid`],
+    /// which returns the permanent UID even when the tag is in random-ID mode.
+    pub async fn get_selected_uid<T: Transport>(
         &self,
         transport: &mut T,
     ) -> Result<Uid, SessionError<T::Error>> {
+        // This is implemented for all session states because
+        // the selected UID is retrieved from the reader, no communication with the PICC
+        // is done.
+
         let data = transport.get_uid().await?;
         let data = data.as_ref();
         match data.len() {
@@ -118,18 +105,32 @@ impl<S> Session<S> {
     }
 }
 
+pub struct Unauthenticated;
+
+impl Session<Unauthenticated> {
+    /// Initialize a new unauthenticated session.
+    pub fn new() -> Self {
+        Self {
+            state: Unauthenticated,
+            ndef_selected: false,
+            ef_selected: None,
+        }
+    }
+}
+
+impl Default for Session<Unauthenticated> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Session<Unauthenticated> {
     /// Select the NDEF application via `ISOSelectFile` by DF name.
-    ///
-    /// `CLA=00 INS=A4 P1=04 P2=00`, NT4H2421Gx §10.9.1.
     ///
     /// After power-on the PICC starts at the MF (master file) level where
     /// ISO file commands and `AuthenticateEV2First` are not reachable.
     /// Call this once per transport session before any `read_unauthenticated`
     /// or authentication call (§8.2.1).
-    ///
-    /// The result is cached: if the application was already selected on this
-    /// session, the APDU is skipped and `Ok(())` is returned immediately.
     ///
     /// Only exposed on an unauthenticated session: re-selecting the
     /// application on the PICC terminates an active `AuthenticatedEV2` /
@@ -149,20 +150,14 @@ impl Session<Unauthenticated> {
         Ok(())
     }
 
-    /// Read bytes from a StandardData file via `ISOReadBinary`.
+    /// Read bytes from a file.
     ///
-    /// `CLA=00 INS=B0`, NT4H2421Gx §10.9.2. Always `CommMode.Plain` —
-    /// the command has no secure-messaging variant and never advances
-    /// `CmdCtr`. `Read` or `ReadWrite` access on the targeted file must
-    /// be set to free (`Eh`) for the call to succeed.
+    /// The command is using plain mode.
+    /// Read access on the targeted file must
+    /// be set to (free access)[`crate::types::file_settings::AccessCondition::Free`] for the call to succeed.
     ///
-    /// Restricted to `Session<Unauthenticated>`: per NT4H2421Gx Table 89,
-    /// while the PICC is in `AuthenticatedEV2` / `AuthenticatedLRP` state
-    /// `ISOReadBinary` is rejected with `SW=6982h` ("AuthenticatedEV2/LRP
-    /// not allowed") and the PICC treats the raw ISO APDU as a protocol
-    /// violation, tearing the EV2/LRP session down. Use the native
-    /// `ReadData` command (available on `Session<Authenticated<_>>`)
-    /// instead for reads inside a secure channel.
+    /// For files with other access conditions, authentication may be required and
+    /// the caller should use [`Session::read_file_with_mode`].
     ///
     /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
     /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
@@ -171,7 +166,7 @@ impl Session<Unauthenticated> {
     /// hits the 256 cap the command asks for the entire file (`Le = 00h`)
     /// and the PICC truncates at the file boundary. The returned `usize`
     /// is the number of bytes actually copied into `buf`.
-    pub async fn read_unauthenticated<T: Transport>(
+    pub async fn read_file_unauthenticated<T: Transport>(
         &mut self,
         transport: &mut T,
         file: File,
@@ -186,23 +181,14 @@ impl Session<Unauthenticated> {
         iso_read_binary(transport, None, offset, buf).await
     }
 
-    /// Write bytes to a StandardData file via `ISOUpdateBinary`.
+    /// Write bytes to a file.
     ///
-    /// `CLA=00 INS=D6`, NT4H2421Gx §10.9.3. Always `CommMode.Plain` —
-    /// the command has no secure-messaging variant and never advances
-    /// `CmdCtr`. `Write` or `ReadWrite` access on the targeted file
-    /// must be set to free (`Eh`) for the call to succeed.
+    /// The command is using plain mode.
+    /// Write access on the targeted file
+    /// must be set to (free access)[`crate::types::file_settings::AccessCondition::Free`] for the call to succeed.
     ///
-    /// Restricted to `Session<Unauthenticated>`: per NT4H2421Gx §10.9.3,
-    /// while the PICC is in `AuthenticatedEV2` / `AuthenticatedLRP` state
-    /// `ISOUpdateBinary` is rejected with `SW=6982h` ("security status
-    /// not satisfied"). Use the native `WriteData` command (available on
-    /// `Session<Authenticated<_>>`) instead for writes inside a secure
-    /// channel.
-    ///
-    /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
     /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
-    pub async fn write_unauthenticated<T: Transport>(
+    pub async fn write_file_unauthenticated<T: Transport>(
         &mut self,
         transport: &mut T,
         file: File,
@@ -216,15 +202,8 @@ impl Session<Unauthenticated> {
         }
         iso_update_binary(transport, None, offset, data).await
     }
-}
 
-impl Session<Unauthenticated> {
-    /// Retrieve a file's settings via `GetFileSettings` (INS `F5h`,
-    /// NT4H2421Gx §10.7.2) in `CommMode.Plain`.
-    ///
-    /// The NDEF application must be selected first; this method issues the
-    /// select automatically if needed and then parses the returned payload
-    /// into [`FileSettings`].
+    /// Retrieve a file's settings.
     pub async fn get_file_settings<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -233,255 +212,22 @@ impl Session<Unauthenticated> {
         self.select_ndef_application(transport).await?;
         get_file_settings(transport, file.file_no()).await
     }
-}
 
-impl Session<Unauthenticated> {
     /// Read software, hardware and production version information.
     ///
-    /// Uses `GetVersion` (INS `60`, NT4H2421Gx §10.7) in `CommMode.Plain`.
+    /// Uses plain mode communication. For authenticated sessions
+    /// there is also a (MAC mode variant available)[`Session::<Authenticated<_>>::get_version`].
     pub async fn get_version<T: Transport>(
         &self,
         transport: &mut T,
     ) -> Result<Version, SessionError<T::Error>> {
         get_version(transport).await
     }
-}
 
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Read version information in `CommMode.MAC`.
-    ///
-    /// Uses `GetVersion` over `CommMode.MAC` (§10.2 Table 21 footnote
-    /// 1). Verifies the trailing `MACt` on the last chained response
-    /// and advances `CmdCtr` on success.
-    ///
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.9) and the session cannot be reused.
-    pub async fn get_version<T: Transport>(
-        mut self,
-        transport: &mut T,
-    ) -> Result<(Version, Self), SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let version = get_version_mac(transport, &mut channel).await?;
-        Ok((version, self))
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Change a non-master application key.
-    ///
-    /// Uses `ChangeKey` Case 1 (INS `C4`, NT4H2421Gx §10.6.1, AN12196
-    /// §5.16.1) in `CommMode.FULL`.
-    ///
-    /// Authentication with key 0 must be established before calling this.
-    /// The command cryptogram contains `NewKey ⊕ OldKey` together with
-    /// `CRC32(NewKey)`; pass the current PICC key as `old_key`. The PICC
-    /// responds with a `MACt` that is verified before returning, and
-    /// `CmdCtr` is advanced on success.
-    ///
-    /// To change the Application Master Key (`Key0`), use
-    /// [`Session::change_master_key`] instead — it has different
-    /// cryptogram/response semantics and invalidates the session.
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.10) and the session cannot be reused.
-    pub async fn change_key<T: Transport>(
-        mut self,
-        transport: &mut T,
-        key_no: NonMasterKeyNumber,
-        new_key: &[u8; 16],
-        new_key_version: u8,
-        old_key: &[u8; 16],
-    ) -> Result<Self, SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        change_key(
-            transport,
-            &mut channel,
-            key_no,
-            new_key,
-            new_key_version,
-            old_key,
-        )
-        .await?;
-        Ok(self)
-    }
-
-    /// Change the application master key.
-    ///
-    /// Uses `ChangeKey` Case 2 for `Key0` (INS `C4`, NT4H2421Gx
-    /// §10.6.1, AN12196 §5.16.2) in `CommMode.FULL`.
-    ///
-    /// Authentication with key 0 must be established before calling this.
-    /// The command cryptogram contains only `NewKey`; the PICC responds
-    /// with `91 00` (no `MACt`). After this call the session keys are
-    /// no longer valid for any further command, so the session is
-    /// consumed and an unauthenticated one is returned — re-run the
-    /// authentication handshake (with the new key) to issue further
-    /// authenticated commands.
-    ///
-    /// On error the session is dropped as well: at that point the PCD
-    /// cannot tell whether the PICC accepted the change or not, so
-    /// continuing to use the old session keys is unsafe.
-    pub async fn change_master_key<T: Transport>(
-        mut self,
-        transport: &mut T,
-        new_key: &[u8; 16],
-        new_key_version: u8,
-    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        change_master_key(transport, &mut channel, new_key, new_key_version).await?;
-        Ok(Session::new())
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Read the permanent PICC UID.
-    ///
-    /// Uses `GetCardUID` (INS `51`, NT4H2421Gx §10.5.3) in
-    /// `CommMode.FULL`.
-    ///
-    /// Authentication with any application key must be established before
-    /// calling this. The command always returns the permanent UID even when
-    /// the tag is configured for Random ID at activation (§10.5.3). Verifies
-    /// the response `MACt`, decrypts the payload, checks ISO/IEC 9797-1
-    /// Method 2 padding, and advances `CmdCtr` on success.
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.10) and the session cannot be reused.
-    pub async fn get_card_uid<T: Transport>(
-        mut self,
-        transport: &mut T,
-    ) -> Result<([u8; 7], Self), SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let uid = get_card_uid(transport, &mut channel).await?;
-        Ok((uid, self))
-    }
-
-    /// Read an application key version.
-    ///
-    /// Uses `GetKeyVersion` (INS `64`, NT4H2421Gx §10.6.2) in
-    /// `CommMode.MAC` (§10.2 Table 21).
-    ///
-    /// Authentication with any application key must be established before
-    /// calling this. The PICC returns `00h` for disabled keys and for
-    /// `OriginalityKey`, and the full byte range otherwise (Table 67).
-    /// The response `MACt` is verified and `CmdCtr` advances on success.
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.9) and the session cannot be reused.
-    pub async fn get_key_version<T: Transport>(
-        mut self,
-        transport: &mut T,
-        key_no: KeyNumber,
-    ) -> Result<(u8, Self), SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let version = get_key_version(transport, &mut channel, key_no).await?;
-        Ok((version, self))
-    }
-
-    /// Read file settings in `CommMode.MAC`.
-    ///
-    /// Uses `GetFileSettings` (INS `F5h`, NT4H2421Gx §10.7.2) in
-    /// `CommMode.MAC` (§10.2 Table 21).
-    ///
-    /// Authentication with any application key must be established before
-    /// calling this. The response `MACt` is verified, the secure-messaging
-    /// frame is stripped, and the remaining payload is decoded into
-    /// [`FileSettings`]. `CmdCtr` advances on success.
-    ///
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.9) and the session cannot be reused.
-    pub async fn get_file_settings<T: Transport>(
-        mut self,
-        transport: &mut T,
-        file: File,
-    ) -> Result<(FileSettings, Self), SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let settings = get_file_settings_mac(transport, &mut channel, file.file_no()).await?;
-        Ok((settings, self))
-    }
-
-    /// Read a file's `SDMReadCtr`.
-    ///
-    /// Uses `GetFileCounters` (INS `F6h`, NT4H2421Gx §10.7.3) in
-    /// `CommMode.MAC`.
-    ///
-    /// The file must have SDM enabled and the `SDMCtrRet` access right
-    /// must be set to a key number other than `Fh` (free). The response
-    /// `MACt` is verified and `CmdCtr` advances on success.
-    ///
-    /// The 24-bit `SDMReadCtr` is returned as a `u32` (zero-extended from
-    /// the 3 wire bytes, LSB first, per NT4H2421Gx §10.7.3 Table 76).
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.9) and the session cannot be reused.
-    pub async fn get_file_counters<T: Transport>(
-        mut self,
-        transport: &mut T,
-        file: File,
-    ) -> Result<(u32, Self), SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let counter = get_file_counters(transport, &mut channel, file.file_no()).await?;
-        Ok((counter, self))
-    }
-
-    /// Apply tag configuration changes via `SetConfiguration` (INS `5C`,
-    /// NT4H2421Gx §10.5.1) in `CommMode.FULL`.
-    ///
-    /// Authentication with the application master key (`Key0`) must be
-    /// established before calling this. Each option set on `configuration`
-    /// is sent as its own APDU (the command is single-option per call) in
-    /// the canonical Table 50 order; `CmdCtr` advances once per APDU on
-    /// success. A configuration with no options is a no-op.
-    ///
-    /// Enabling LRP is intentionally not reachable through this method —
-    /// the PICC tears down the secure channel as part of the switch, so
-    /// mixing it with other options would leave the session in an invalid
-    /// state. Use [`Session::enable_lrp`] instead, which consumes the
-    /// authenticated AES session and returns a fresh unauthenticated one.
-    ///
-    /// Several options are irreversible — see [`Configuration`] for the
-    /// individual `with_*` builder methods.
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.10) and the session cannot be reused.
-    pub async fn set_configuration<T: Transport>(
-        mut self,
-        transport: &mut T,
-        configuration: &Configuration,
-    ) -> Result<Self, SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        set_configuration(transport, &mut channel, configuration).await?;
-        Ok(self)
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Change a file's settings via `ChangeFileSettings` (INS `5Fh`,
-    /// NT4H2421Gx §10.7.1) in `CommMode.FULL`.
-    ///
-    /// Authentication with the key indicated by the file's `Change` access
-    /// condition must be established before calling this. The file
-    /// settings are encoded via [`FileSettings::encode_change`], padded,
-    /// encrypted and MAC'd; the PICC responds with `MACt` only.
-    ///
-    /// `CmdCtr` advances once on success.
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.10) and the session cannot be reused.
-    pub async fn change_file_settings<T: Transport>(
-        mut self,
-        transport: &mut T,
-        file: File,
-        settings: &FileSettings,
-    ) -> Result<Self, SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        change_file_settings(transport, &mut channel, file.file_no(), settings).await?;
-        Ok(self)
-    }
-}
-
-impl Session<Unauthenticated> {
     /// Perform AES authentication.
     ///
-    /// Selects the NDEF application (`ISOSelectFile` by DF name) if it has
-    /// not already been selected in this session, then drives the two-part
-    /// `AuthenticateEV2First` AES handshake. `rnd_a` is the 16-byte PCD
-    /// challenge; the caller owns entropy so this method stays deterministic
-    /// in tests and free of RNG dependencies in `no_std`.
+    /// The caller must provide the 16-byte key and the PCD challenge `rnd_a`
+    /// (the caller owns entropy).
     pub async fn authenticate_aes<T: Transport>(
         mut self,
         transport: &mut T,
@@ -499,19 +245,13 @@ impl Session<Unauthenticated> {
         })
     }
 
-    /// Perform LRP authentication (`AuthenticateLRPFirst`, NT4H2421Gx §9.2.5,
-    /// §10.4.3).
+    /// Perform LRP authentication.
     ///
-    /// Selects the NDEF application (`ISOSelectFile` by DF name) if it has
-    /// not already been selected in this session, then drives the two-part
-    /// `AuthenticateLRPFirst` handshake. The tag must have been put into LRP
-    /// mode beforehand via `SetConfiguration` (§10.10). `rnd_a` is the
-    /// 16-byte PCD challenge; the caller supplies entropy to keep this method
-    /// deterministic in tests and free of RNG dependencies in `no_std`.
+    /// The tag must have been put into LRP
+    /// mode beforehand via [`Session::enable_lrp`].
     ///
-    /// On success, returns a session backed by LRP with `EncCtr = 1`
-    /// (§9.2.4: the value `0` is consumed by the Part 2 response decryption
-    /// during the handshake itself).
+    /// The caller must provide the key and the PCD challenge `rnd_a`
+    /// (the caller owns entropy).
     pub async fn authenticate_lrp<T: Transport>(
         mut self,
         transport: &mut T,
@@ -528,101 +268,13 @@ impl Session<Unauthenticated> {
             ef_selected,
         })
     }
-}
 
-impl Session<Authenticated<AesSuite>> {
-    /// Enable LRP mode on the PICC.
+    /// Verify tag originality by its UID.
     ///
-    /// Uses `SetConfiguration` Option `05h` (NT4H2421Gx §10.5.1,
-    /// AN12321 §5).
+    /// Reads the 56-byte ECDSA originality signature from the
+    /// PICC and verifies it using the NXP master public key.
     ///
-    /// Consumes the authenticated AES session: enabling LRP tears down the
-    /// secure channel on the PICC (the PICC returns `9100` without a
-    /// response `MACt`, and any subsequent secure-messaging APDU on the
-    /// same channel fails with `LENGTH_ERROR` / `PERMISSION_DENIED`). The
-    /// returned [`Session<Unauthenticated>`] keeps the NDEF application /
-    /// EF selection state — plain commands still work on it — but the
-    /// next authentication must be [`Session::authenticate_lrp`] (which
-    /// runs `AuthenticateLRPFirst`), because AES First is rejected with
-    /// `PERMISSION_DENIED` once LRP is on.
-    ///
-    /// The switch is **permanent** (NT4H2421Gx §8).
-    pub async fn enable_lrp<T: Transport>(
-        mut self,
-        transport: &mut T,
-    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
-        let configuration = Configuration::new().with_lrp_enabled();
-        {
-            let mut channel = SecureChannel::new(&mut self.state);
-            set_configuration(transport, &mut channel, &configuration).await?;
-        }
-        Ok(Session {
-            state: Unauthenticated,
-            ndef_selected: self.ndef_selected,
-            ef_selected: self.ef_selected,
-        })
-    }
-}
-
-impl Session<Authenticated<AesSuite>> {
-    /// Re-authenticate within an existing AES session (`AuthenticateEV2NonFirst`,
-    /// NT4H2421Gx §9.1.6, §10.4.2).
-    ///
-    /// Derives fresh session keys (`SesAuthMACKey`, `SesAuthENCKey`) while the
-    /// PICC preserves TI and `CmdCtr` (p. 25–26). Returns `self` with the suite
-    /// replaced by the newly derived one. The `TI` and `CmdCtr` values carried by
-    /// the returned session match those of the original session.
-    ///
-    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
-    pub async fn authenticate_aes_non_first<T: Transport>(
-        mut self,
-        transport: &mut T,
-        key_no: KeyNumber,
-        key: &[u8; 16],
-        rnd_a: [u8; 16],
-    ) -> Result<Self, SessionError<T::Error>> {
-        let ti = *self.state.ti_bytes();
-        let cmd_counter = self.state.counter();
-        let suite = authenticate_ev2_non_first_aes(transport, key_no, key, rnd_a).await?;
-        self.state = Authenticated::non_first(suite, ti, cmd_counter);
-        Ok(self)
-    }
-}
-
-impl Session<Authenticated<LrpSuite>> {
-    /// Re-authenticate within an existing LRP session (`AuthenticateLRPNonFirst`,
-    /// NT4H2421Gx §9.2.6, §10.4.4).
-    ///
-    /// Derives fresh session keys while the PICC preserves TI and `CmdCtr` and
-    /// resets `EncCtr` to 0 (§9.2.4, p. 30). Returns `self` with the suite
-    /// replaced by the newly derived one.
-    ///
-    /// AES NonFirst is not available on an LRP session — LRP mode is not
-    /// reversible.
-    ///
-    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
-    pub async fn authenticate_lrp_non_first<T: Transport>(
-        mut self,
-        transport: &mut T,
-        key_no: KeyNumber,
-        key: &[u8; 16],
-        rnd_a: [u8; 16],
-    ) -> Result<Self, SessionError<T::Error>> {
-        let ti = *self.state.ti_bytes();
-        let cmd_counter = self.state.counter();
-        let suite = authenticate_ev2_non_first_lrp(transport, key_no, key, rnd_a).await?;
-        self.state = Authenticated::non_first(suite, ti, cmd_counter);
-        Ok(self)
-    }
-}
-
-impl Session<Unauthenticated> {
-    /// Verify tag originality by its UID, using `Read_Sig` in
-    /// `CommMode.Plain`.
-    ///
-    /// Issue `Read_Sig` (INS = 0x3C, NT4H2421Gx §10.12) and verify the
-    /// 56-byte ECDSA originality signature against `uid` using the NXP
-    /// master public key (AN12196 §7.2).
+    /// The provided UID must not be a randomized ID - use [`Session::get_uid`] if needed.
     pub async fn verify_originality<T: Transport>(
         &self,
         transport: &mut T,
@@ -630,183 +282,6 @@ impl Session<Unauthenticated> {
     ) -> Result<(), SessionError<T::Error>> {
         let sig = read_sig(transport).await?;
         originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Verify tag originality by its UID, using `Read_Sig` in
-    /// `CommMode.MAC` (§9.1.9). Verifies the response `MACt` and
-    /// advances `CmdCtr` before running the ECDSA check against the
-    /// NXP master public key (AN12196 §7.2).
-    ///
-    /// Consumes the session: a PICC error invalidates the authenticated
-    /// state (§9.1.9) and the session cannot be reused.
-    pub async fn verify_originality<T: Transport>(
-        mut self,
-        transport: &mut T,
-        uid: &[u8; 7],
-    ) -> Result<Self, SessionError<T::Error>> {
-        let mut channel = SecureChannel::new(&mut self.state);
-        let sig = read_sig_mac(transport, &mut channel).await?;
-        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)?;
-        Ok(self)
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Read file bytes in `CommMode.Plain`.
-    ///
-    /// Uses `ReadData` (INS `AD`) under an active session
-    /// (NT4H2421Gx §10.8.1).
-    ///
-    /// Per §8.2.3.3, `CommMode.Plain` must be used when the only access
-    /// condition granting the current session access is free access (`Eh`).
-    ///
-    /// Does **not** use secure messaging, so a PICC error does **not**
-    /// invalidate the authenticated session — the session is borrowed,
-    /// not consumed. `CmdCtr` is advanced on success (§9.1.2, §9.1.8).
-    ///
-    /// `length = 0` means "entire file from `offset`". Returns the
-    /// number of bytes copied into `buf`.
-    pub async fn read_plain<T: Transport>(
-        &mut self,
-        transport: &mut T,
-        file: File,
-        offset: u32,
-        length: u32,
-        buf: &mut [u8],
-    ) -> Result<usize, SessionError<T::Error>> {
-        let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
-        self.state.advance_counter();
-        Ok(n)
-    }
-
-    /// Read file bytes with an explicit CommMode.
-    ///
-    /// Reads `length` bytes from `file` starting at `offset`, using the
-    /// caller-supplied `mode` as the command's effective CommMode
-    /// (NT4H2421Gx §10.8.1 `ReadData`, INS `AD`).
-    ///
-    /// The effective CommMode is determined by the file's configuration
-    /// (§8.2.3.5, Table 13), with one override from §8.2.3.3: when the
-    /// only access condition granting the current session access to the
-    /// targeted right (`Read` / `ReadWrite` / `SDMFileRead`) is free
-    /// access (`Eh`), `CommMode.Plain` must be used even though the
-    /// session is authenticated. In that case the PICC expects a plain
-    /// APDU with no MAC trailer — prefer [`Self::read_plain`] which
-    /// borrows instead of consuming the session.
-    ///
-    /// `length = 0` means "entire file from `offset`", capped at the
-    /// 256-byte short-`Le` response limit (§10.8.1 Table 78). When
-    /// `length != 0`, `buf.len()` must be at least `length`.
-    ///
-    /// Consumes the session: a PICC error on `CommMode::Mac` or
-    /// `CommMode::Full` invalidates the authenticated state
-    /// (§9.1.9/§9.1.10) and the session cannot be reused. Returns the
-    /// number of bytes copied into `buf` together with the session.
-    /// `CmdCtr` is advanced on success in all three modes (§9.1.2,
-    /// §9.1.8).
-    pub async fn read_with_mode<T: Transport>(
-        mut self,
-        transport: &mut T,
-        file: File,
-        offset: u32,
-        length: u32,
-        mode: CommMode,
-        buf: &mut [u8],
-    ) -> Result<(usize, Self), SessionError<T::Error>> {
-        match mode {
-            CommMode::Plain => {
-                let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
-                self.state.advance_counter();
-                Ok((n, self))
-            }
-            CommMode::Mac => {
-                let mut channel = SecureChannel::new(&mut self.state);
-                let n = read_data_mac(transport, &mut channel, file.file_no(), offset, length, buf)
-                    .await?;
-                Ok((n, self))
-            }
-            CommMode::Full => {
-                let mut channel = SecureChannel::new(&mut self.state);
-                let n =
-                    read_data_full(transport, &mut channel, file.file_no(), offset, length, buf)
-                        .await?;
-                Ok((n, self))
-            }
-        }
-    }
-}
-
-impl<S: SessionSuite> Session<Authenticated<S>> {
-    /// Write file bytes in `CommMode.Plain`.
-    ///
-    /// Uses `WriteData` (INS `8D`) under an active session
-    /// (NT4H2421Gx §10.8.2).
-    ///
-    /// Per §8.2.3.3, `CommMode.Plain` must be used when the only access
-    /// condition granting the current session access is free access (`Eh`).
-    ///
-    /// Does **not** use secure messaging, so a PICC error does **not**
-    /// invalidate the authenticated session — the session is borrowed,
-    /// not consumed. `CmdCtr` is advanced on success (§9.1.2, §9.1.8).
-    pub async fn write_plain<T: Transport>(
-        &mut self,
-        transport: &mut T,
-        file: File,
-        offset: u32,
-        data: &[u8],
-    ) -> Result<(), SessionError<T::Error>> {
-        write_data_plain(transport, file.file_no(), offset, data).await?;
-        self.state.advance_counter();
-        Ok(())
-    }
-
-    /// Write file bytes with an explicit CommMode.
-    ///
-    /// Writes `data` to `file` starting at `offset`, using the
-    /// caller-supplied `mode` as the command's effective CommMode
-    /// (NT4H2421Gx §10.8.2 `WriteData`, INS `8D`).
-    ///
-    /// The effective CommMode is determined by the file's configuration
-    /// (§8.2.3.5, Table 13), with one override from §8.2.3.3: when the
-    /// only access condition granting the current session access to the
-    /// targeted right (`Write` / `ReadWrite`) is free access (`Eh`),
-    /// `CommMode.Plain` must be used even though the session is
-    /// authenticated. In that case the PICC expects a plain APDU with
-    /// no MAC trailer — prefer [`Self::write_plain`] which borrows
-    /// instead of consuming the session.
-    ///
-    /// Consumes the session: a PICC error on `CommMode::Mac` or
-    /// `CommMode::Full` invalidates the authenticated state
-    /// (§9.1.9/§9.1.10) and the session cannot be reused.
-    /// `CmdCtr` is advanced on success in all three modes (§9.1.2,
-    /// §9.1.8).
-    pub async fn write_with_mode<T: Transport>(
-        mut self,
-        transport: &mut T,
-        file: File,
-        offset: u32,
-        data: &[u8],
-        mode: CommMode,
-    ) -> Result<Self, SessionError<T::Error>> {
-        match mode {
-            CommMode::Plain => {
-                write_data_plain(transport, file.file_no(), offset, data).await?;
-                self.state.advance_counter();
-                Ok(self)
-            }
-            CommMode::Mac => {
-                let mut channel = SecureChannel::new(&mut self.state);
-                write_data_mac(transport, &mut channel, file.file_no(), offset, data).await?;
-                Ok(self)
-            }
-            CommMode::Full => {
-                let mut channel = SecureChannel::new(&mut self.state);
-                write_data_full(transport, &mut channel, file.file_no(), offset, data).await?;
-                Ok(self)
-            }
-        }
     }
 }
 
@@ -871,19 +346,377 @@ impl<S: SessionSuite> Authenticated<S> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Read software, hardware and production version information.
+    ///
+    /// Uses MAC mode communication.
+    pub async fn get_version<T: Transport>(
+        mut self,
+        transport: &mut T,
+    ) -> Result<(Version, Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let version = get_version_mac(transport, &mut channel).await?;
+        Ok((version, self))
+    }
+
+    /// Change a non-master application key.
+    ///
+    /// The factory default value for all keys is `[0u8; 16]`.
+    ///
+    /// Authentication with the master key must be established before calling this.
+    ///
+    /// To change the master key use [`Session::change_master_key`] instead.
+    pub async fn change_key<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: NonMasterKeyNumber,
+        new_key: &[u8; 16],
+        new_key_version: u8,
+        old_key: &[u8; 16],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_key(
+            transport,
+            &mut channel,
+            key_no,
+            new_key,
+            new_key_version,
+            old_key,
+        )
+        .await?;
+        Ok(self)
+    }
+
+    /// Change the application master key.
+    ///
+    /// Authentication with the master key must be established before calling this.
+    ///
+    /// After this call the session keys are
+    /// no longer valid for any further command, so the session is
+    /// consumed and an unauthenticated one is returned. Re-run the
+    /// authentication to issue further
+    /// authenticated commands.
+    pub async fn change_master_key<T: Transport>(
+        mut self,
+        transport: &mut T,
+        new_key: &[u8; 16],
+        new_key_version: u8,
+    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_master_key(transport, &mut channel, new_key, new_key_version).await?;
+        Ok(Session::new())
+    }
+
+    /// Read the permanent PICC UID.
+    ///
+    /// The command returns the permanent UID even when
+    /// the tag is configured for Random ID at activation (§10.5.3).
+    pub async fn get_uid<T: Transport>(
+        mut self,
+        transport: &mut T,
+    ) -> Result<([u8; 7], Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let uid = get_card_uid(transport, &mut channel).await?;
+        Ok((uid, self))
+    }
+
+    /// Read an application key version.
+    ///
+    /// The PICC returns `0` for disabled keys and for
+    /// `OriginalityKey` (not implemented),
+    /// and the full byte range otherwise.
+    pub async fn get_key_version<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+    ) -> Result<(u8, Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let version = get_key_version(transport, &mut channel, key_no).await?;
+        Ok((version, self))
+    }
+
+    /// Read file settings.
+    pub async fn get_file_settings<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+    ) -> Result<(FileSettings, Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let settings = get_file_settings_mac(transport, &mut channel, file.file_no()).await?;
+        Ok((settings, self))
+    }
+
+    /// Read a file's SDM read counter.
+    ///
+    /// The counter increments on unauthenticated reads of the file when SDM
+    /// is enabled, it is reset to zero when enabling SDM for the file.
+    pub async fn get_file_counters<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+    ) -> Result<(u32, Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let counter = get_file_counters(transport, &mut channel, file.file_no()).await?;
+        Ok((counter, self))
+    }
+
+    /// Apply tag configuration changes
+    ///
+    /// Authentication with the application master key must be
+    /// established before calling this. Each option set on `configuration`
+    /// is sent as its own APDU (the command is single-option per call) in
+    /// the canonical Table 50 order. A configuration with no options is a no-op.
+    ///
+    /// Enabling LRP is intentionally not reachable through this method -
+    /// the PICC tears down the secure channel as part of the switch, so
+    /// mixing it with other options would leave the session in an invalid
+    /// state. Use [`Session::enable_lrp`] instead, which consumes the
+    /// authenticated AES session and returns a fresh unauthenticated one.
+    ///
+    /// Several options are irreversible, see [`Configuration`] for the
+    /// individual `with_*` builder methods.
+    pub async fn set_configuration<T: Transport>(
+        mut self,
+        transport: &mut T,
+        configuration: &Configuration,
+    ) -> Result<Self, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        set_configuration(transport, &mut channel, configuration).await?;
+        Ok(self)
+    }
+
+    /// Change a file's settings.
+    ///
+    /// Authentication with the key indicated by the file's `Change` access
+    /// condition must be established before calling this.
+    pub async fn change_file_settings<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+        settings: &FileSettings,
+    ) -> Result<Self, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_file_settings(transport, &mut channel, file.file_no(), settings).await?;
+        Ok(self)
+    }
+
+    /// Verify tag originality by its UID, using `Read_Sig` in
+    /// `CommMode.MAC` (§9.1.9). Verifies the response `MACt` and
+    /// advances `CmdCtr` before running the ECDSA check against the
+    /// NXP master public key (AN12196 §7.2).
+    pub async fn verify_originality<T: Transport>(
+        mut self,
+        transport: &mut T,
+        uid: &[u8; 7],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let sig = read_sig_mac(transport, &mut channel).await?;
+        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)?;
+        Ok(self)
+    }
+
+    /// Read file bytes in plain mode.
+    ///
+    /// This must be used when the only access
+    /// condition granting the current session access is free access.
+    ///
+    /// `length = 0` means "entire file from `offset`". Returns the
+    /// number of bytes copied into `buf`.
+    pub async fn read_file_plain<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        length: u32,
+        buf: &mut [u8],
+    ) -> Result<usize, SessionError<T::Error>> {
+        let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
+        self.state.advance_counter();
+        Ok(n)
+    }
+
+    /// Read file bytes with an explicit communication mode.
+    ///
+    /// Reads `length` bytes from `file` starting at `offset`, using the
+    /// caller-supplied `mode` as the command's effective communication mode.
+    ///
+    /// The required communication mode can be determined by the file's configuration,
+    /// with one exception: when the
+    /// only access condition granting the current session access to the
+    /// targeted right (`Read` / `ReadWrite` / `SDMFileRead`) is free
+    /// access, plain communication mode must be used even though the
+    /// session is authenticated. You may use [`Self::read_file_plain`]
+    /// in this case.
+    ///
+    /// `length = 0` means "entire file from `offset`", capped at the
+    /// 256-byte short-`Le` response limit (§10.8.1 Table 78). When
+    /// `length != 0`, `buf.len()` must be at least `length`.
+    pub async fn read_file_with_mode<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        length: u32,
+        mode: CommMode,
+        buf: &mut [u8],
+    ) -> Result<(usize, Self), SessionError<T::Error>> {
+        match mode {
+            CommMode::Plain => {
+                let n = read_data_plain(transport, file.file_no(), offset, length, buf).await?;
+                self.state.advance_counter();
+                Ok((n, self))
+            }
+            CommMode::Mac => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                let n = read_data_mac(transport, &mut channel, file.file_no(), offset, length, buf)
+                    .await?;
+                Ok((n, self))
+            }
+            CommMode::Full => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                let n =
+                    read_data_full(transport, &mut channel, file.file_no(), offset, length, buf)
+                        .await?;
+                Ok((n, self))
+            }
+        }
+    }
+
+    /// Write file bytes in plain communication mode.
+    ///
+    /// This must be used when the only access
+    /// condition granting the current session access is free access.
+    pub async fn write_file_plain<T: Transport>(
+        &mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        data: &[u8],
+    ) -> Result<(), SessionError<T::Error>> {
+        write_data_plain(transport, file.file_no(), offset, data).await?;
+        self.state.advance_counter();
+        Ok(())
+    }
+
+    /// Write file bytes with an explicit CommMode.
+    ///
+    /// Writes `data` to `file` starting at `offset`, using the
+    /// caller-supplied `mode` as the command's effective communication mode.
+    ///
+    /// The required communication mode can be determined by the file's configuration,
+    /// with one exception: when the
+    /// only access condition granting the current session access to the
+    /// targeted right (read / write) is free access,
+    /// plain communication mode must be used even though the session is
+    /// authenticated. You may use [`Self::write_file_plain`]
+    /// in this case.
+    pub async fn write_with_mode<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        data: &[u8],
+        mode: CommMode,
+    ) -> Result<Self, SessionError<T::Error>> {
+        match mode {
+            CommMode::Plain => {
+                write_data_plain(transport, file.file_no(), offset, data).await?;
+                self.state.advance_counter();
+                Ok(self)
+            }
+            CommMode::Mac => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                write_data_mac(transport, &mut channel, file.file_no(), offset, data).await?;
+                Ok(self)
+            }
+            CommMode::Full => {
+                let mut channel = SecureChannel::new(&mut self.state);
+                write_data_full(transport, &mut channel, file.file_no(), offset, data).await?;
+                Ok(self)
+            }
+        }
+    }
+
     /// Return the session transaction identifier.
     ///
     /// This value is assigned by the PICC on the first authentication
     /// of the transaction (§9.1.1).
+    #[doc(hidden)] // not needed by typical users, but exposed for advanced use cases and testing
     pub fn ti(&self) -> &[u8; 4] {
         &self.state.ti
     }
 
-    /// Current value of the shared Command Counter (§9.1.2). Reset to
-    /// zero on `AuthenticateEV2First`, advanced in lockstep with the
+    /// Current value of the shared Command Counter.
+    ///
+    /// Reset to zero on `AuthenticateEV2First`, advanced in lockstep with the
     /// PICC as commands succeed.
+    #[doc(hidden)] // not needed by typical users, but exposed for advanced use cases and testing
     pub fn cmd_counter(&self) -> u16 {
         self.state.cmd_counter
+    }
+}
+
+impl Session<Authenticated<AesSuite>> {
+    /// Enable LRP mode on the PICC.
+    ///
+    /// <div class="warning">The switch is permanent (NT4H2421Gx §8).</div>
+    ///
+    /// Consumes the authenticated AES session: enabling LRP tears down the
+    /// secure channel on the PICC. The
+    /// next authentication must be [`Session::authenticate_lrp`].
+    pub async fn enable_lrp<T: Transport>(
+        mut self,
+        transport: &mut T,
+    ) -> Result<Session<Unauthenticated>, SessionError<T::Error>> {
+        let configuration = Configuration::new().with_lrp_enabled();
+        {
+            let mut channel = SecureChannel::new(&mut self.state);
+            set_configuration(transport, &mut channel, &configuration).await?;
+        }
+        Ok(Session {
+            state: Unauthenticated,
+            ndef_selected: self.ndef_selected,
+            ef_selected: self.ef_selected,
+        })
+    }
+
+    /// Re-authenticate within an existing AES session.
+    ///
+    /// Returns `self` with the suite replaced by the newly derived one.
+    ///
+    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
+    pub async fn authenticate_aes<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let ti = *self.state.ti_bytes();
+        let cmd_counter = self.state.counter();
+        let suite = authenticate_ev2_non_first_aes(transport, key_no, key, rnd_a).await?;
+        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        Ok(self)
+    }
+}
+
+impl Session<Authenticated<LrpSuite>> {
+    /// Re-authenticate within an existing LRP session.
+    ///
+    /// Returns `self` with the suite replaced by the newly derived one.
+    ///
+    /// `rnd_a` is the 16-byte PCD challenge; the caller owns entropy.
+    pub async fn authenticate_lrp<T: Transport>(
+        mut self,
+        transport: &mut T,
+        key_no: KeyNumber,
+        key: &[u8; 16],
+        rnd_a: [u8; 16],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let ti = *self.state.ti_bytes();
+        let cmd_counter = self.state.counter();
+        let suite = authenticate_ev2_non_first_lrp(transport, key_no, key, rnd_a).await?;
+        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        Ok(self)
     }
 }
 
@@ -1188,7 +1021,7 @@ mod tests {
         assert_eq!(session.cmd_counter(), 0);
 
         // NonFirst: TI and CmdCtr must survive the re-authentication.
-        let session = block_on(session.authenticate_aes_non_first(
+        let session = block_on(session.authenticate_aes(
             &mut transport,
             KeyNumber::Key0,
             &key,
@@ -1382,7 +1215,7 @@ mod tests {
         assert_eq!(session.cmd_counter(), 10);
 
         // NonFirst re-auth: TI and CmdCtr must survive.
-        let session = block_on(session.authenticate_lrp_non_first(
+        let session = block_on(session.authenticate_lrp(
             &mut transport,
             KeyNumber::Key0,
             &key,

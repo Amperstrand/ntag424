@@ -23,9 +23,9 @@ impl Configuration {
 
     /// Enable Random UID mode (PICCConfig bit 1).
     ///
-    /// The spec only allows enabling Random UID through `SetConfiguration`
-    /// (`0b` means "no change"), so there is no symmetric disable method.
+    /// <div class="warning">This change is <strong>permanent</strong>.</div>
     pub fn with_random_uid_enabled(mut self) -> Self {
+        // TODO: extend docs, briefly explain the consequences
         let bytes = self.picc.get_or_insert([0]);
         bytes[0] |= 1 << 1;
         self
@@ -33,9 +33,12 @@ impl Configuration {
 
     /// Disable chained writes.
     ///
+    /// <div class="warning">This change is <strong>permanent</strong>.</div>
+    ///
     /// Sets SMConfig bit 2 for `WriteData` in `CommMode.MAC` and
     /// `CommMode.Full`.
     pub fn with_chained_writing_disabled(mut self) -> Self {
+        // TODO: extend docs, briefly explain the consequences
         let bytes = self.secure_messaging.get_or_insert([0; 2]);
         // SMConfig is two bytes; bit 2 lives in the low byte.
         bytes[0] |= 1 << 2;

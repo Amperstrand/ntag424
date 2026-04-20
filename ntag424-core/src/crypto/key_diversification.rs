@@ -1,12 +1,19 @@
-//! AES-128 key diversification per AN10922 §2.2.
+//! AES-128 key diversification.
 //!
-//! Derives a unique AES-128 key per PICC from a single master key and
-//! card-specific diversification input using CMAC (NIST SP 800-38B).
+//! The methods implemented in this module allow to generate unique
+//! AES-128 keys from a master key combined with tag specific information.
+//! This is useful to avoid storing multiple keys, every key can
+//! be derived on the fly when needed.
 //!
-//! The diversification input should be unique per card — for NTAG 424 DNA
-//! the typical choice is `UID ‖ AID ‖ SystemIdentifier` (see AN10922 §2.1).
+//! The diversification process is based on AES-CMAC and follows the
+//! steps outlined in NXP's application note AN10922 §2.2. There are two main functions:
 //!
-//! Gated behind the **`key_diversification`** Cargo feature.
+//! - The [`diversify_aes128`] function takes a master key and
+//!   a generic diversification input, and produces a unique AES-128 key.
+//! - The [`diversify_ntag424`] function is a helper that assembles the diversification input
+//!   in the recommended format for NTAG 424 DNA,
+//!   which includes the tag's UID, a fixed AID, a key number,
+//!   and an application-defined system identifier.
 //!
 //! # Example
 //!
