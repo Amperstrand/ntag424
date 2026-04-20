@@ -4,11 +4,12 @@ use thiserror::Error;
 
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
-    authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_key, change_master_key,
-    get_card_uid, get_file_counters, get_file_settings, get_file_settings_mac, get_key_version,
-    get_version, get_version_mac, iso_read_binary, iso_select_ef_by_fid, iso_update_binary,
-    read_data_full, read_data_mac, read_data_plain, read_sig, read_sig_mac,
-    select_ndef_application, set_configuration, write_data_full, write_data_mac, write_data_plain,
+    authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_file_settings,
+    change_key, change_master_key, get_card_uid, get_file_counters, get_file_settings,
+    get_file_settings_mac, get_key_version, get_version, get_version_mac, iso_read_binary,
+    iso_select_ef_by_fid, iso_update_binary, read_data_full, read_data_mac, read_data_plain,
+    read_sig, read_sig_mac, select_ndef_application, set_configuration, write_data_full,
+    write_data_mac, write_data_plain,
 };
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
@@ -453,6 +454,30 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         set_configuration(transport, &mut channel, configuration).await?;
+        Ok(self)
+    }
+}
+
+impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Change a file's settings via `ChangeFileSettings` (INS `5Fh`,
+    /// NT4H2421Gx §10.7.1) in `CommMode.FULL`.
+    ///
+    /// Authentication with the key indicated by the file's `Change` access
+    /// condition must be established before calling this. The file
+    /// settings are encoded via [`FileSettings::encode_change`], padded,
+    /// encrypted and MAC'd; the PICC responds with `MACt` only.
+    ///
+    /// `CmdCtr` advances once on success.
+    /// Consumes the session: a PICC error invalidates the authenticated
+    /// state (§9.1.10) and the session cannot be reused.
+    pub async fn change_file_settings<T: Transport>(
+        mut self,
+        transport: &mut T,
+        file: File,
+        settings: &FileSettings,
+    ) -> Result<Self, SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        change_file_settings(transport, &mut channel, file.file_no(), settings).await?;
         Ok(self)
     }
 }
