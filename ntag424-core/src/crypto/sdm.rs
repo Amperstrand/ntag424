@@ -166,29 +166,31 @@ impl SecureDynamicMessageVerifier {
         // Build PiccSource + extract meta_read_key from access rights.
         let (picc_source, meta_read_key) = match settings.access.meta_read {
             SdmMetaRead::Encrypted(k) => {
-                let offset = settings.offsets.picc_data.ok_or(
-                    SdmError::InvalidConfiguration(
+                let offset = settings
+                    .offsets
+                    .picc_data
+                    .ok_or(SdmError::InvalidConfiguration(
                         "encrypted PICCData enabled but picc_data offset missing",
-                    ),
-                )?;
+                    ))?;
                 (PiccSource::Encrypted { offset }, Some(k))
             }
             SdmMetaRead::Plain => {
                 let uid_offset = if settings.uid_mirror {
-                    Some(settings.offsets.uid.ok_or(
-                        SdmError::InvalidConfiguration(
-                            "UID mirror enabled but uid offset missing",
-                        ),
-                    )?)
+                    Some(settings.offsets.uid.ok_or(SdmError::InvalidConfiguration(
+                        "UID mirror enabled but uid offset missing",
+                    ))?)
                 } else {
                     None
                 };
                 let read_ctr_offset = if settings.read_ctr_mirror {
-                    Some(settings.offsets.read_ctr.ok_or(
-                        SdmError::InvalidConfiguration(
-                            "read_ctr mirror enabled but read_ctr offset missing",
-                        ),
-                    )?)
+                    Some(
+                        settings
+                            .offsets
+                            .read_ctr
+                            .ok_or(SdmError::InvalidConfiguration(
+                                "read_ctr mirror enabled but read_ctr offset missing",
+                            ))?,
+                    )
                 } else {
                     None
                 };
@@ -279,11 +281,7 @@ impl SecureDynamicMessageVerifier {
     /// Use [`verify_with_meta_key`](Self::verify_with_meta_key) when
     /// `SDMMetaRead` and `SDMFileRead` are configured to different
     /// application keys.
-    pub fn verify(
-        &self,
-        ndef_data: &[u8],
-        key: &[u8; 16],
-    ) -> Result<SdmVerification, SdmError> {
+    pub fn verify(&self, ndef_data: &[u8], key: &[u8; 16]) -> Result<SdmVerification, SdmError> {
         self.verify_inner(ndef_data, key, key)
     }
 
@@ -312,16 +310,12 @@ impl SecureDynamicMessageVerifier {
 
         // -- Step 2: Derive SDM session keys --
         let keys = match self.mode {
-            CryptoMode::Aes => derive_sdm_keys_aes(
-                sdm_file_read_key,
-                uid.as_ref(),
-                read_ctr_bytes.as_ref(),
-            ),
-            CryptoMode::Lrp => derive_sdm_keys_lrp(
-                sdm_file_read_key,
-                uid.as_ref(),
-                read_ctr_bytes.as_ref(),
-            ),
+            CryptoMode::Aes => {
+                derive_sdm_keys_aes(sdm_file_read_key, uid.as_ref(), read_ctr_bytes.as_ref())
+            }
+            CryptoMode::Lrp => {
+                derive_sdm_keys_lrp(sdm_file_read_key, uid.as_ref(), read_ctr_bytes.as_ref())
+            }
         };
 
         // -- Step 3: Verify SDMMAC --
@@ -340,16 +334,12 @@ impl SecureDynamicMessageVerifier {
 
         // -- Step 4: Decrypt SDMENCFileData if configured --
         #[cfg(feature = "alloc")]
-        let enc_file_data = self.decrypt_enc_file_data(
-            ndef_data,
-            &keys,
-            read_ctr_bytes.as_ref(),
-        )?;
+        let enc_file_data =
+            self.decrypt_enc_file_data(ndef_data, &keys, read_ctr_bytes.as_ref())?;
 
         Ok(SdmVerification {
             uid,
-            read_ctr: read_ctr_bytes
-                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], 0])),
+            read_ctr: read_ctr_bytes.map(|c| u32::from_le_bytes([c[0], c[1], c[2], 0])),
             #[cfg(feature = "alloc")]
             enc_file_data,
         })
@@ -445,10 +435,11 @@ impl SecureDynamicMessageVerifier {
                 // Counter = SDMReadCtr || 000000 (6 bytes, §9.3.6.2).
                 let mut counter = [0u8; 6];
                 counter[..3].copy_from_slice(&ctr);
-                enc.lricb_decrypt_in_place(&mut counter, &mut ct)
-                    .ok_or(SdmError::InvalidConfiguration(
+                enc.lricb_decrypt_in_place(&mut counter, &mut ct).ok_or(
+                    SdmError::InvalidConfiguration(
                         "LRICB decryption failed: invalid buffer length",
-                    ))?;
+                    ),
+                )?;
             }
         }
 
@@ -468,8 +459,14 @@ struct PiccData {
 
 /// SDM session keys for both AES and LRP paths.
 enum SdmKeys {
-    Aes { enc_key: [u8; 16], mac_key: [u8; 16] },
-    Lrp { enc: Box<Lrp>, mac: Box<Lrp> },
+    Aes {
+        enc_key: [u8; 16],
+        mac_key: [u8; 16],
+    },
+    Lrp {
+        enc: Box<Lrp>,
+        mac: Box<Lrp>,
+    },
 }
 
 impl SdmKeys {
@@ -636,10 +633,7 @@ fn hex_nibble(b: u8, offset: usize) -> Result<u8, SdmError> {
     }
 }
 
-fn decode_hex_array<const N: usize>(
-    data: &[u8],
-    offset: usize,
-) -> Result<[u8; N], SdmError> {
+fn decode_hex_array<const N: usize>(data: &[u8], offset: usize) -> Result<[u8; N], SdmError> {
     let mut out = [0u8; N];
     for i in 0..N {
         let hi = hex_nibble(data[offset + 2 * i], offset + 2 * i)?;
@@ -650,11 +644,7 @@ fn decode_hex_array<const N: usize>(
 }
 
 #[cfg(feature = "alloc")]
-fn decode_hex_into(
-    out: &mut [u8],
-    data: &[u8],
-    offset: usize,
-) -> Result<(), SdmError> {
+fn decode_hex_into(out: &mut [u8], data: &[u8], offset: usize) -> Result<(), SdmError> {
     for (i, byte) in out.iter_mut().enumerate() {
         let hi = hex_nibble(data[offset + 2 * i], offset + 2 * i)?;
         let lo = hex_nibble(data[offset + 2 * i + 1], offset + 2 * i + 1)?;
@@ -683,9 +673,7 @@ mod tests {
     use super::*;
     use crate::testing::hex_array;
     use crate::types::KeyNumber;
-    use crate::types::file_settings::{
-        SdmAccessRights, SdmCtrRet, SdmOffsets, SdmSettings,
-    };
+    use crate::types::file_settings::{SdmAccessRights, SdmCtrRet, SdmOffsets, SdmSettings};
 
     // -- Helper: build a synthetic NDEF file for testing ---------------------
 
@@ -919,12 +907,12 @@ mod tests {
         let enc_hex = "4ADE304B5AB9474CB40AFFCAB0607A85";
         let mac_hex = "87E287E8135BFC06";
         let mut ndef = alloc::vec::Vec::new();
-        ndef.extend_from_slice(prefix);               // offset 0, len 14
-        ndef.extend_from_slice(picc_hex.as_bytes());   // offset 14, len 48
-        ndef.extend_from_slice(b"x");                  // offset 62
-        ndef.extend_from_slice(enc_hex.as_bytes());    // offset 63, len 32
-        ndef.extend_from_slice(b"x");                  // offset 95
-        ndef.extend_from_slice(mac_hex.as_bytes());    // offset 96, len 16
+        ndef.extend_from_slice(prefix); // offset 0, len 14
+        ndef.extend_from_slice(picc_hex.as_bytes()); // offset 14, len 48
+        ndef.extend_from_slice(b"x"); // offset 62
+        ndef.extend_from_slice(enc_hex.as_bytes()); // offset 63, len 32
+        ndef.extend_from_slice(b"x"); // offset 95
+        ndef.extend_from_slice(mac_hex.as_bytes()); // offset 96, len 16
 
         let settings = SdmSettings {
             uid_mirror: true,
@@ -973,17 +961,19 @@ mod tests {
         // Compute MAC over the PICCData hex + 'x' separator.
         let mac_input = [picc_hex, "x"].concat();
         let mac = match &keys {
-            SdmKeys::Lrp { mac, .. } => truncate_mac(&cmac_lrp(Lrp::clone(mac), mac_input.as_bytes())),
+            SdmKeys::Lrp { mac, .. } => {
+                truncate_mac(&cmac_lrp(Lrp::clone(mac), mac_input.as_bytes()))
+            }
             _ => unreachable!(),
         };
         let mac_hex: alloc::string::String =
             mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
 
         let mut ndef = alloc::vec::Vec::new();
-        ndef.extend_from_slice(b"PREFIX_");             // offset 0, len 7
-        ndef.extend_from_slice(picc_hex.as_bytes());    // offset 7, len 48
-        ndef.extend_from_slice(b"x");                   // offset 55
-        ndef.extend_from_slice(mac_hex.as_bytes());     // offset 56, len 16
+        ndef.extend_from_slice(b"PREFIX_"); // offset 0, len 7
+        ndef.extend_from_slice(picc_hex.as_bytes()); // offset 7, len 48
+        ndef.extend_from_slice(b"x"); // offset 55
+        ndef.extend_from_slice(mac_hex.as_bytes()); // offset 56, len 16
 
         let settings = SdmSettings {
             uid_mirror: true,
@@ -1108,7 +1098,8 @@ mod tests {
         };
         let full_mac = cmac_aes(&mac_key, mac_data);
         let mac = truncate_mac(&full_mac);
-        let mac_hex_str: alloc::string::String = mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
+        let mac_hex_str: alloc::string::String =
+            mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
 
         let settings = SdmSettings {
             uid_mirror: true,
