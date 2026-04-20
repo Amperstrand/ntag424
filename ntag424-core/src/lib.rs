@@ -207,6 +207,9 @@ mod testing;
 mod transport;
 pub mod types;
 
+#[cfg(all(feature = "sdm", feature = "alloc"))]
+mod sdm_url;
+
 #[cfg(feature = "key_diversification")]
 pub mod key_diversification {
     //! AES-128 key diversification per AN10922 §2.2.
@@ -224,8 +227,16 @@ pub mod sdm {
     //! [`verify`](SecureDynamicMessageVerifier::verify) with the raw NDEF file
     //! bytes and application key.
     //!
+    //! With the `alloc` feature enabled, [`build_sdm_ndef_plan`] is also
+    //! available for converting a URL template into ready-to-write NDEF bytes
+    //! and matching [`SdmSettings`] for provisioning.
+    //!
     //! [`SdmSettings`]: crate::types::file_settings::SdmSettings
     pub use crate::crypto::sdm::*;
+
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+    pub use crate::sdm_url::*;
 }
 
 pub use transport::{Response, Transport};

@@ -226,7 +226,12 @@ pub struct SdmReadAccess {
     pub mac_input: u32,
     /// Start of the 16-byte ASCII `SDMMAC` placeholder.
     pub mac: u32,
-    /// Byte range mirrored as `SDMENCFileData`, if enabled.
+    /// `SDMENCFileData` placeholder byte range, if enabled.
+    ///
+    /// In ASCII mode this range uses the on-wire placeholder length
+    /// (`SDMENCLength`): the returned ciphertext occupies the whole range as
+    /// ASCII hex, while only the first half of the static file placeholder is
+    /// taken as plaintext before encryption.
     pub encrypted_file_data: Option<Range<u32>>,
 }
 
@@ -476,8 +481,10 @@ impl SdmSettingsBuilder {
 
     /// Enable `SDMENCFileData` over a file range.
     ///
-    /// `start..end` are byte offsets into the file; `end - start` must
-    /// be a multiple of 32. This also requires
+    /// `start..end` are byte offsets into the file for the full ASCII
+    /// placeholder; `end - start` is `SDMENCLength` and must be a multiple of
+    /// 32. The actual plaintext length encrypted by the tag is half that
+    /// placeholder length. This also requires
     /// [`enable_read_access`](Self::enable_read_access).
     pub fn mirror_encrypted_file_data(mut self, range: Range<u32>) -> Self {
         if let Some(read_access) = &mut self.inner.read_access {

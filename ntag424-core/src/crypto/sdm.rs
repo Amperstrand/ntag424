@@ -140,7 +140,12 @@ pub struct SecureDynamicMessageVerifier {
     mac_offset: u32,
     /// File byte offset of the 2-byte Tag Tamper status, if mirrored.
     tamper_status_offset: Option<u32>,
-    /// ASCII hex byte range for `SDMENCFileData`, if configured.
+    /// `SDMENCFileData` placeholder byte range, if configured.
+    ///
+    /// In ASCII mode this is the full mirrored placeholder length from
+    /// `SDMENCOffset .. SDMENCOffset + SDMENCLength`: the returned ciphertext
+    /// occupies the whole range as ASCII hex, but only the first half of the
+    /// static file placeholder contributes plaintext bytes before encryption.
     enc_data: Option<Range<u32>>,
 }
 
@@ -238,11 +243,11 @@ impl SecureDynamicMessageVerifier {
             && offset >= range.start
             && offset < range.end
         {
-            let relative_ascii = (offset - range.start) as usize;
-            let enc_ascii_len = (range.end - range.start) as usize;
-            if !relative_ascii.is_multiple_of(2) || relative_ascii + 4 > enc_ascii_len {
+            let relative_plain = (offset - range.start) as usize;
+            let plain_len = (range.end - range.start) as usize / 2;
+            if relative_plain + 2 > plain_len {
                 return Err(SdmError::InvalidConfiguration(
-                    "tamper_status inside enc_data must map to exactly 2 decrypted bytes",
+                    "tamper_status inside enc_data must point into the plaintext half",
                 ));
             }
         }
@@ -474,12 +479,11 @@ impl SecureDynamicMessageVerifier {
             let start = range.start as usize;
             let end = range.end as usize;
             if offset >= start && offset < end {
-                let relative_ascii = offset - start;
-                let relative_plain = relative_ascii / 2;
+                let relative_plain = offset - start;
                 let plain = enc_file_data.ok_or(SdmError::InvalidConfiguration(
                     "tamper_status inside enc_data requires decrypted file data",
                 ))?;
-                if relative_ascii + 4 > end - start || relative_plain + 2 > plain.len() {
+                if relative_plain + 2 > plain.len() {
                     return Err(SdmError::InvalidConfiguration(
                         "tamper_status offset exceeds enc_data bounds",
                     ));
@@ -1318,7 +1322,7 @@ mod tests {
             74,
             Some(42..74),
         );
-        settings.tamper_status = Some(46);
+        settings.tamper_status = Some(44);
 
         let ndef = build_ndef(b"HELLOWORLD", Some(picc_hex), Some(&enc_hex), b"", &mac_hex);
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
@@ -1330,6 +1334,27 @@ mod tests {
             result.enc_file_data.as_deref(),
             Some(b"xxCOxxxxxxxxxxxx".as_slice())
         );
+    }
+
+    #[test]
+    fn try_new_rejects_tamper_status_in_second_half_of_enc_file_data_placeholder() {
+        let mut settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(42..74),
+        );
+        settings.tamper_status = Some(58);
+
+        assert!(matches!(
+            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Err(SdmError::InvalidConfiguration(
+                "tamper_status inside enc_data must point into the plaintext half"
+            )),
+        ));
     }
 
     #[test]
