@@ -91,6 +91,10 @@ impl Transport for TestTransport {
             sw2: next.sw2,
         })
     }
+
+    async fn get_uid(&mut self) -> Result<Self::Data, Self::Error> {
+        todo!("not implemented")
+    }
 }
 
 /// Poll `fut` to completion on the current thread.

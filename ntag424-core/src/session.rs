@@ -2,6 +2,7 @@ use core::error::Error;
 
 use thiserror::Error;
 
+use crate::Transport;
 use crate::commands::{
     SecureChannel, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
     authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp, change_file_settings,
@@ -15,9 +16,8 @@ use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
     CommMode, Configuration, File, FileSettings, FileSettingsError, KeyNumber, NonMasterKeyNumber,
-    ResponseCode, ResponseStatus, Uid, Version,
+    ResponseStatus, Uid, Version,
 };
-use crate::{PseudoApduCapable, Transport};
 
 #[derive(Error, Debug)]
 pub enum SessionError<E: Error + core::fmt::Debug> {
@@ -92,24 +92,16 @@ impl Default for Session<Unauthenticated> {
 pub struct Unauthenticated;
 
 impl<S> Session<S> {
-    /// Read the UID via the PC/SC `GET_UID` pseudo-APDU (`FF CA 00 00 00`).
+    /// Read the UID as seen during collision resolution at activation.
     ///
-    /// Single round-trip; served by the reader driver from its anticollision
-    /// cache, so the bytes never reach the card. Only available on transports
-    /// that implement [`PseudoApduCapable`].
     /// In random-ID mode the value returned here is the randomized UID, not
     /// the permanent one.
-    pub async fn get_uid_from_reader<T: Transport + PseudoApduCapable>(
+    pub async fn get_uid_from_reader<T: Transport>(
         &self,
         transport: &mut T,
     ) -> Result<Uid, SessionError<T::Error>> {
-        let response = transport.transmit(&[0xFF, 0xCA, 0x00, 0x00, 0x00]).await?;
-
-        let code = ResponseCode::iso(response.sw1, response.sw2);
-        if !code.ok() {
-            return Err(SessionError::ErrorResponse(code.status()));
-        }
-        let data = response.data.as_ref();
+        let data = transport.get_uid().await?;
+        let data = data.as_ref();
         match data.len() {
             7 => {
                 let mut uid = [0u8; 7];

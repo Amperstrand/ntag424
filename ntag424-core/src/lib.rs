@@ -84,6 +84,8 @@
 //! #             .pop_front()
 //! #             .expect("TestTransport: no more responses queued"))
 //! #     }
+//! #
+//! #     async fn get_uid(&mut self) -> Result<Self::Data, Self::Error> { todo!() }
 //! # }
 //! # fn hex_nib(c: u8) -> u8 {
 //! #     match c {
@@ -167,6 +169,6 @@ pub mod key_diversification {
     pub use crate::crypto::key_diversification::*;
 }
 
-pub use transport::{PseudoApduCapable, Response, Transport};
+pub use transport::{Response, Transport};
 
 pub use session::{Session, SessionError};
