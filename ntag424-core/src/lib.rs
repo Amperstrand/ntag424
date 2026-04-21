@@ -223,15 +223,15 @@ pub mod key_diversification {
 pub mod sdm {
     //! Secure Dynamic Messaging (SDM) server-side verification (§9.3).
     //!
-    //! Build a [`SecureDynamicMessageVerifier`] from [`SdmSettings`] and call
-    //! [`verify`](SecureDynamicMessageVerifier::verify) with the raw NDEF file
-    //! bytes and application key.
+    //! Build a [`SecureDynamicMessageVerifier`] from an [`Sdm`] configuration
+    //! and call [`verify`](SecureDynamicMessageVerifier::verify) with the raw
+    //! NDEF file bytes and application key.
     //!
     //! With the `alloc` feature enabled, [`sdm_url_config`] is also
     //! available for converting a URL template into ready-to-write NDEF bytes
-    //! and matching [`SdmSettings`] for provisioning.
+    //! and matching [`Sdm`] settings for provisioning.
     //!
-    //! [`SdmSettings`]: crate::types::file_settings::SdmSettings
+    //! [`Sdm`]: crate::types::file_settings::Sdm
     pub use crate::crypto::sdm::*;
 
     pub use crate::sdm_url::*;
@@ -240,7 +240,7 @@ pub mod sdm {
 #[cfg(feature = "sdm")]
 /// Build SDM URL configuration for provisioning.
 ///
-/// Returns `(&'static [u8], &'static SdmSettings)`.
+/// Returns `(&'static [u8], &'static Sdm)`.
 ///
 /// Invalid templates fail during compilation. It is intended for compile-time
 /// provisioning data that will be written to a tag at runtime.

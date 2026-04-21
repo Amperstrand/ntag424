@@ -6,7 +6,8 @@ use crate::{
     crypto::suite::SessionSuite,
     session::SessionError,
     types::{
-        FileSettings, ResponseCode, ResponseStatus, file_settings::MAX_CHANGE_FILE_SETTINGS_LEN,
+        FileSettingsPatch, ResponseCode, ResponseStatus,
+        file_settings::MAX_CHANGE_FILE_SETTINGS_LEN,
     },
 };
 
@@ -23,7 +24,7 @@ const CMD: u8 = 0x5F;
 /// Authentication with the key indicated by the file's `Change` access
 /// condition must be established before calling this. The command data
 /// field (`FileOption || AccessRights [|| SDM block]`) is produced by
-/// [`FileSettings::encode_change`], then ISO/IEC 9797-1 Method 2 padded,
+/// [`FileSettingsPatch::encode`], then ISO/IEC 9797-1 Method 2 padded,
 /// encrypted with `SesAuthENCKey`, and MAC'd together with the
 /// `FileNo` header byte (§9.1.10 Figure 9).
 ///
@@ -34,12 +35,12 @@ pub(crate) async fn change_file_settings<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
     file_no: u8,
-    settings: &FileSettings,
+    settings: &FileSettingsPatch,
 ) -> Result<(), SessionError<T::Error>> {
     // Encode the ChangeFileSettings data payload.
     let mut raw = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
     let raw_len = settings
-        .encode_change(&mut raw)
+        .encode(&mut raw)
         .map_err(SessionError::FileSettings)?;
 
     // ISO/IEC 9797-1 Method 2 padding to a 16-byte boundary.
@@ -112,12 +113,12 @@ mod tests {
         ti: [u8; 4],
         cmd_ctr: u16,
         file_no: u8,
-        settings: &FileSettings,
+        settings: &FileSettingsPatch,
     ) -> (Vec<u8>, Vec<u8>) {
         let mut suite = AesSuite::from_keys(enc_key, mac_key);
 
         let mut raw = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
-        let raw_len = settings.encode_change(&mut raw).unwrap();
+        let raw_len = settings.encode(&mut raw).unwrap();
 
         let padded_len = (raw_len + 1).div_ceil(BLOCK) * BLOCK;
         let mut padded = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN + BLOCK];
@@ -162,30 +163,35 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettings {
-            file_type: FileType::StandardData,
-            file_size: 0,
+        let sdm = Sdm::try_new(
+            PiccData::Encrypted {
+                key: KeyNumber::Key2,
+                offset: Offset::new(0x20).unwrap(),
+                content: EncryptedContent::Both(ReadCtrFeatures {
+                    limit: None,
+                    ret_access: CtrRetAccess::Key(KeyNumber::Key1),
+                }),
+            },
+            Some(FileRead::MacOnly {
+                key: FileReadKey::new(KeyNumber::Key1),
+                window: MacWindow {
+                    input: Offset::new(0x43).unwrap(),
+                    mac: Offset::new(0x43).unwrap(),
+                },
+            }),
+            None,
+        )
+        .expect("valid SDM settings");
+
+        let settings = FileSettingsPatch {
             comm_mode: CommMode::Plain,
             access_rights: AccessRights {
-                read: AccessCondition::Free,
-                write: AccessCondition::Key(KeyNumber::Key0),
-                read_write: AccessCondition::Key(KeyNumber::Key0),
-                change: AccessCondition::Key(KeyNumber::Key0),
+                read: Access::Free,
+                write: Access::Key(KeyNumber::Key0),
+                read_write: Access::Key(KeyNumber::Key0),
+                change: Access::Key(KeyNumber::Key0),
             },
-            sdm: Some(
-                SdmSettings::try_from_parts(
-                    PiccDataMirror::encrypted(
-                        KeyNumber::Key2,
-                        0x20,
-                        PiccDataContent::UidAndReadCounter,
-                    ),
-                    Some(SdmReadAccess::new(KeyNumber::Key1, 0x43, 0x43)),
-                    AccessCondition::Key(KeyNumber::Key1),
-                    None,
-                    None,
-                )
-                .expect("valid SDM settings"),
-            ),
+            sdm: Some(sdm),
         };
 
         let (expected_apdu, resp_body) =
@@ -212,15 +218,13 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettings {
-            file_type: FileType::StandardData,
-            file_size: 0,
+        let settings = FileSettingsPatch {
             comm_mode: CommMode::Plain,
             access_rights: AccessRights {
-                read: AccessCondition::Free,
-                write: AccessCondition::Free,
-                read_write: AccessCondition::Free,
-                change: AccessCondition::Free,
+                read: Access::Free,
+                write: Access::Free,
+                read_write: Access::Free,
+                change: Access::Free,
             },
             sdm: None,
         };
@@ -252,15 +256,13 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettings {
-            file_type: FileType::StandardData,
-            file_size: 0,
+        let settings = FileSettingsPatch {
             comm_mode: CommMode::Full,
             access_rights: AccessRights {
-                read: AccessCondition::Key(KeyNumber::Key2),
-                write: AccessCondition::Key(KeyNumber::Key3),
-                read_write: AccessCondition::Key(KeyNumber::Key3),
-                change: AccessCondition::Key(KeyNumber::Key0),
+                read: Access::Key(KeyNumber::Key2),
+                write: Access::Key(KeyNumber::Key3),
+                read_write: Access::Key(KeyNumber::Key3),
+                change: Access::Key(KeyNumber::Key0),
             },
             sdm: None,
         };

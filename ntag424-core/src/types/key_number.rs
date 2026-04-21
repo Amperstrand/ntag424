@@ -20,7 +20,7 @@ impl KeyNumber {
     ///
     /// The high two bits stay zero and the low nibble carries the key
     /// index (§10.4.1).
-    pub fn as_byte(self) -> u8 {
+    pub const fn as_byte(self) -> u8 {
         match self {
             Self::Key0 => 0x00,
             Self::Key1 => 0x01,

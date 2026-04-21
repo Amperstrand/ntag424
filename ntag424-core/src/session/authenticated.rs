@@ -171,7 +171,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         mut self,
         transport: &mut T,
         file: File,
-    ) -> Result<(FileSettings, Self), SessionError<T::Error>> {
+    ) -> Result<(FileSettingsView, Self), SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         let settings = get_file_settings_mac(transport, &mut channel, file.file_no()).await?;
         Ok((settings, self))
@@ -237,7 +237,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         mut self,
         transport: &mut T,
         file: File,
-        settings: &FileSettings,
+        settings: &FileSettingsPatch,
     ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         change_file_settings(transport, &mut channel, file.file_no(), settings).await?;

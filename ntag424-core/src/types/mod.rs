@@ -12,7 +12,10 @@ mod version;
 
 pub use configuration::Configuration;
 pub use file::File;
-pub use file_settings::{AccessCondition, CommMode, FileSettings, FileSettingsError};
+pub use file_settings::{
+    Access, CommMode, FileSettingsError, FileSettingsPatch, FileSettingsView, OverlapKind,
+    ReservedByte,
+};
 pub use key_number::{KeyNumber, NonMasterKeyNumber};
 pub(crate) use response_code::ResponseCode;
 pub use response_status::ResponseStatus;

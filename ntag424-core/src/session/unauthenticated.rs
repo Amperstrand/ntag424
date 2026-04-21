@@ -103,7 +103,7 @@ impl Session<Unauthenticated> {
         &mut self,
         transport: &mut T,
         file: File,
-    ) -> Result<FileSettings, SessionError<T::Error>> {
+    ) -> Result<FileSettingsView, SessionError<T::Error>> {
         self.select_ndef_application(transport).await?;
         get_file_settings(transport, file.file_no()).await
     }

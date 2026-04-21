@@ -15,8 +15,8 @@ use crate::commands::{
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
-    CommMode, Configuration, File, FileSettings, FileSettingsError, KeyNumber, NonMasterKeyNumber,
-    ResponseStatus, TagTamperStatusReadout, Uid, Version,
+    CommMode, Configuration, File, FileSettingsError, FileSettingsPatch, FileSettingsView,
+    KeyNumber, NonMasterKeyNumber, ResponseStatus, TagTamperStatusReadout, Uid, Version,
 };
 
 mod authenticated;

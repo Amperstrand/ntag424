@@ -65,7 +65,9 @@ use thiserror::Error;
 use crate::crypto::sdm::CryptoMode;
 use crate::types::KeyNumber;
 use crate::types::file_settings::{
-    AccessCondition, FileSettingsError, PiccDataContent, SdmSettings,
+    CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, FileReadKey,
+    FileSettingsError, MacWindow, Offset, PiccData, PlainMirror, ReadCtrFeatures, ReadCtrMirror,
+    Sdm,
 };
 
 const URI_AT: u32 = 7;
@@ -116,7 +118,7 @@ pub enum SdmUrlError {
 pub struct SdmUrlOptions {
     pub picc_key: KeyNumber,
     pub mac_key: KeyNumber,
-    pub ctr_ret: AccessCondition,
+    pub ctr_ret: CtrRetAccess,
     pub max_file_size: u16,
 }
 
@@ -125,7 +127,7 @@ impl SdmUrlOptions {
         Self {
             picc_key: KeyNumber::Key2,
             mac_key: KeyNumber::Key2,
-            ctr_ret: AccessCondition::NoAccess,
+            ctr_ret: CtrRetAccess::NoAccess,
             max_file_size: 256,
         }
     }
@@ -142,7 +144,7 @@ impl Default for SdmUrlOptions {
 #[derive(Debug)]
 pub struct SdmUrlConfig {
     pub ndef_bytes: Vec<u8>,
-    pub sdm_settings: SdmSettings,
+    pub sdm_settings: Sdm,
 }
 
 /// Fixed-capacity byte buffer returned by the hidden const SDM URL builder.
@@ -216,7 +218,7 @@ impl<const N: usize> ConstNdefBytes<N> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstSdmNdefPlan<const N: usize> {
     pub ndef_bytes: ConstNdefBytes<N>,
-    pub sdm_settings: SdmSettings,
+    pub sdm_settings: Sdm,
 }
 
 #[doc(hidden)]
@@ -226,10 +228,17 @@ pub type __ConstSdmNdefPlan<const N: usize> = ConstSdmNdefPlan<N>;
 pub const __SDM_URL_PLAN_CAPACITY: usize = DEFAULT_CONST_PLAN_CAPACITY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PiccContent {
+    Uid,
+    Ctr,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Placeholder {
     Uid,
     Ctr,
-    Picc(PiccDataContent),
+    Picc(PiccContent),
     Tt,
     Mac,
 }
@@ -259,7 +268,7 @@ struct ParsedTemplate<const N: usize> {
     uri_content: ConstNdefBytes<N>,
     uid_offset: Option<u32>,
     ctr_offset: Option<u32>,
-    picc: Option<(u32, PiccDataContent)>,
+    picc: Option<(u32, PiccContent)>,
     tt_offset: Option<u32>,
     mac_offset: u32,
     mac_input: u32,
@@ -363,46 +372,139 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
         Err(err) => return Err(err),
     }
 
-    let mut builder = SdmSettings::builder();
-    if let Some((picc_offset, content)) = parsed.picc {
-        builder = builder.mirror_encrypted_picc_data(
-            opts.picc_key,
-            picc_offset,
-            picc_content_includes_uid(content),
-            picc_content_includes_ctr(content),
-        );
+    // Build picc_data
+    let picc_data = if let Some((picc_offset, content)) = parsed.picc {
+        let offset = match Offset::new(picc_offset) {
+            Ok(o) => o,
+            Err(_) => return Err(TemplateCoreError::FileSettings("picc_offset out of range")),
+        };
+        let enc_content = match content {
+            PiccContent::Uid => EncryptedContent::Uid,
+            PiccContent::Ctr => EncryptedContent::RCtr(ReadCtrFeatures {
+                limit: None,
+                ret_access: opts.ctr_ret,
+            }),
+            PiccContent::Both => EncryptedContent::Both(ReadCtrFeatures {
+                limit: None,
+                ret_access: opts.ctr_ret,
+            }),
+        };
+        PiccData::Encrypted {
+            key: opts.picc_key,
+            offset,
+            content: enc_content,
+        }
     } else {
-        if let Some(uid_offset) = parsed.uid_offset {
-            builder = builder.mirror_plain_uid(uid_offset);
+        match (parsed.uid_offset, parsed.ctr_offset) {
+            (Some(uid_off), Some(ctr_off)) => {
+                let uid = match Offset::new(uid_off) {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return Err(TemplateCoreError::FileSettings("uid_offset out of range"));
+                    }
+                };
+                let ctr = match Offset::new(ctr_off) {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return Err(TemplateCoreError::FileSettings("ctr_offset out of range"));
+                    }
+                };
+                PiccData::Plain(PlainMirror::Both {
+                    uid,
+                    read_ctr: ReadCtrMirror {
+                        offset: ctr,
+                        features: ReadCtrFeatures {
+                            limit: None,
+                            ret_access: opts.ctr_ret,
+                        },
+                    },
+                })
+            }
+            (Some(uid_off), None) => {
+                let uid = match Offset::new(uid_off) {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return Err(TemplateCoreError::FileSettings("uid_offset out of range"));
+                    }
+                };
+                PiccData::Plain(PlainMirror::Uid { uid })
+            }
+            (None, Some(ctr_off)) => {
+                let ctr = match Offset::new(ctr_off) {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return Err(TemplateCoreError::FileSettings("ctr_offset out of range"));
+                    }
+                };
+                PiccData::Plain(PlainMirror::RCtr {
+                    read_ctr: ReadCtrMirror {
+                        offset: ctr,
+                        features: ReadCtrFeatures {
+                            limit: None,
+                            ret_access: opts.ctr_ret,
+                        },
+                    },
+                })
+            }
+            (None, None) => PiccData::None,
         }
-        if let Some(ctr_offset) = parsed.ctr_offset {
-            builder = builder.mirror_plain_read_counter(ctr_offset);
-        }
-    }
-    if let Some(tt_offset) = parsed.tt_offset {
-        builder = builder.mirror_tt_status(tt_offset);
-    }
-    if let Some((start, end)) = parsed.enc_range {
-        builder = builder.mirror_encrypted_file_data(start..end);
-    }
+    };
 
-    let includes_ctr = match parsed.picc {
-        Some((_, content)) => picc_content_includes_ctr(content),
-        None => parsed.ctr_offset.is_some(),
+    // Build tamper_status
+    let tamper_status = match parsed.tt_offset {
+        Some(off) => match Offset::new(off) {
+            Ok(o) => Some(o),
+            Err(_) => return Err(TemplateCoreError::FileSettings("tt_offset out of range")),
+        },
+        None => None,
     };
-    let counter_access = if includes_ctr {
-        opts.ctr_ret
+
+    // Build mac_window
+    let mac_input_offset = match Offset::new(parsed.mac_input) {
+        Ok(o) => o,
+        Err(_) => return Err(TemplateCoreError::FileSettings("mac_input out of range")),
+    };
+    let mac_offset_val = match Offset::new(parsed.mac_offset) {
+        Ok(o) => o,
+        Err(_) => return Err(TemplateCoreError::FileSettings("mac_offset out of range")),
+    };
+    let window = MacWindow {
+        input: mac_input_offset,
+        mac: mac_offset_val,
+    };
+
+    // Build file_read
+    let file_read = if let Some((enc_start, enc_end)) = parsed.enc_range {
+        let start = match Offset::new(enc_start) {
+            Ok(o) => o,
+            Err(_) => return Err(TemplateCoreError::FileSettings("enc_start out of range")),
+        };
+        let length = match EncLength::new(enc_end - enc_start) {
+            Ok(l) => l,
+            Err(_) => return Err(TemplateCoreError::FileSettings("enc_length invalid")),
+        };
+        Some(FileRead::MacAndEnc {
+            key: FileReadKey::new(opts.mac_key),
+            window,
+            enc: EncFileData { start, length },
+        })
     } else {
-        AccessCondition::NoAccess
+        Some(FileRead::MacOnly {
+            key: FileReadKey::new(opts.mac_key),
+            window,
+        })
     };
-    let sdm_settings = match builder
-        .enable_read_access(opts.mac_key, parsed.mac_input, parsed.mac_offset)
-        .allow_counter_read(counter_access)
-        .build()
-    {
-        Ok(settings) => settings,
-        Err(FileSettingsError::InconsistentOffsets(field)) => {
-            return Err(TemplateCoreError::FileSettings(field));
+
+    let sdm_settings = match Sdm::try_new(picc_data, file_read, tamper_status) {
+        Ok(sdm) => sdm,
+        Err(FileSettingsError::MacInputAfterMac) => {
+            return Err(TemplateCoreError::FileSettings("mac_input > mac"));
+        }
+        Err(FileSettingsError::EncOutsideMacWindow) => {
+            return Err(TemplateCoreError::FileSettings("enc outside mac window"));
+        }
+        Err(FileSettingsError::EncRequiresBothMirrors) => {
+            return Err(TemplateCoreError::EncFileDataRequiresUidAndCtr);
         }
         Err(_) => return Err(TemplateCoreError::FileSettings("sdm_settings")),
     };
@@ -676,18 +778,12 @@ const fn placeholder_fill_len(placeholder: Placeholder, mode: CryptoMode) -> usi
     }
 }
 
-const fn picc_content_includes_uid(content: PiccDataContent) -> bool {
-    matches!(
-        content,
-        PiccDataContent::Uid | PiccDataContent::UidAndReadCounter
-    )
+const fn picc_content_includes_uid(content: PiccContent) -> bool {
+    matches!(content, PiccContent::Uid | PiccContent::Both)
 }
 
-const fn picc_content_includes_ctr(content: PiccDataContent) -> bool {
-    matches!(
-        content,
-        PiccDataContent::ReadCounter | PiccDataContent::UidAndReadCounter
-    )
+const fn picc_content_includes_ctr(content: PiccContent) -> bool {
+    matches!(content, PiccContent::Ctr | PiccContent::Both)
 }
 
 const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
@@ -759,21 +855,15 @@ const fn parse_placeholder(
             } else if bytes_match(url, spec_start, spec_len, b"mac") {
                 (Placeholder::Mac, "{mac}")
             } else if bytes_match(url, spec_start, spec_len, b"picc") {
-                (
-                    Placeholder::Picc(PiccDataContent::UidAndReadCounter),
-                    "{picc}",
-                )
+                (Placeholder::Picc(PiccContent::Both), "{picc}")
             } else if bytes_match(url, spec_start, spec_len, b"picc:uid") {
-                (Placeholder::Picc(PiccDataContent::Uid), "{picc}")
+                (Placeholder::Picc(PiccContent::Uid), "{picc}")
             } else if bytes_match(url, spec_start, spec_len, b"picc:ctr") {
-                (Placeholder::Picc(PiccDataContent::ReadCounter), "{picc}")
+                (Placeholder::Picc(PiccContent::Ctr), "{picc}")
             } else if bytes_match(url, spec_start, spec_len, b"picc:uid+ctr")
                 || bytes_match(url, spec_start, spec_len, b"picc:ctr+uid")
             {
-                (
-                    Placeholder::Picc(PiccDataContent::UidAndReadCounter),
-                    "{picc}",
-                )
+                (Placeholder::Picc(PiccContent::Both), "{picc}")
             } else {
                 return Err(TemplateCoreError::InvalidPlaceholder {
                     start,
@@ -833,8 +923,8 @@ fn map_runtime_error(url: &str, err: TemplateCoreError) -> SdmUrlError {
             max: capacity as u16,
         },
         TemplateCoreError::FileTooLong { got, max } => SdmUrlError::FileTooLong { got, max },
-        TemplateCoreError::FileSettings(field) => {
-            SdmUrlError::FileSettings(FileSettingsError::InconsistentOffsets(field))
+        TemplateCoreError::FileSettings(_) => {
+            SdmUrlError::FileSettings(FileSettingsError::MacInputAfterMac)
         }
     }
 }
@@ -898,20 +988,20 @@ const fn panic_on_const_error(err: TemplateCoreError) -> ! {
 mod tests {
     use super::*;
     use crate::types::file_settings::{
-        EncryptedPiccDataMirror, PiccDataMirror, PlainPiccDataMirror, SdmReadAccess,
+        CtrRetAccess, EncryptedContent, FileRead, Offset, PiccData, PlainMirror, ReadCtrFeatures,
     };
 
     fn key0_opts() -> SdmUrlOptions {
         SdmUrlOptions {
             picc_key: KeyNumber::Key0,
             mac_key: KeyNumber::Key0,
-            ctr_ret: AccessCondition::NoAccess,
+            ctr_ret: CtrRetAccess::NoAccess,
             max_file_size: 256,
         }
     }
 
-    fn read_access(plan: &SdmUrlConfig) -> &SdmReadAccess {
-        plan.sdm_settings.read_access.as_ref().unwrap()
+    fn file_read(plan: &SdmUrlConfig) -> FileRead {
+        plan.sdm_settings.file_read().unwrap()
     }
 
     #[test]
@@ -924,24 +1014,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            plan.sdm_settings.picc_data,
-            PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+            plan.sdm_settings.picc_data(),
+            PiccData::Encrypted {
                 key: KeyNumber::Key0,
-                offset: URI_AT + 15,
-                content: PiccDataContent::UidAndReadCounter,
-            })
+                offset: Offset::new(URI_AT + 15).unwrap(),
+                content: EncryptedContent::Both(ReadCtrFeatures {
+                    limit: None,
+                    ret_access: CtrRetAccess::NoAccess,
+                }),
+            }
         );
-        assert_eq!(
-            plan.sdm_settings.read_access,
-            Some(SdmReadAccess {
-                key: KeyNumber::Key0,
-                mac_input: URI_AT + 11,
-                mac: URI_AT + 24 + 26,
-                encrypted_file_data: None,
-            })
-        );
-        assert_eq!(plan.sdm_settings.counter_access, AccessCondition::NoAccess);
-        assert_eq!(plan.sdm_settings.tamper_status, None);
+        let fr = file_read(&plan);
+        assert_eq!(fr.key().key(), KeyNumber::Key0);
+        assert_eq!(fr.window().input.get(), URI_AT + 11);
+        assert_eq!(fr.window().mac.get(), URI_AT + 24 + 26);
+        assert!(fr.enc().is_none());
+        assert_eq!(plan.sdm_settings.tamper_status(), None);
         assert_eq!(plan.ndef_bytes[2], 0xD1);
         assert_eq!(plan.ndef_bytes[3], 0x01);
         assert_eq!(plan.ndef_bytes[5], 0x55);
@@ -958,12 +1046,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            plan.sdm_settings.picc_data,
-            PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+            plan.sdm_settings.picc_data(),
+            PiccData::Encrypted {
                 key: KeyNumber::Key0,
-                offset: URI_AT + 15,
-                content: PiccDataContent::Uid,
-            })
+                offset: Offset::new(URI_AT + 15).unwrap(),
+                content: EncryptedContent::Uid,
+            }
         );
     }
 
@@ -976,8 +1064,8 @@ mod tests {
         )
         .unwrap();
 
-        let picc_start = match plan.sdm_settings.picc_data {
-            PiccDataMirror::Encrypted(encrypted) => encrypted.offset as usize,
+        let picc_start = match plan.sdm_settings.picc_data() {
+            PiccData::Encrypted { offset, .. } => offset.get() as usize,
             _ => unreachable!(),
         };
         for &b in &plan.ndef_bytes[picc_start..picc_start + 48] {
@@ -994,14 +1082,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            plan.sdm_settings.picc_data,
-            PiccDataMirror::Plain(PlainPiccDataMirror {
-                uid: Some(URI_AT + 15),
-                read_counter: Some(URI_AT + 32),
-            })
-        );
-        assert!(plan.sdm_settings.read_access.is_some());
+        assert!(matches!(
+            plan.sdm_settings.picc_data(),
+            PiccData::Plain(PlainMirror::Both { .. })
+        ));
+        assert!(plan.sdm_settings.file_read().is_some());
     }
 
     #[test]
@@ -1013,7 +1098,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(read_access(&plan).mac_input, URI_AT + 11);
+        assert_eq!(file_read(&plan).window().input.get(), URI_AT + 11);
     }
 
     #[test]
@@ -1025,11 +1110,11 @@ mod tests {
         )
         .unwrap();
 
-        let read_access = read_access(&plan);
-        assert_eq!(read_access.mac_input, URI_AT + 30);
-        assert_eq!(read_access.mac, URI_AT + 32);
+        let fr = file_read(&plan);
+        assert_eq!(fr.window().input.get(), URI_AT + 30);
+        assert_eq!(fr.window().mac.get(), URI_AT + 32);
         assert_eq!(
-            &plan.ndef_bytes[read_access.mac_input as usize..read_access.mac as usize],
+            &plan.ndef_bytes[fr.window().input.get() as usize..fr.window().mac.get() as usize],
             b"x="
         );
     }
@@ -1043,10 +1128,13 @@ mod tests {
         )
         .unwrap();
 
-        let enc_range = read_access(&plan).encrypted_file_data.clone().unwrap();
-        assert_eq!(enc_range.end - enc_range.start, 32);
+        let fr = file_read(&plan);
+        let enc = fr.enc().unwrap();
+        let start = enc.start.get() as usize;
+        let len = enc.length.get() as usize;
+        assert_eq!(len, 32);
         assert!(
-            plan.ndef_bytes[enc_range.start as usize..enc_range.end as usize]
+            plan.ndef_bytes[start..start + len]
                 .iter()
                 .all(|&b| b == b'0')
         );
@@ -1061,7 +1149,7 @@ mod tests {
         )
         .unwrap();
 
-        let tt_offset = plan.sdm_settings.tamper_status.unwrap() as usize;
+        let tt_offset = plan.sdm_settings.tamper_status().unwrap().get() as usize;
         assert_eq!(&plan.ndef_bytes[tt_offset..tt_offset + 2], b"00");
     }
 
@@ -1071,31 +1159,36 @@ mod tests {
             "https://example.com/?tt={tt}&m={mac}",
             CryptoMode::Aes,
             SdmUrlOptions {
-                ctr_ret: AccessCondition::Key(KeyNumber::Key0),
+                ctr_ret: CtrRetAccess::Key(KeyNumber::Key0),
                 ..key0_opts()
             },
         )
         .unwrap();
 
-        assert_eq!(plan.sdm_settings.counter_access, AccessCondition::NoAccess);
-        assert_eq!(plan.sdm_settings.tamper_status, Some(URI_AT + 15));
+        assert_eq!(plan.sdm_settings.picc_data(), PiccData::None);
+        assert_eq!(
+            plan.sdm_settings.tamper_status(),
+            Some(Offset::new(URI_AT + 16).unwrap())
+        );
     }
 
     #[test]
     fn tt_can_live_inside_enc_range() {
         let plan = sdm_url_config(
-            "https://example.com/?u={uid}&c={ctr}&[[e=[............{tt}................]&m={mac}",
+            "https://example.com/?u={uid}&c={ctr}&[[e=[............{tt}..................]&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
         )
         .unwrap();
 
-        let read_access = read_access(&plan);
-        let enc_range = read_access.encrypted_file_data.clone().unwrap();
-        let tt_offset = plan.sdm_settings.tamper_status.unwrap();
-        assert!(tt_offset >= enc_range.start);
-        assert!(tt_offset + 2 <= enc_range.end);
-        assert_eq!(read_access.mac_input, URI_AT + 39);
+        let fr = file_read(&plan);
+        let enc = fr.enc().unwrap();
+        let enc_start = enc.start.get();
+        let enc_end = enc_start + enc.length.get();
+        let tt_offset = plan.sdm_settings.tamper_status().unwrap().get();
+        assert!(tt_offset >= enc_start);
+        assert!(tt_offset + 2 <= enc_end);
+        assert_eq!(fr.window().input.get(), URI_AT + 39);
     }
 
     #[test]
@@ -1122,7 +1215,7 @@ mod tests {
             SdmUrlOptions {
                 picc_key: KeyNumber::Key0,
                 mac_key: KeyNumber::Key0,
-                ctr_ret: AccessCondition::NoAccess,
+                ctr_ret: CtrRetAccess::NoAccess,
                 max_file_size: 256,
             },
         );

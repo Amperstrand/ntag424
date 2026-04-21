@@ -1,7 +1,7 @@
 //! Configuration payloads for the `SetConfiguration` command (NT4H2421Gx
 //! §10.5.1, Tables 49 and 50).
 
-use super::file_settings::AccessCondition;
+use super::file_settings::Access;
 
 /// Builder for the `SetConfiguration` data payload.
 ///
@@ -104,11 +104,11 @@ impl Configuration {
     ///
     /// Once enabled on a Tag Tamper-capable chip, the feature cannot be
     /// disabled again. Measurements start from the next activation onward.
-    pub fn with_tag_tamper_enabled(mut self, status_access: AccessCondition) -> Self {
+    pub fn with_tag_tamper_enabled(mut self, status_access: Access) -> Self {
         let status_access = match status_access {
-            AccessCondition::Key(key) => key.as_byte(),
-            AccessCondition::Free => 0x0E,
-            AccessCondition::NoAccess => 0x0F,
+            Access::Key(key) => key.as_byte(),
+            Access::Free => 0x0E,
+            Access::NoAccess => 0x0F,
         };
         self.tag_tamper = Some([0x01, status_access]);
         self
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn tag_tamper_builder_emits_option_07_payload() {
         let built: alloc::vec::Vec<_> = Configuration::new()
-            .with_tag_tamper_enabled(AccessCondition::Key(KeyNumber::Key4))
+            .with_tag_tamper_enabled(Access::Key(KeyNumber::Key4))
             .build()
             .map(|(id, data)| (id, data.to_vec()))
             .collect();
@@ -178,7 +178,7 @@ mod tests {
     fn build_emits_tag_tamper_in_table_50_order() {
         let option_ids: alloc::vec::Vec<_> = Configuration::new()
             .with_failed_auth_counter(true, 1000, 10)
-            .with_tag_tamper_enabled(AccessCondition::NoAccess)
+            .with_tag_tamper_enabled(Access::NoAccess)
             .with_pdcap2_5(0xAA)
             .with_random_uid_enabled()
             .build()

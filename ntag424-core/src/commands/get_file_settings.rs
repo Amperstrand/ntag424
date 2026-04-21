@@ -3,7 +3,7 @@ use crate::{
     commands::SecureChannel,
     crypto::suite::SessionSuite,
     session::SessionError,
-    types::{FileSettings, ResponseCode, ResponseStatus},
+    types::{FileSettingsView, ResponseCode, ResponseStatus},
 };
 
 const CMD: u8 = 0xF5;
@@ -15,14 +15,14 @@ const CMD: u8 = 0xF5;
 pub(crate) async fn get_file_settings<T: Transport>(
     transport: &mut T,
     file_no: u8,
-) -> Result<FileSettings, SessionError<T::Error>> {
+) -> Result<FileSettingsView, SessionError<T::Error>> {
     let apdu = [0x90, CMD, 0x00, 0x00, 0x01, file_no, 0x00];
     let response = transport.transmit(&apdu).await?;
     let code = ResponseCode::desfire(response.sw1, response.sw2);
     if !matches!(code.status(), ResponseStatus::OperationOk) {
         return Err(SessionError::ErrorResponse(code.status()));
     }
-    FileSettings::decode(response.data.as_ref()).map_err(SessionError::FileSettings)
+    FileSettingsView::decode(response.data.as_ref()).map_err(SessionError::FileSettings)
 }
 
 /// `GetFileSettings` (INS `F5h`, NT4H2421Gx §10.7.2) in `CommMode.MAC`
@@ -34,11 +34,11 @@ pub(crate) async fn get_file_settings_mac<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
     file_no: u8,
-) -> Result<FileSettings, SessionError<T::Error>> {
+) -> Result<FileSettingsView, SessionError<T::Error>> {
     let plain = channel
         .send_mac(transport, CMD, 0x00, 0x00, &[file_no], &[])
         .await?;
-    FileSettings::decode(&plain).map_err(SessionError::FileSettings)
+    FileSettingsView::decode(&plain).map_err(SessionError::FileSettings)
 }
 
 #[cfg(test)]
