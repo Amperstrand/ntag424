@@ -30,7 +30,7 @@ use aes::{
 use thiserror::Error;
 
 use crate::types::KeyNumber;
-use crate::types::file_settings::{SdmFileRead, SdmMetaRead, SdmSettings};
+use crate::types::file_settings::{PiccDataMirror, SdmSettings};
 
 use super::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
 use super::suite::{aes_cbc_decrypt, cmac_aes, cmac_lrp, truncate_mac};
@@ -156,66 +156,30 @@ impl SecureDynamicMessageVerifier {
     ///
     /// [`SdmSettings`]: crate::types::file_settings::SdmSettings
     pub fn try_new(settings: SdmSettings, mode: CryptoMode) -> Result<Self, SdmError> {
-        // SDMFileRead must point to a key for MAC verification.
-        let file_read_key = match settings.access.file_read {
-            SdmFileRead::Key(k) => k,
-            SdmFileRead::None => {
-                return Err(SdmError::InvalidConfiguration(
-                    "SDMFileRead is None — no MAC key configured",
-                ));
-            }
+        let read_access = settings.read_access.ok_or(SdmError::InvalidConfiguration(
+            "SDM read access is missing — no MAC key configured",
+        ))?;
+        let file_read_key = read_access.key;
+
+        let (picc_source, meta_read_key) = match settings.picc_data {
+            PiccDataMirror::Encrypted(encrypted) => (
+                PiccSource::Encrypted {
+                    offset: encrypted.offset,
+                },
+                Some(encrypted.key),
+            ),
+            PiccDataMirror::Plain(plain) => (
+                PiccSource::Plain {
+                    uid_offset: plain.uid,
+                    read_ctr_offset: plain.read_counter,
+                },
+                None,
+            ),
+            PiccDataMirror::None => (PiccSource::None, None),
         };
 
-        // Build PiccSource + extract meta_read_key from access rights.
-        let (picc_source, meta_read_key) = match settings.access.meta_read {
-            SdmMetaRead::Encrypted(k) => {
-                let offset = settings
-                    .offsets
-                    .picc_data
-                    .ok_or(SdmError::InvalidConfiguration(
-                        "encrypted PICCData enabled but picc_data offset missing",
-                    ))?;
-                (PiccSource::Encrypted { offset }, Some(k))
-            }
-            SdmMetaRead::Plain => {
-                let uid_offset = if settings.uid_mirror {
-                    Some(settings.offsets.uid.ok_or(SdmError::InvalidConfiguration(
-                        "UID mirror enabled but uid offset missing",
-                    ))?)
-                } else {
-                    None
-                };
-                let read_ctr_offset = if settings.read_ctr_mirror {
-                    Some(
-                        settings
-                            .offsets
-                            .read_ctr
-                            .ok_or(SdmError::InvalidConfiguration(
-                                "read_ctr mirror enabled but read_ctr offset missing",
-                            ))?,
-                    )
-                } else {
-                    None
-                };
-                (
-                    PiccSource::Plain {
-                        uid_offset,
-                        read_ctr_offset,
-                    },
-                    None,
-                )
-            }
-            SdmMetaRead::None => (PiccSource::None, None),
-        };
-
-        let mac_input_offset = settings
-            .offsets
-            .mac_input
-            .ok_or(SdmError::InvalidConfiguration("mac_input offset missing"))?;
-        let mac_offset = settings
-            .offsets
-            .mac
-            .ok_or(SdmError::InvalidConfiguration("mac offset missing"))?;
+        let mac_input_offset = read_access.mac_input;
+        let mac_offset = read_access.mac;
 
         if mac_input_offset > mac_offset {
             return Err(SdmError::InvalidConfiguration(
@@ -223,25 +187,18 @@ impl SecureDynamicMessageVerifier {
             ));
         }
 
-        let enc_data = if settings.enc_file_data {
-            if !settings.uid_mirror {
+        let enc_data = if let Some(range) = read_access.encrypted_file_data {
+            if !settings.picc_data.includes_uid() {
                 return Err(SdmError::InvalidConfiguration(
                     "enc_file_data requires UID mirroring",
                 ));
             }
-            if !settings.read_ctr_mirror {
+            if !settings.picc_data.includes_read_counter() {
                 return Err(SdmError::InvalidConfiguration(
                     "enc_file_data requires read_ctr mirroring",
                 ));
             }
-            Some(
-                settings
-                    .offsets
-                    .enc_data
-                    .ok_or(SdmError::InvalidConfiguration(
-                        "enc_file_data enabled but enc_data range missing",
-                    ))?,
-            )
+            Some(range)
         } else {
             None
         };
@@ -694,7 +651,10 @@ mod tests {
     use super::*;
     use crate::testing::hex_array;
     use crate::types::KeyNumber;
-    use crate::types::file_settings::{SdmAccessRights, SdmCtrRet, SdmOffsets, SdmSettings};
+    use crate::types::file_settings::{
+        AccessCondition, EncryptedPiccDataMirror, PiccDataContent, PiccDataMirror, SdmReadAccess,
+        SdmSettings,
+    };
 
     // -- Helper: build a synthetic NDEF file for testing ---------------------
 
@@ -717,6 +677,51 @@ mod tests {
         buf.extend_from_slice(mid);
         buf.extend_from_slice(mac_hex.as_bytes());
         buf
+    }
+
+    fn encrypted_settings(
+        picc_key: KeyNumber,
+        read_key: KeyNumber,
+        picc_offset: u32,
+        mac_input: u32,
+        mac: u32,
+    ) -> SdmSettings {
+        encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            picc_key,
+            read_key,
+            picc_offset,
+            mac_input,
+            mac,
+            None,
+        )
+    }
+
+    fn encrypted_settings_with_enc_data(
+        content: PiccDataContent,
+        picc_key: KeyNumber,
+        read_key: KeyNumber,
+        picc_offset: u32,
+        mac_input: u32,
+        mac: u32,
+        encrypted_file_data: Option<Range<u32>>,
+    ) -> SdmSettings {
+        SdmSettings {
+            picc_data: PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                key: picc_key,
+                offset: picc_offset,
+                content,
+            }),
+            read_access: Some(SdmReadAccess {
+                key: read_key,
+                mac_input,
+                mac,
+                encrypted_file_data,
+            }),
+            counter_access: AccessCondition::NoAccess,
+            tamper_status: None,
+            read_counter_limit: None,
+        }
     }
 
     // -- Unit tests for internal primitives ---------------------------------
@@ -807,23 +812,7 @@ mod tests {
     /// Build settings + NDEF for Table 4 (encrypted PICC, empty MAC input).
     fn table4_fixture() -> (SdmSettings, alloc::vec::Vec<u8>) {
         // Layout: [10-byte prefix][32-char PICCData hex][16-char SDMMAC hex]
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: false,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                mac_input: Some(42), // 10 + 32
-                mac: Some(42),       // empty MAC input
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 10, 42, 42);
         let ndef = build_ndef(
             b"HELLOWORLD", // 10-byte prefix
             Some("EF963FF7828658A599F3041510671E88"),
@@ -894,23 +883,7 @@ mod tests {
         ndef.extend_from_slice(b"x");
         ndef.extend_from_slice(mac_hex.as_bytes());
 
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: false,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(7),
-                mac_input: Some(7),
-                mac: Some(56),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 7, 7, 56);
 
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
@@ -937,24 +910,15 @@ mod tests {
         ndef.extend_from_slice(b"x"); // offset 95
         ndef.extend_from_slice(mac_hex.as_bytes()); // offset 96, len 16
 
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(14),
-                enc_data: Some(63..95),
-                mac_input: Some(0),
-                mac: Some(96),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            14,
+            0,
+            96,
+            Some(63..95),
+        );
 
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
@@ -999,23 +963,7 @@ mod tests {
         ndef.extend_from_slice(b"x"); // offset 55
         ndef.extend_from_slice(mac_hex.as_bytes()); // offset 56, len 16
 
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: false,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key2),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(7),
-                mac_input: Some(7),
-                mac: Some(56),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key2, 7, 7, 56);
 
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify_with_meta_key(&ndef, &file_key, &meta_key).unwrap();
@@ -1058,19 +1006,7 @@ mod tests {
 
     #[test]
     fn try_new_rejects_no_file_read() {
-        let settings = SdmSettings {
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::None,
-                file_read: SdmFileRead::None,
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                mac_input: Some(0),
-                mac: Some(0),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let settings = SdmSettings::default();
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(_)),
@@ -1078,42 +1014,26 @@ mod tests {
     }
 
     #[test]
-    fn try_new_rejects_missing_mac_offset() {
-        let settings = SdmSettings {
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::None,
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets::default(), // no mac_input / mac
-            ..Default::default()
-        };
+    fn builder_rejects_encrypted_file_data_without_read_access() {
         assert!(matches!(
-            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
-            Err(SdmError::InvalidConfiguration(_)),
+            SdmSettings::builder()
+                .mirror_encrypted_file_data(42..74)
+                .build(),
+            Err(_),
         ));
     }
 
     #[test]
     fn try_new_rejects_enc_file_data_without_uid_mirror() {
-        let settings = SdmSettings {
-            uid_mirror: false,
-            read_ctr_mirror: true,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                enc_data: Some(42..74),
-                mac_input: Some(42),
-                mac: Some(74),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::ReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(42..74),
+        );
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(
@@ -1124,24 +1044,15 @@ mod tests {
 
     #[test]
     fn try_new_rejects_enc_file_data_without_read_ctr_mirror() {
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: false,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                enc_data: Some(42..74),
-                mac_input: Some(42),
-                mac: Some(74),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::Uid,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(42..74),
+        );
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(
@@ -1152,24 +1063,15 @@ mod tests {
 
     #[test]
     fn try_new_rejects_inverted_enc_data_range() {
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                enc_data: Some(74..42),
-                mac_input: Some(42),
-                mac: Some(74),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(74..42),
+        );
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration("enc_data range end < start")),
@@ -1178,24 +1080,15 @@ mod tests {
 
     #[test]
     fn try_new_rejects_mac_window_that_does_not_cover_enc_data() {
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                enc_data: Some(42..74),
-                mac_input: Some(43),
-                mac: Some(74),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            43,
+            74,
+            Some(42..74),
+        );
         assert!(matches!(
             SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(
@@ -1236,24 +1129,15 @@ mod tests {
         let mac_hex_str: alloc::string::String =
             mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
 
-        let settings = SdmSettings {
-            uid_mirror: true,
-            read_ctr_mirror: true,
-            enc_file_data: true,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
-                file_read: SdmFileRead::Key(KeyNumber::Key0),
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets {
-                picc_data: Some(10),
-                enc_data: Some(42..74),
-                mac_input: Some(42),
-                mac: Some(74),
-                ..Default::default()
-            },
-        };
+        let settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(42..74),
+        );
 
         let ndef = build_ndef(
             b"HELLOWORLD",

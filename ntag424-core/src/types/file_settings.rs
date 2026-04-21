@@ -127,20 +127,117 @@ impl AccessRights {
     }
 }
 
-/// `SDMMetaRead` access right (NT4H2421Gx §8.2.3.4, Table 10).
+/// Which parts of `PICCData` are mirrored into the file.
 ///
-/// Controls how `PICCData` (UID + SDMReadCtr) is mirrored.
+/// The `None` variant exists so decoded on-wire settings can be represented
+/// losslessly, even if the tag reports an unusual combination that mirrors
+/// neither `UID` nor `SDMReadCtr`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SdmMetaRead {
-    /// `0h..4h` — encrypted PICCData mirroring with the targeted AppKey.
+pub enum PiccDataContent {
+    None,
+    Uid,
+    ReadCounter,
+    UidAndReadCounter,
+}
+
+impl PiccDataContent {
+    fn from_flags(uid: bool, read_counter: bool) -> Self {
+        match (uid, read_counter) {
+            (false, false) => Self::None,
+            (true, false) => Self::Uid,
+            (false, true) => Self::ReadCounter,
+            (true, true) => Self::UidAndReadCounter,
+        }
+    }
+
+    fn includes_uid(self) -> bool {
+        matches!(self, Self::Uid | Self::UidAndReadCounter)
+    }
+
+    fn includes_read_counter(self) -> bool {
+        matches!(self, Self::ReadCounter | Self::UidAndReadCounter)
+    }
+}
+
+/// Plain `PICCData` mirroring.
+///
+/// `uid` is the start of the 14-byte ASCII UID placeholder (7-byte UID,
+/// hex-encoded). `read_counter` is the start of the 6-byte ASCII
+/// `SDMReadCtr` placeholder.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlainPiccDataMirror {
+    pub uid: Option<u32>,
+    pub read_counter: Option<u32>,
+}
+
+impl PlainPiccDataMirror {
+    fn content(self) -> PiccDataContent {
+        PiccDataContent::from_flags(self.uid.is_some(), self.read_counter.is_some())
+    }
+}
+
+/// Encrypted `PICCData` mirroring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncryptedPiccDataMirror {
+    /// AppKey used for `PICCData` encryption.
+    pub key: KeyNumber,
+    /// Start of the encrypted `PICCData` placeholder.
+    pub offset: u32,
+    /// Which fields are present inside the encrypted blob.
+    pub content: PiccDataContent,
+}
+
+/// How `PICCData` is mirrored into the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PiccDataMirror {
+    /// No UID / read-counter mirroring.
+    #[default]
+    None,
+    /// UID and/or read counter mirrored as plain ASCII hex.
+    Plain(PlainPiccDataMirror),
+    /// UID and/or read counter mirrored inside encrypted `PICCData`.
+    Encrypted(EncryptedPiccDataMirror),
+}
+
+impl PiccDataMirror {
+    fn content(self) -> PiccDataContent {
+        match self {
+            Self::None => PiccDataContent::None,
+            Self::Plain(plain) => plain.content(),
+            Self::Encrypted(encrypted) => encrypted.content,
+        }
+    }
+
+    pub fn includes_uid(self) -> bool {
+        self.content().includes_uid()
+    }
+
+    pub fn includes_read_counter(self) -> bool {
+        self.content().includes_read_counter()
+    }
+}
+
+/// `SDMFileRead`-backed read access for unauthenticated SDM reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SdmReadAccess {
+    /// AppKey used to derive `SesSDMFileReadENCKey` / `...MACKey`.
+    pub key: KeyNumber,
+    /// First byte covered by `SDMMAC`.
+    pub mac_input: u32,
+    /// Start of the 16-byte ASCII `SDMMAC` placeholder.
+    pub mac: u32,
+    /// Byte range mirrored as `SDMENCFileData`, if enabled.
+    pub encrypted_file_data: Option<Range<u32>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WirePiccDataAccess {
     Encrypted(KeyNumber),
-    /// `Eh` — plain PICCData mirroring (UID and/or SDMReadCtr in clear).
     Plain,
-    /// `Fh` — no PICCData mirroring at all.
     None,
 }
 
-impl SdmMetaRead {
+impl WirePiccDataAccess {
     fn from_nibble(n: u8) -> Result<Self, FileSettingsError> {
         Ok(match n {
             0x0 => Self::Encrypted(KeyNumber::Key0),
@@ -156,196 +253,47 @@ impl SdmMetaRead {
 
     fn to_nibble(self) -> u8 {
         match self {
-            Self::Encrypted(k) => k.as_byte(),
+            Self::Encrypted(key) => key.as_byte(),
             Self::Plain => 0xE,
             Self::None => 0xF,
         }
     }
 }
 
-/// `SDMFileRead` access right (NT4H2421Gx §8.2.3.4, Table 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SdmFileRead {
-    /// `0h..4h` — SDM read using the targeted AppKey.
-    Key(KeyNumber),
-    /// `Fh` — no SDM for reading. `Eh` is RFU.
-    None,
+struct WireSdmAccessRights {
+    picc_data: WirePiccDataAccess,
+    read_access_key: Option<KeyNumber>,
+    counter_access: AccessCondition,
 }
 
-impl SdmFileRead {
-    fn from_nibble(n: u8) -> Result<Self, FileSettingsError> {
-        Ok(match n {
-            0x0 => Self::Key(KeyNumber::Key0),
-            0x1 => Self::Key(KeyNumber::Key1),
-            0x2 => Self::Key(KeyNumber::Key2),
-            0x3 => Self::Key(KeyNumber::Key3),
-            0x4 => Self::Key(KeyNumber::Key4),
-            0xF => Self::None,
-            v => return Err(FileSettingsError::InvalidAccessCondition(v)),
-        })
-    }
-
-    fn to_nibble(self) -> u8 {
-        match self {
-            Self::Key(k) => k.as_byte(),
-            Self::None => 0xF,
-        }
-    }
-}
-
-/// `SDMCtrRet` access right (NT4H2421Gx §8.2.3.4 + Table 6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SdmCtrRet {
-    Key(KeyNumber),
-    Free,
-    NoAccess,
-}
-
-impl SdmCtrRet {
-    fn from_nibble(n: u8) -> Result<Self, FileSettingsError> {
-        Ok(match n {
-            0x0 => Self::Key(KeyNumber::Key0),
-            0x1 => Self::Key(KeyNumber::Key1),
-            0x2 => Self::Key(KeyNumber::Key2),
-            0x3 => Self::Key(KeyNumber::Key3),
-            0x4 => Self::Key(KeyNumber::Key4),
-            0xE => Self::Free,
-            0xF => Self::NoAccess,
-            v => return Err(FileSettingsError::InvalidAccessCondition(v)),
-        })
-    }
-
-    fn to_nibble(self) -> u8 {
-        match self {
-            Self::Key(k) => k.as_byte(),
-            Self::Free => 0xE,
-            Self::NoAccess => 0xF,
-        }
-    }
-}
-
-/// SDM access-rights triple (NT4H2421Gx §10.7.1, Table 69; semantics in
-/// §8.2.3.4).
-///
-/// The Secure Dynamic Messaging (SDM) feature lets a tag emit dynamic,
-/// authenticated data to **unauthenticated** readers — typically inside an
-/// NDEF URL. These three fields control *who* can read the dynamic content
-/// and *which* AppKey is used to derive the SDM session keys:
-///
-/// - [`meta_read`](Self::meta_read) — controls how `PICCData` (UID and/or
-///   `SDMReadCtr`) is exposed: not at all, in plain ASCII, or encrypted with
-///   one of the AppKeys (§9.3.3).
-/// - [`file_read`](Self::file_read) — when set to an AppKey, grants free
-///   `ReadData`/`ISOReadBinary` access *and* selects the key used to derive
-///   `SesSDMFileReadENCKey` / `SesSDMFileReadMACKey` for `SDMENCFileData` and
-///   `SDMMAC` (§9.3.6, §9.3.8). `None` (`Fh`) disables SDM read entirely.
-/// - [`ctr_ret`](Self::ctr_ret) — access right for `GetFileCounters`, which
-///   returns the current `SDMReadCtr` value out-of-band.
-///
-/// Encoded as 2 bytes little-endian: bits 15..12 = `meta_read`,
-/// 11..8 = `file_read`, 7..4 = `Fh` (RFU), 3..0 = `ctr_ret`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SdmAccessRights {
-    /// Selects the form of `PICCData` mirroring (none / plain / encrypted),
-    /// see [`SdmMetaRead`].
-    pub meta_read: SdmMetaRead,
-    /// Select the SDM read key.
-    ///
-    /// This chooses the AppKey used to derive the SDM read session
-    /// keys, or disables SDM-read entirely; see [`SdmFileRead`].
-    pub file_read: SdmFileRead,
-    /// Access right for `GetFileCounters`.
-    ///
-    /// This command returns the current `SDMReadCtr` value
-    /// (NT4H2421Gx §10.7.3).
-    pub ctr_ret: SdmCtrRet,
-}
-
-impl SdmAccessRights {
+impl WireSdmAccessRights {
     fn from_le_bytes(b: [u8; 2]) -> Result<Self, FileSettingsError> {
         let v = u16::from_le_bytes(b);
+        let read_access_key = match ((v >> 8) & 0xF) as u8 {
+            0x0 => Some(KeyNumber::Key0),
+            0x1 => Some(KeyNumber::Key1),
+            0x2 => Some(KeyNumber::Key2),
+            0x3 => Some(KeyNumber::Key3),
+            0x4 => Some(KeyNumber::Key4),
+            0xF => None,
+            other => return Err(FileSettingsError::InvalidAccessCondition(other)),
+        };
         Ok(Self {
-            meta_read: SdmMetaRead::from_nibble(((v >> 12) & 0xF) as u8)?,
-            file_read: SdmFileRead::from_nibble(((v >> 8) & 0xF) as u8)?,
-            ctr_ret: SdmCtrRet::from_nibble((v & 0xF) as u8)?,
+            picc_data: WirePiccDataAccess::from_nibble(((v >> 12) & 0xF) as u8)?,
+            read_access_key,
+            counter_access: AccessCondition::from_nibble((v & 0xF) as u8)?,
         })
     }
 
     fn to_le_bytes(self) -> [u8; 2] {
-        let v = (u16::from(self.meta_read.to_nibble()) << 12)
-            | (u16::from(self.file_read.to_nibble()) << 8)
+        let read_access_nibble = self.read_access_key.map_or(0xF, KeyNumber::as_byte);
+        let v = (u16::from(self.picc_data.to_nibble()) << 12)
+            | (u16::from(read_access_nibble) << 8)
             | (0xFu16 << 4)
-            | u16::from(self.ctr_ret.to_nibble());
+            | u16::from(self.counter_access.to_nibble());
         v.to_le_bytes()
     }
-}
-
-/// SDM placeholder offsets inside the file.
-///
-/// These offsets tell the tag where to inject SDM dynamic content when
-/// the file is read unauthenticated (NT4H2421Gx §9.3, §10.7.1).
-///
-/// At personalisation time you write the file with **placeholder bytes** at
-/// the positions listed below. On every unauthenticated read the tag
-/// substitutes those placeholders with freshly computed dynamic values
-/// (`PICCData`, `SDMENCFileData`, `SDMMAC`). All values are 24-bit
-/// little-endian byte offsets relative to the start of the file.
-///
-/// Whether a given field must be present depends on the [`SdmSettings`] flags
-/// and [`SdmAccessRights`] selectors:
-///
-/// | Field            | Required when                                           |
-/// |------------------|---------------------------------------------------------|
-/// | `uid`            | `uid_mirror` AND `meta_read = Plain`                    |
-/// | `read_ctr`       | `read_ctr_mirror` AND `meta_read = Plain`               |
-/// | `picc_data`      | `meta_read = Encrypted(_)`                              |
-/// | `tt_status`      | `tt_status_mirror`                                      |
-/// | `mac_input`      | `file_read != None`                                     |
-/// | `enc_data`       | `file_read != None` AND `enc_file_data`                 |
-/// | `mac`            | `file_read != None`                                     |
-/// | `read_ctr_limit` | `read_ctr_limit_enabled`                                |
-///
-/// Field semantics:
-///
-/// - [`uid`](Self::uid) — start of the 14-byte ASCII UID placeholder
-///   (7-byte UID, hex-encoded). Plain MetaRead only; with encrypted
-///   MetaRead the UID travels inside `picc_data` instead.
-/// - [`read_ctr`](Self::read_ctr) — start of the 6-byte ASCII
-///   `SDMReadCtr` placeholder.
-/// - [`picc_data`](Self::picc_data) — start of the encrypted-`PICCData`
-///   placeholder. Length is 32 ASCII bytes in AES mode (16 bytes ciphertext)
-///   and 48 ASCII bytes in LRP mode (8-byte `PICCRand` || 16-byte ciphertext);
-///   see §9.3.4.
-/// - [`tt_status`](Self::tt_status) — start of the 2-byte Tag Tamper status
-///   placeholder (`TTPermStatus || TTCurrStatus`), mirrored either plain or
-///   inside `SDMENCFileData`.
-/// - [`mac_input`](Self::mac_input) — first byte of the file region the
-///   `SDMMAC` is computed over (§9.3.7). Must be `≤ mac` and, if `enc_data`
-///   is configured, must cover the whole encrypted region.
-/// - [`enc_data`](Self::enc_data) — byte range covered by
-///   `SDMENCFileData` (§9.3.5). `start` is `SDMENCOffset`,
-///   `end - start` is `SDMENCLength`. The placeholder length on the wire is
-///   in ASCII; the actual encrypted plaintext length is half of it, so
-///   `SDMENCLength` must be a multiple of 32 (and ≥ 32).
-/// - [`mac`](Self::mac) — start of the 16-byte ASCII `SDMMAC` placeholder
-///   (8-byte truncated CMAC, hex-encoded). Must satisfy
-///   `mac + 16 ≤ file_size` and, if `enc_data` is set,
-///   `mac ≥ enc_data.end`.
-/// - [`read_ctr_limit`](Self::read_ctr_limit) — value of `SDMReadCtrLimit`
-///   (NOT a file offset). Once `SDMReadCtr == read_ctr_limit`, further
-///   unauthenticated reads of the file fail (§9.3.2). `None` disables the
-///   limit (encoded by clearing the corresponding bit; the all-ones sentinel
-///   value used by some implementations is normalised to `None` on decode).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SdmOffsets {
-    pub uid: Option<u32>,
-    pub read_ctr: Option<u32>,
-    pub picc_data: Option<u32>,
-    pub tt_status: Option<u32>,
-    pub mac_input: Option<u32>,
-    pub enc_data: Option<Range<u32>>,
-    pub mac: Option<u32>,
-    pub read_ctr_limit: Option<u32>,
 }
 
 /// Secure Dynamic Messaging settings (NT4H2421Gx §9.3, §10.7.1 Table 69).
@@ -357,7 +305,7 @@ pub struct SdmOffsets {
 /// (`SDMENCFileData`) and a truncated CMAC (`SDMMAC`) over the dynamic view.
 ///
 /// Mirroring is implemented by writing fixed-size **placeholder bytes** into
-/// the file at the positions in [`SdmOffsets`]; the PICC substitutes them on
+/// the file at the configured offsets; the PICC substitutes them on
 /// the fly during each unauthenticated read. SDM is only meaningful for the
 /// NDEF file (FileNo `02h`) on NTAG 424 DNA.
 ///
@@ -365,50 +313,22 @@ pub struct SdmOffsets {
 /// messaging applies instead, and `SDMReadCtr` is not incremented (§9.3.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdmSettings {
-    /// Mirror the UID as plain ASCII hex at the specified offset.
-    ///
-    /// `SDMOptions[Bit 7]` — mirror the 7-byte `UID` into the file.
-    /// With [`SdmMetaRead::Plain`] it is hex-encoded at
-    /// [`SdmOffsets::uid`] (14 ASCII bytes); with
-    /// [`SdmMetaRead::Encrypted`] it is bundled into the encrypted
-    /// `PICCData` blob at [`SdmOffsets::picc_data`].
-    pub uid_mirror: bool,
-    /// Mirror the 3-byte `SDMReadCtr` into the file.
-    ///
-    /// `SDMOptions[Bit 6]` — mirror the 24-bit `SDMReadCtr`. Same
-    /// plain/encrypted distinction as [`uid_mirror`](Self::uid_mirror).
-    /// On the wire `SDMReadCtr` is LSB-first; mirrored ASCII is MSB-first
-    /// (§9.3.1).
-    pub read_ctr_mirror: bool,
-    /// Encrypt a file slice into the SDM response.
-    ///
-    /// This is `SDMOptions[Bit 4]`. It encrypts the contiguous slice at
-    /// [`SdmOffsets::enc_data`] with `SesSDMFileReadENCKey` derived from
-    /// [`SdmAccessRights::file_read`] (§9.3.5–§9.3.6). It requires
-    /// `file_read != None`, and per spec also requires both UID and
-    /// `SDMReadCtr` mirroring to be enabled.
-    pub enc_file_data: bool,
-    /// Mirror the Tag Tamper status as plain bytes or inside the encrypted `PICCData`.
-    ///
-    /// `SDMOptions[Bit 3]` — mirror the 2-byte Tag Tamper status
-    /// (`TTPermStatus || TTCurrStatus`) at [`SdmOffsets::tt_status`].
-    ///
-    /// The placeholder may be plain or may live inside `SDMENCFileData`; this
-    /// model only captures whether mirroring is enabled and where the 2-byte
-    /// placeholder starts.
-    pub tt_status_mirror: bool,
-    /// SDM access rights and key selection (`SDMMetaRead`, `SDMFileRead`,
-    /// `SDMCtrRet`).
-    pub access: SdmAccessRights,
-    /// Placeholder offsets / lengths injected into the file content.
-    pub offsets: SdmOffsets,
+    /// How `UID` / `SDMReadCtr` are mirrored.
+    pub picc_data: PiccDataMirror,
+    /// Access settings for `SDMMAC` / `SDMENCFileData`, if enabled.
+    pub read_access: Option<SdmReadAccess>,
+    /// Access right for `GetFileCounters`.
+    pub counter_access: AccessCondition,
+    /// Start of the 2-byte Tag Tamper placeholder, if mirrored.
+    pub tamper_status: Option<u32>,
+    /// `SDMReadCtrLimit`, if configured.
+    pub read_counter_limit: Option<u32>,
 }
 
 impl SdmSettings {
     /// Start an [`SdmSettingsBuilder`].
     ///
-    /// The builder keeps the [`SdmSettings`] flags and matching
-    /// [`SdmOffsets`] entries in sync automatically.
+    /// The builder keeps the high-level SDM features and their offsets in sync.
     pub fn builder() -> SdmSettingsBuilder {
         SdmSettingsBuilder::default()
     }
@@ -416,61 +336,71 @@ impl SdmSettings {
 
 /// Builder for [`SdmSettings`].
 ///
-/// It sets [`SdmSettings`] flags and the corresponding
-/// [`SdmOffsets`] entries together, so callers cannot accidentally
-/// enable a mirror without supplying an offset, or vice versa.
+/// It sets high-level SDM features and their offsets together, so callers
+/// cannot accidentally enable a mirror without supplying its location.
 ///
-/// Defaults: SDM disabled — no mirroring, `meta_read = None`,
-/// `file_read = None`, `ctr_ret = NoAccess`, no encrypted data, no read-ctr
-/// limit. Build with [`SdmSettingsBuilder::build`].
+/// Defaults: SDM disabled — no PICCData mirroring, no read access, counter
+/// reads blocked, no encrypted file data, and no read-counter limit. Build
+/// with [`SdmSettingsBuilder::build`].
 ///
 /// Example — encrypted PICCData (Key2) with SDMMAC over a fixed window
 /// (matches AN12196 §5.9 Table 18):
 ///
 /// ```
 /// use ntag424_core::types::KeyNumber;
-/// use ntag424_core::types::file_settings::{SdmCtrRet, SdmSettings};
+/// use ntag424_core::types::file_settings::{AccessCondition, SdmSettings};
 ///
 /// let sdm = SdmSettings::builder()
 ///     .mirror_encrypted_picc_data(KeyNumber::Key2, 0x20, true, true)
-///     .enable_file_read(KeyNumber::Key1, 0x43, 0x43)
-///     .allow_ctr_ret(SdmCtrRet::Key(KeyNumber::Key1))
-///     .build();
+///     .enable_read_access(KeyNumber::Key1, 0x43, 0x43)
+///     .allow_counter_read(AccessCondition::Key(KeyNumber::Key1))
+///     .build()
+///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct SdmSettingsBuilder {
     inner: SdmSettings,
+    pending_encrypted_file_data: Option<Range<u32>>,
 }
 
 impl SdmSettingsBuilder {
     /// Mirror the 7-byte UID in plain ASCII hex at `offset` in the file.
-    /// Sets [`SdmAccessRights::meta_read`] to [`SdmMetaRead::Plain`]; can be
-    /// combined with [`mirror_plain_read_ctr`](Self::mirror_plain_read_ctr).
+    /// Can be combined with
+    /// [`mirror_plain_read_counter`](Self::mirror_plain_read_counter).
     ///
     /// Mutually exclusive with
     /// [`mirror_encrypted_picc_data`](Self::mirror_encrypted_picc_data) —
     /// calling that method afterwards clears this mirror.
     pub fn mirror_plain_uid(mut self, offset: u32) -> Self {
-        self.inner.access.meta_read = SdmMetaRead::Plain;
-        self.inner.uid_mirror = true;
-        self.inner.offsets.uid = Some(offset);
-        self.inner.offsets.picc_data = None;
+        let mut plain = match self.inner.picc_data {
+            PiccDataMirror::Plain(plain) => plain,
+            _ => PlainPiccDataMirror::default(),
+        };
+        plain.uid = Some(offset);
+        self.inner.picc_data = PiccDataMirror::Plain(plain);
         self
     }
 
     /// Mirror the 6-byte ASCII `SDMReadCtr` at `offset` in the file. Sets
-    /// [`SdmAccessRights::meta_read`] to [`SdmMetaRead::Plain`]; can be
+    /// plain `PICCData` mirroring; can be
     /// combined with [`mirror_plain_uid`](Self::mirror_plain_uid).
     ///
     /// Mutually exclusive with
     /// [`mirror_encrypted_picc_data`](Self::mirror_encrypted_picc_data) —
     /// calling that method afterwards clears this mirror.
-    pub fn mirror_plain_read_ctr(mut self, offset: u32) -> Self {
-        self.inner.access.meta_read = SdmMetaRead::Plain;
-        self.inner.read_ctr_mirror = true;
-        self.inner.offsets.read_ctr = Some(offset);
-        self.inner.offsets.picc_data = None;
+    pub fn mirror_plain_read_counter(mut self, offset: u32) -> Self {
+        let mut plain = match self.inner.picc_data {
+            PiccDataMirror::Plain(plain) => plain,
+            _ => PlainPiccDataMirror::default(),
+        };
+        plain.read_counter = Some(offset);
+        self.inner.picc_data = PiccDataMirror::Plain(plain);
         self
+    }
+
+    /// Backwards-compatible alias for [`mirror_plain_read_counter`](Self::mirror_plain_read_counter).
+    pub fn mirror_plain_read_ctr(self, offset: u32) -> Self {
+        self.mirror_plain_read_counter(offset)
     }
 
     /// Mirror UID and/or `SDMReadCtr` *encrypted* inside `PICCData` placed
@@ -487,12 +417,11 @@ impl SdmSettingsBuilder {
         include_uid: bool,
         include_read_ctr: bool,
     ) -> Self {
-        self.inner.access.meta_read = SdmMetaRead::Encrypted(key);
-        self.inner.uid_mirror = include_uid;
-        self.inner.read_ctr_mirror = include_read_ctr;
-        self.inner.offsets.uid = None;
-        self.inner.offsets.read_ctr = None;
-        self.inner.offsets.picc_data = Some(offset);
+        self.inner.picc_data = PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+            key,
+            offset,
+            content: PiccDataContent::from_flags(include_uid, include_read_ctr),
+        });
         self
     }
 
@@ -530,22 +459,39 @@ impl SdmSettingsBuilder {
     ///   not `picc_data`.
     /// - `enable_file_read(key, 75, 75)` — MAC over empty input (degenerate
     ///   but allowed).
-    pub fn enable_file_read(mut self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
-        self.inner.access.file_read = SdmFileRead::Key(key);
-        self.inner.offsets.mac_input = Some(mac_input);
-        self.inner.offsets.mac = Some(mac);
+    pub fn enable_read_access(mut self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+        self.inner.read_access = Some(SdmReadAccess {
+            key,
+            mac_input,
+            mac,
+            encrypted_file_data: self.pending_encrypted_file_data.take(),
+        });
         self
+    }
+
+    /// Backwards-compatible alias for [`enable_read_access`](Self::enable_read_access).
+    pub fn enable_file_read(self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+        self.enable_read_access(key, mac_input, mac)
     }
 
     /// Enable `SDMENCFileData` over a file range.
     ///
     /// `start..end` are byte offsets into the file; `end - start` must
-    /// be a multiple of 32, see [`SdmOffsets::enc_data`]. This also
-    /// requires [`enable_file_read`](Self::enable_file_read).
-    pub fn mirror_enc_file_data(mut self, range: Range<u32>) -> Self {
-        self.inner.enc_file_data = true;
-        self.inner.offsets.enc_data = Some(range);
+    /// be a multiple of 32. This also requires
+    /// [`enable_read_access`](Self::enable_read_access).
+    pub fn mirror_encrypted_file_data(mut self, range: Range<u32>) -> Self {
+        if let Some(read_access) = &mut self.inner.read_access {
+            read_access.encrypted_file_data = Some(range);
+        } else {
+            self.pending_encrypted_file_data = Some(range);
+        }
         self
+    }
+
+    /// Backwards-compatible alias for
+    /// [`mirror_encrypted_file_data`](Self::mirror_encrypted_file_data).
+    pub fn mirror_enc_file_data(self, range: Range<u32>) -> Self {
+        self.mirror_encrypted_file_data(range)
     }
 
     /// Mirror the 2-byte Tag Tamper status (`TTPermStatus || TTCurrStatus`)
@@ -556,44 +502,57 @@ impl SdmSettingsBuilder {
     ///
     /// The tag must support this feature, check the (tag's version)[`crate::types::Version::has_tag_tamper_support`]
     pub fn mirror_tt_status(mut self, offset: u32) -> Self {
-        self.inner.tt_status_mirror = true;
-        self.inner.offsets.tt_status = Some(offset);
+        self.inner.tamper_status = Some(offset);
         self
     }
 
     /// Set the `SDMReadCtrLimit`. After `SDMReadCtr` reaches this value,
     /// further unauthenticated reads of the file fail.
     pub fn limit_read_ctr(mut self, value: u32) -> Self {
-        self.inner.offsets.read_ctr_limit = Some(value);
+        self.inner.read_counter_limit = Some(value);
         self
     }
 
     /// Set the `SDMCtrRet` access right (controls who may issue
     /// `GetFileCounters`).
-    pub fn allow_ctr_ret(mut self, c: SdmCtrRet) -> Self {
-        self.inner.access.ctr_ret = c;
+    pub fn allow_counter_read(mut self, access: AccessCondition) -> Self {
+        self.inner.counter_access = access;
         self
     }
 
+    /// Backwards-compatible alias for [`allow_counter_read`](Self::allow_counter_read).
+    pub fn allow_ctr_ret(self, access: AccessCondition) -> Self {
+        self.allow_counter_read(access)
+    }
+
     /// Finalise the [`SdmSettings`] value.
-    pub fn build(self) -> SdmSettings {
-        self.inner
+    pub fn build(self) -> Result<SdmSettings, FileSettingsError> {
+        if self.pending_encrypted_file_data.is_some() {
+            return Err(FileSettingsError::InconsistentOffsets(
+                "encrypted_file_data",
+            ));
+        }
+        if matches!(
+            self.inner.picc_data,
+            PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                content: PiccDataContent::None,
+                ..
+            })
+        ) {
+            return Err(FileSettingsError::InconsistentOffsets("picc_data"));
+        }
+        Ok(self.inner)
     }
 }
 
 impl Default for SdmSettings {
     fn default() -> Self {
         Self {
-            uid_mirror: false,
-            read_ctr_mirror: false,
-            enc_file_data: false,
-            tt_status_mirror: false,
-            access: SdmAccessRights {
-                meta_read: SdmMetaRead::None,
-                file_read: SdmFileRead::None,
-                ctr_ret: SdmCtrRet::NoAccess,
-            },
-            offsets: SdmOffsets::default(),
+            picc_data: PiccDataMirror::None,
+            read_access: None,
+            counter_access: AccessCondition::NoAccess,
+            tamper_status: None,
+            read_counter_limit: None,
         }
     }
 }
@@ -648,7 +607,7 @@ impl FileSettings {
 
         let sdm = if file_option & (1 << 6) != 0 {
             let sdm_options = r.u8()?;
-            let access = SdmAccessRights::from_le_bytes(r.array::<2>()?)?;
+            let access = WireSdmAccessRights::from_le_bytes(r.array::<2>()?)?;
 
             let uid_mirror = sdm_options & (1 << 7) != 0;
             let read_ctr_mirror = sdm_options & (1 << 6) != 0;
@@ -660,48 +619,85 @@ impl FileSettings {
             // binary mirroring is RFU. We always emit `1` and ignore the bit
             // on decode.
 
-            let meta_plain = matches!(access.meta_read, SdmMetaRead::Plain);
-            let meta_enc = matches!(access.meta_read, SdmMetaRead::Encrypted(_));
-            let file_read_active = !matches!(access.file_read, SdmFileRead::None);
+            let meta_plain = matches!(access.picc_data, WirePiccDataAccess::Plain);
+            let meta_enc = matches!(access.picc_data, WirePiccDataAccess::Encrypted(_));
+            let file_read_active = access.read_access_key.is_some();
 
-            let mut offsets = SdmOffsets::default();
-            if uid_mirror && meta_plain {
-                offsets.uid = Some(r.u24_le()?);
-            }
-            if read_ctr_mirror && meta_plain {
-                offsets.read_ctr = Some(r.u24_le()?);
-            }
-            if meta_enc {
-                offsets.picc_data = Some(r.u24_le()?);
-            }
-            if tt_status_mirror {
-                offsets.tt_status = Some(r.u24_le()?);
-            }
-            if file_read_active {
-                offsets.mac_input = Some(r.u24_le()?);
-            }
-            if file_read_active && enc_file_data {
+            let plain_uid = if uid_mirror && meta_plain {
+                Some(r.u24_le()?)
+            } else {
+                None
+            };
+            let plain_read_counter = if read_ctr_mirror && meta_plain {
+                Some(r.u24_le()?)
+            } else {
+                None
+            };
+            let encrypted_picc_offset = if meta_enc { Some(r.u24_le()?) } else { None };
+            let tamper_status = if tt_status_mirror {
+                Some(r.u24_le()?)
+            } else {
+                None
+            };
+            let mac_input = if file_read_active {
+                Some(r.u24_le()?)
+            } else {
+                None
+            };
+            let encrypted_file_data = if file_read_active && enc_file_data {
                 let start = r.u24_le()?;
                 let len = r.u24_le()?;
-                offsets.enc_data = Some(start..start.saturating_add(len));
-            }
-            if file_read_active {
-                offsets.mac = Some(r.u24_le()?);
-            }
-            if read_ctr_limit_enabled {
+                Some(start..start.saturating_add(len))
+            } else {
+                None
+            };
+            let mac = if file_read_active {
+                Some(r.u24_le()?)
+            } else {
+                None
+            };
+            let read_counter_limit = if read_ctr_limit_enabled {
                 let v = r.u24_le()?;
                 // 0x00FF_FFFF is the conventional "no limit" sentinel —
                 // expose it as `None` so callers don't need to special-case it.
-                offsets.read_ctr_limit = (v != 0x00FF_FFFF).then_some(v);
-            }
+                (v != 0x00FF_FFFF).then_some(v)
+            } else {
+                None
+            };
+
+            let picc_data = match access.picc_data {
+                WirePiccDataAccess::None => PiccDataMirror::None,
+                WirePiccDataAccess::Plain => PiccDataMirror::Plain(PlainPiccDataMirror {
+                    uid: plain_uid,
+                    read_counter: plain_read_counter,
+                }),
+                WirePiccDataAccess::Encrypted(key) => {
+                    PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                        key,
+                        offset: encrypted_picc_offset
+                            .ok_or(FileSettingsError::InconsistentOffsets("picc_data"))?,
+                        content: PiccDataContent::from_flags(uid_mirror, read_ctr_mirror),
+                    })
+                }
+            };
+
+            let read_access = match (access.read_access_key, mac_input, mac) {
+                (Some(key), Some(mac_input), Some(mac)) => Some(SdmReadAccess {
+                    key,
+                    mac_input,
+                    mac,
+                    encrypted_file_data,
+                }),
+                (None, None, None) => None,
+                _ => return Err(FileSettingsError::InconsistentOffsets("read_access")),
+            };
 
             Some(SdmSettings {
-                uid_mirror,
-                read_ctr_mirror,
-                enc_file_data,
-                tt_status_mirror,
-                access,
-                offsets,
+                picc_data,
+                read_access,
+                counter_access: access.counter_access,
+                tamper_status,
+                read_counter_limit,
             })
         } else {
             None
@@ -742,90 +738,77 @@ impl FileSettings {
 
         if let Some(sdm) = &self.sdm {
             let mut sdm_options = 0u8;
-            if sdm.uid_mirror {
+            if sdm.picc_data.includes_uid() {
                 sdm_options |= 1 << 7;
             }
-            if sdm.read_ctr_mirror {
+            if sdm.picc_data.includes_read_counter() {
                 sdm_options |= 1 << 6;
             }
-            if sdm.offsets.read_ctr_limit.is_some() {
+            if sdm.read_counter_limit.is_some() {
                 sdm_options |= 1 << 5;
             }
-            if sdm.enc_file_data {
+            if sdm
+                .read_access
+                .as_ref()
+                .is_some_and(|read_access| read_access.encrypted_file_data.is_some())
+            {
                 sdm_options |= 1 << 4;
             }
-            if sdm.tt_status_mirror {
+            if sdm.tamper_status.is_some() {
                 sdm_options |= 1 << 3;
             }
             // ASCII encoding is the only supported mode (binary is RFU); always set.
             sdm_options |= 1;
             w.u8(sdm_options)?;
-            w.array(&sdm.access.to_le_bytes())?;
+            let wire_access = WireSdmAccessRights {
+                picc_data: match sdm.picc_data {
+                    PiccDataMirror::None => WirePiccDataAccess::None,
+                    PiccDataMirror::Plain(_) => WirePiccDataAccess::Plain,
+                    PiccDataMirror::Encrypted(encrypted) => {
+                        WirePiccDataAccess::Encrypted(encrypted.key)
+                    }
+                },
+                read_access_key: sdm.read_access.as_ref().map(|read_access| read_access.key),
+                counter_access: sdm.counter_access,
+            };
+            w.array(&wire_access.to_le_bytes())?;
 
-            let meta_plain = matches!(sdm.access.meta_read, SdmMetaRead::Plain);
-            let meta_enc = matches!(sdm.access.meta_read, SdmMetaRead::Encrypted(_));
-            let file_read_active = !matches!(sdm.access.file_read, SdmFileRead::None);
-
-            let need_uid = sdm.uid_mirror && meta_plain;
-            let need_read_ctr = sdm.read_ctr_mirror && meta_plain;
-            let need_picc = meta_enc;
-            let need_tt_status = sdm.tt_status_mirror;
-            let need_mac_input = file_read_active;
-            let need_enc = file_read_active && sdm.enc_file_data;
-            let need_mac = file_read_active;
-            let need_limit = sdm.offsets.read_ctr_limit.is_some();
-
-            check(need_uid, sdm.offsets.uid, "uid")?;
-            check(need_read_ctr, sdm.offsets.read_ctr, "read_ctr")?;
-            check(need_picc, sdm.offsets.picc_data, "picc_data")?;
-            check(need_tt_status, sdm.offsets.tt_status, "tt_status")?;
-            check(need_mac_input, sdm.offsets.mac_input, "mac_input")?;
-            match (need_enc, sdm.offsets.enc_data.as_ref()) {
-                (true, Some(range)) if range.end < range.start => {
-                    return Err(FileSettingsError::InconsistentOffsets("enc_data"));
+            match sdm.picc_data {
+                PiccDataMirror::None => {}
+                PiccDataMirror::Plain(plain) => {
+                    if let Some(uid) = plain.uid {
+                        w.u24_le(uid)?;
+                    }
+                    if let Some(read_counter) = plain.read_counter {
+                        w.u24_le(read_counter)?;
+                    }
                 }
-                (true, Some(_)) | (false, None) => {}
-                _ => return Err(FileSettingsError::InconsistentOffsets("enc_data")),
+                PiccDataMirror::Encrypted(encrypted) => {
+                    w.u24_le(encrypted.offset)?;
+                }
             }
-            check(need_mac, sdm.offsets.mac, "mac")?;
-            check(need_limit, sdm.offsets.read_ctr_limit, "read_ctr_limit")?;
-
-            if need_uid {
-                w.u24_le(sdm.offsets.uid.unwrap())?;
+            if let Some(tamper_status) = sdm.tamper_status {
+                w.u24_le(tamper_status)?;
             }
-            if need_read_ctr {
-                w.u24_le(sdm.offsets.read_ctr.unwrap())?;
+            if let Some(read_access) = &sdm.read_access {
+                w.u24_le(read_access.mac_input)?;
+                if let Some(range) = read_access.encrypted_file_data.as_ref() {
+                    if range.end < range.start {
+                        return Err(FileSettingsError::InconsistentOffsets(
+                            "encrypted_file_data",
+                        ));
+                    }
+                    w.u24_le(range.start)?;
+                    w.u24_le(range.end - range.start)?;
+                }
+                w.u24_le(read_access.mac)?;
             }
-            if need_picc {
-                w.u24_le(sdm.offsets.picc_data.unwrap())?;
-            }
-            if need_tt_status {
-                w.u24_le(sdm.offsets.tt_status.unwrap())?;
-            }
-            if need_mac_input {
-                w.u24_le(sdm.offsets.mac_input.unwrap())?;
-            }
-            if need_enc {
-                let range = sdm.offsets.enc_data.as_ref().unwrap();
-                w.u24_le(range.start)?;
-                w.u24_le(range.end - range.start)?;
-            }
-            if need_mac {
-                w.u24_le(sdm.offsets.mac.unwrap())?;
-            }
-            if need_limit {
-                w.u24_le(sdm.offsets.read_ctr_limit.unwrap())?;
+            if let Some(limit) = sdm.read_counter_limit {
+                w.u24_le(limit)?;
             }
         }
 
         Ok(w.pos())
-    }
-}
-
-fn check(required: bool, value: Option<u32>, name: &'static str) -> Result<(), FileSettingsError> {
-    match (required, value) {
-        (true, Some(_)) | (false, None) => Ok(()),
-        _ => Err(FileSettingsError::InconsistentOffsets(name)),
     }
 }
 
@@ -947,24 +930,26 @@ mod tests {
             }
         );
         let sdm = fs.sdm.expect("SDM enabled");
-        assert!(sdm.uid_mirror);
-        assert!(sdm.read_ctr_mirror);
-        assert_eq!(sdm.offsets.read_ctr_limit, None);
-        assert!(sdm.enc_file_data);
-        assert!(!sdm.tt_status_mirror);
         assert_eq!(
-            sdm.access.meta_read,
-            SdmMetaRead::Encrypted(KeyNumber::Key0)
+            sdm.picc_data,
+            PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                key: KeyNumber::Key0,
+                offset: 0x1F,
+                content: PiccDataContent::UidAndReadCounter,
+            })
         );
-        assert_eq!(sdm.access.file_read, SdmFileRead::Key(KeyNumber::Key0));
-        assert_eq!(sdm.access.ctr_ret, SdmCtrRet::Free);
-        assert_eq!(sdm.offsets.uid, None);
-        assert_eq!(sdm.offsets.read_ctr, None);
-        assert_eq!(sdm.offsets.picc_data, Some(0x1F));
-        assert_eq!(sdm.offsets.mac_input, Some(0x44));
-        assert_eq!(sdm.offsets.enc_data, Some(0x44..0x44 + 0x20));
-        assert_eq!(sdm.offsets.mac, Some(0x6A));
-        assert_eq!(sdm.offsets.read_ctr_limit, None);
+        assert_eq!(
+            sdm.read_access,
+            Some(SdmReadAccess {
+                key: KeyNumber::Key0,
+                mac_input: 0x44,
+                mac: 0x6A,
+                encrypted_file_data: Some(0x44..0x44 + 0x20),
+            })
+        );
+        assert_eq!(sdm.counter_access, AccessCondition::Free);
+        assert_eq!(sdm.tamper_status, None);
+        assert_eq!(sdm.read_counter_limit, None);
     }
 
     /// AN12196 §5.9 Table 18 step 7 — `ChangeFileSettings` `CmdData` for the
@@ -986,21 +971,20 @@ mod tests {
                 change: AccessCondition::Key(KeyNumber::Key0),
             },
             sdm: Some(SdmSettings {
-                uid_mirror: true,
-                read_ctr_mirror: true,
-                enc_file_data: false,
-                tt_status_mirror: false,
-                access: SdmAccessRights {
-                    meta_read: SdmMetaRead::Encrypted(KeyNumber::Key2),
-                    file_read: SdmFileRead::Key(KeyNumber::Key1),
-                    ctr_ret: SdmCtrRet::Key(KeyNumber::Key1),
-                },
-                offsets: SdmOffsets {
-                    picc_data: Some(0x20),
-                    mac_input: Some(0x43),
-                    mac: Some(0x43),
-                    ..Default::default()
-                },
+                picc_data: PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                    key: KeyNumber::Key2,
+                    offset: 0x20,
+                    content: PiccDataContent::UidAndReadCounter,
+                }),
+                read_access: Some(SdmReadAccess {
+                    key: KeyNumber::Key1,
+                    mac_input: 0x43,
+                    mac: 0x43,
+                    encrypted_file_data: None,
+                }),
+                counter_access: AccessCondition::Key(KeyNumber::Key1),
+                tamper_status: None,
+                read_counter_limit: None,
             }),
         }
     }
@@ -1045,7 +1029,7 @@ mod tests {
     fn rejects_inconsistent_offsets() {
         let mut fs = an12196_change_settings();
         let sdm = fs.sdm.as_mut().unwrap();
-        sdm.offsets.uid = Some(1); // not allowed: meta_read = Encrypted
+        sdm.read_access.as_mut().unwrap().encrypted_file_data = Some(5..4);
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
         assert!(matches!(
             fs.encode_change(&mut buf),
@@ -1057,9 +1041,10 @@ mod tests {
     fn builder_matches_an12196_change_file_settings() {
         let sdm = SdmSettings::builder()
             .mirror_encrypted_picc_data(KeyNumber::Key2, 0x20, true, true)
-            .enable_file_read(KeyNumber::Key1, 0x43, 0x43)
-            .allow_ctr_ret(SdmCtrRet::Key(KeyNumber::Key1))
-            .build();
+            .enable_read_access(KeyNumber::Key1, 0x43, 0x43)
+            .allow_counter_read(AccessCondition::Key(KeyNumber::Key1))
+            .build()
+            .unwrap();
         assert_eq!(sdm, an12196_change_settings().sdm.unwrap());
     }
 
@@ -1078,7 +1063,7 @@ mod tests {
         ];
         let fs = FileSettings::decode(&payload).expect("decode");
         let sdm = fs.sdm.expect("sdm");
-        assert_eq!(sdm.offsets.read_ctr_limit, None);
+        assert_eq!(sdm.read_counter_limit, None);
     }
 
     const TT_CHANGE_FS_PAYLOAD: &[u8] = &[
@@ -1097,29 +1082,25 @@ mod tests {
                 change: AccessCondition::Key(KeyNumber::Key0),
             },
             sdm: Some(SdmSettings {
-                uid_mirror: true,
-                read_ctr_mirror: false,
-                enc_file_data: false,
-                tt_status_mirror: true,
-                access: SdmAccessRights {
-                    meta_read: SdmMetaRead::Plain,
-                    file_read: SdmFileRead::None,
-                    ctr_ret: SdmCtrRet::NoAccess,
-                },
-                offsets: SdmOffsets {
+                picc_data: PiccDataMirror::Plain(PlainPiccDataMirror {
                     uid: Some(0x20),
-                    tt_status: Some(0x22),
-                    ..Default::default()
-                },
+                    read_counter: None,
+                }),
+                read_access: None,
+                counter_access: AccessCondition::NoAccess,
+                tamper_status: Some(0x22),
+                read_counter_limit: None,
             }),
         }
     }
 
     #[test]
     fn builder_enables_tt_status_mirroring() {
-        let sdm = SdmSettings::builder().mirror_tt_status(0x24).build();
-        assert!(sdm.tt_status_mirror);
-        assert_eq!(sdm.offsets.tt_status, Some(0x24));
+        let sdm = SdmSettings::builder()
+            .mirror_tt_status(0x24)
+            .build()
+            .unwrap();
+        assert_eq!(sdm.tamper_status, Some(0x24));
     }
 
     #[test]
@@ -1138,10 +1119,14 @@ mod tests {
         ];
         let fs = FileSettings::decode(&payload).expect("decode");
         let sdm = fs.sdm.as_ref().expect("sdm");
-        assert!(sdm.uid_mirror);
-        assert!(sdm.tt_status_mirror);
-        assert_eq!(sdm.offsets.uid, Some(0x20));
-        assert_eq!(sdm.offsets.tt_status, Some(0x22));
+        assert_eq!(
+            sdm.picc_data,
+            PiccDataMirror::Plain(PlainPiccDataMirror {
+                uid: Some(0x20),
+                read_counter: None,
+            })
+        );
+        assert_eq!(sdm.tamper_status, Some(0x22));
 
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
         let n = fs.encode_change(&mut buf).expect("encode");

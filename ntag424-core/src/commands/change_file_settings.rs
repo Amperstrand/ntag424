@@ -173,21 +173,20 @@ mod tests {
                 change: AccessCondition::Key(KeyNumber::Key0),
             },
             sdm: Some(SdmSettings {
-                uid_mirror: true,
-                read_ctr_mirror: true,
-                enc_file_data: false,
-                tt_status_mirror: false,
-                access: SdmAccessRights {
-                    meta_read: SdmMetaRead::Encrypted(KeyNumber::Key2),
-                    file_read: SdmFileRead::Key(KeyNumber::Key1),
-                    ctr_ret: SdmCtrRet::Key(KeyNumber::Key1),
-                },
-                offsets: SdmOffsets {
-                    picc_data: Some(0x20),
-                    mac_input: Some(0x43),
-                    mac: Some(0x43),
-                    ..Default::default()
-                },
+                picc_data: PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+                    key: KeyNumber::Key2,
+                    offset: 0x20,
+                    content: PiccDataContent::UidAndReadCounter,
+                }),
+                read_access: Some(SdmReadAccess {
+                    key: KeyNumber::Key1,
+                    mac_input: 0x43,
+                    mac: 0x43,
+                    encrypted_file_data: None,
+                }),
+                counter_access: AccessCondition::Key(KeyNumber::Key1),
+                tamper_status: None,
+                read_counter_limit: None,
             }),
         };
 
