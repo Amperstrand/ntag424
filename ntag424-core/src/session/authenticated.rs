@@ -191,6 +191,19 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok((counter, self))
     }
 
+    /// Read the TagTamper permanent and current status bytes.
+    ///
+    /// Uses `GetTTStatus` (INS `F7`) in `CommMode.FULL`. On TT-capable silicon,
+    /// `Invalid` indicates the feature exists but has not been enabled yet.
+    pub async fn get_tt_status<T: Transport>(
+        mut self,
+        transport: &mut T,
+    ) -> Result<(TagTamperStatusReadout, Self), SessionError<T::Error>> {
+        let mut channel = SecureChannel::new(&mut self.state);
+        let status = get_tt_status(transport, &mut channel).await?;
+        Ok((status, self))
+    }
+
     /// Apply tag configuration changes
     ///
     /// Authentication with the application master key must be

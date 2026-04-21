@@ -299,6 +299,7 @@ impl SdmAccessRights {
 /// | `uid`            | `uid_mirror` AND `meta_read = Plain`                    |
 /// | `read_ctr`       | `read_ctr_mirror` AND `meta_read = Plain`               |
 /// | `picc_data`      | `meta_read = Encrypted(_)`                              |
+/// | `tt_status`      | `tt_status_mirror`                                      |
 /// | `mac_input`      | `file_read != None`                                     |
 /// | `enc_data`       | `file_read != None` AND `enc_file_data`                 |
 /// | `mac`            | `file_read != None`                                     |
@@ -315,6 +316,9 @@ impl SdmAccessRights {
 ///   placeholder. Length is 32 ASCII bytes in AES mode (16 bytes ciphertext)
 ///   and 48 ASCII bytes in LRP mode (8-byte `PICCRand` || 16-byte ciphertext);
 ///   see §9.3.4.
+/// - [`tt_status`](Self::tt_status) — start of the 2-byte Tag Tamper status
+///   placeholder (`TTPermStatus || TTCurrStatus`), mirrored either plain or
+///   inside `SDMENCFileData`.
 /// - [`mac_input`](Self::mac_input) — first byte of the file region the
 ///   `SDMMAC` is computed over (§9.3.7). Must be `≤ mac` and, if `enc_data`
 ///   is configured, must cover the whole encrypted region.
@@ -337,6 +341,7 @@ pub struct SdmOffsets {
     pub uid: Option<u32>,
     pub read_ctr: Option<u32>,
     pub picc_data: Option<u32>,
+    pub tt_status: Option<u32>,
     pub mac_input: Option<u32>,
     pub enc_data: Option<Range<u32>>,
     pub mac: Option<u32>,
@@ -360,12 +365,16 @@ pub struct SdmOffsets {
 /// messaging applies instead, and `SDMReadCtr` is not incremented (§9.3.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdmSettings {
+    /// Mirror the UID as plain ASCII hex at the specified offset.
+    ///
     /// `SDMOptions[Bit 7]` — mirror the 7-byte `UID` into the file.
     /// With [`SdmMetaRead::Plain`] it is hex-encoded at
     /// [`SdmOffsets::uid`] (14 ASCII bytes); with
     /// [`SdmMetaRead::Encrypted`] it is bundled into the encrypted
     /// `PICCData` blob at [`SdmOffsets::picc_data`].
     pub uid_mirror: bool,
+    /// Mirror the 3-byte `SDMReadCtr` into the file.
+    ///
     /// `SDMOptions[Bit 6]` — mirror the 24-bit `SDMReadCtr`. Same
     /// plain/encrypted distinction as [`uid_mirror`](Self::uid_mirror).
     /// On the wire `SDMReadCtr` is LSB-first; mirrored ASCII is MSB-first
@@ -379,8 +388,17 @@ pub struct SdmSettings {
     /// `file_read != None`, and per spec also requires both UID and
     /// `SDMReadCtr` mirroring to be enabled.
     pub enc_file_data: bool,
+    /// Mirror the Tag Tamper status as plain bytes or inside the encrypted `PICCData`.
+    ///
+    /// `SDMOptions[Bit 3]` — mirror the 2-byte Tag Tamper status
+    /// (`TTPermStatus || TTCurrStatus`) at [`SdmOffsets::tt_status`].
+    ///
+    /// The placeholder may be plain or may live inside `SDMENCFileData`; this
+    /// model only captures whether mirroring is enabled and where the 2-byte
+    /// placeholder starts.
+    pub tt_status_mirror: bool,
     /// SDM access rights and key selection (`SDMMetaRead`, `SDMFileRead`,
-    /// `SDMCtrRet`); see [`SdmAccessRights`].
+    /// `SDMCtrRet`).
     pub access: SdmAccessRights,
     /// Placeholder offsets / lengths injected into the file content.
     pub offsets: SdmOffsets,
@@ -530,6 +548,19 @@ impl SdmSettingsBuilder {
         self
     }
 
+    /// Mirror the 2-byte Tag Tamper status (`TTPermStatus || TTCurrStatus`)
+    /// at `offset`.
+    ///
+    /// If the offset falls inside `SDMENCFileData`, the mirrored bytes become
+    /// part of the encrypted region; otherwise they are mirrored in the clear.
+    ///
+    /// The tag must support this feature, check the (tag's version)[`crate::types::Version::has_tag_tamper_support`]
+    pub fn mirror_tt_status(mut self, offset: u32) -> Self {
+        self.inner.tt_status_mirror = true;
+        self.inner.offsets.tt_status = Some(offset);
+        self
+    }
+
     /// Set the `SDMReadCtrLimit`. After `SDMReadCtr` reaches this value,
     /// further unauthenticated reads of the file fail.
     pub fn limit_read_ctr(mut self, value: u32) -> Self {
@@ -556,6 +587,7 @@ impl Default for SdmSettings {
             uid_mirror: false,
             read_ctr_mirror: false,
             enc_file_data: false,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::None,
                 file_read: SdmFileRead::None,
@@ -584,8 +616,8 @@ pub struct FileSettings {
 /// Maximum encoded `ChangeFileSettings` payload length.
 ///
 /// This upper bound is `FileOption (1) + AccessRights (2) + SDMOptions
-/// (1) + SDMAccessRights (2) + 8 × 3-byte offset fields`.
-pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 8 * 3;
+/// (1) + SDMAccessRights (2) + 9 × 3-byte offset fields`.
+pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 9 * 3;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FileSettingsError {
@@ -622,6 +654,7 @@ impl FileSettings {
             let read_ctr_mirror = sdm_options & (1 << 6) != 0;
             let read_ctr_limit_enabled = sdm_options & (1 << 5) != 0;
             let enc_file_data = sdm_options & (1 << 4) != 0;
+            let tt_status_mirror = sdm_options & (1 << 3) != 0;
             // SDMOptions[Bit 0] (ASCII vs binary encoding) is hidden from the
             // public API: only ASCII mirroring is defined for NTAG 424 DNA;
             // binary mirroring is RFU. We always emit `1` and ignore the bit
@@ -640,6 +673,9 @@ impl FileSettings {
             }
             if meta_enc {
                 offsets.picc_data = Some(r.u24_le()?);
+            }
+            if tt_status_mirror {
+                offsets.tt_status = Some(r.u24_le()?);
             }
             if file_read_active {
                 offsets.mac_input = Some(r.u24_le()?);
@@ -663,6 +699,7 @@ impl FileSettings {
                 uid_mirror,
                 read_ctr_mirror,
                 enc_file_data,
+                tt_status_mirror,
                 access,
                 offsets,
             })
@@ -685,7 +722,9 @@ impl FileSettings {
     }
 
     /// Encode the data payload of `ChangeFileSettings` (NT4H2421Gx §10.7.1,
-    /// Table 69) into `buf`. The leading `FileNo` byte is **not** written —
+    /// Table 69) into `buf`.
+    ///
+    /// The leading `FileNo` byte is **not** written —
     /// the caller emits it as part of the command header. `FileType` and
     /// `FileSize` are also omitted (they cannot be changed).
     ///
@@ -715,6 +754,9 @@ impl FileSettings {
             if sdm.enc_file_data {
                 sdm_options |= 1 << 4;
             }
+            if sdm.tt_status_mirror {
+                sdm_options |= 1 << 3;
+            }
             // ASCII encoding is the only supported mode (binary is RFU); always set.
             sdm_options |= 1;
             w.u8(sdm_options)?;
@@ -727,6 +769,7 @@ impl FileSettings {
             let need_uid = sdm.uid_mirror && meta_plain;
             let need_read_ctr = sdm.read_ctr_mirror && meta_plain;
             let need_picc = meta_enc;
+            let need_tt_status = sdm.tt_status_mirror;
             let need_mac_input = file_read_active;
             let need_enc = file_read_active && sdm.enc_file_data;
             let need_mac = file_read_active;
@@ -735,6 +778,7 @@ impl FileSettings {
             check(need_uid, sdm.offsets.uid, "uid")?;
             check(need_read_ctr, sdm.offsets.read_ctr, "read_ctr")?;
             check(need_picc, sdm.offsets.picc_data, "picc_data")?;
+            check(need_tt_status, sdm.offsets.tt_status, "tt_status")?;
             check(need_mac_input, sdm.offsets.mac_input, "mac_input")?;
             match (need_enc, sdm.offsets.enc_data.as_ref()) {
                 (true, Some(range)) if range.end < range.start => {
@@ -754,6 +798,9 @@ impl FileSettings {
             }
             if need_picc {
                 w.u24_le(sdm.offsets.picc_data.unwrap())?;
+            }
+            if need_tt_status {
+                w.u24_le(sdm.offsets.tt_status.unwrap())?;
             }
             if need_mac_input {
                 w.u24_le(sdm.offsets.mac_input.unwrap())?;
@@ -904,6 +951,7 @@ mod tests {
         assert!(sdm.read_ctr_mirror);
         assert_eq!(sdm.offsets.read_ctr_limit, None);
         assert!(sdm.enc_file_data);
+        assert!(!sdm.tt_status_mirror);
         assert_eq!(
             sdm.access.meta_read,
             SdmMetaRead::Encrypted(KeyNumber::Key0)
@@ -941,6 +989,7 @@ mod tests {
                 uid_mirror: true,
                 read_ctr_mirror: true,
                 enc_file_data: false,
+                tt_status_mirror: false,
                 access: SdmAccessRights {
                     meta_read: SdmMetaRead::Encrypted(KeyNumber::Key2),
                     file_read: SdmFileRead::Key(KeyNumber::Key1),
@@ -1030,6 +1079,73 @@ mod tests {
         let fs = FileSettings::decode(&payload).expect("decode");
         let sdm = fs.sdm.expect("sdm");
         assert_eq!(sdm.offsets.read_ctr_limit, None);
+    }
+
+    const TT_CHANGE_FS_PAYLOAD: &[u8] = &[
+        0x40, 0x00, 0xE0, 0x89, 0xFF, 0xEF, 0x20, 0x00, 0x00, 0x22, 0x00, 0x00,
+    ];
+
+    fn tt_change_settings() -> FileSettings {
+        FileSettings {
+            file_type: FileType::StandardData,
+            file_size: 0,
+            comm_mode: CommMode::Plain,
+            access_rights: AccessRights {
+                read: AccessCondition::Free,
+                write: AccessCondition::Key(KeyNumber::Key0),
+                read_write: AccessCondition::Key(KeyNumber::Key0),
+                change: AccessCondition::Key(KeyNumber::Key0),
+            },
+            sdm: Some(SdmSettings {
+                uid_mirror: true,
+                read_ctr_mirror: false,
+                enc_file_data: false,
+                tt_status_mirror: true,
+                access: SdmAccessRights {
+                    meta_read: SdmMetaRead::Plain,
+                    file_read: SdmFileRead::None,
+                    ctr_ret: SdmCtrRet::NoAccess,
+                },
+                offsets: SdmOffsets {
+                    uid: Some(0x20),
+                    tt_status: Some(0x22),
+                    ..Default::default()
+                },
+            }),
+        }
+    }
+
+    #[test]
+    fn builder_enables_tt_status_mirroring() {
+        let sdm = SdmSettings::builder().mirror_tt_status(0x24).build();
+        assert!(sdm.tt_status_mirror);
+        assert_eq!(sdm.offsets.tt_status, Some(0x24));
+    }
+
+    #[test]
+    fn encode_change_file_settings_with_tt_status() {
+        let fs = tt_change_settings();
+        let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
+        let n = fs.encode_change(&mut buf).expect("encode");
+        assert_eq!(&buf[..n], TT_CHANGE_FS_PAYLOAD);
+    }
+
+    #[test]
+    fn decode_round_trip_for_get_file_settings_with_tt_status() {
+        let payload = [
+            0x00, 0x40, 0x00, 0xE0, 0x40, 0x00, 0x00, 0x89, 0xFF, 0xEF, 0x20, 0x00, 0x00, 0x22,
+            0x00, 0x00,
+        ];
+        let fs = FileSettings::decode(&payload).expect("decode");
+        let sdm = fs.sdm.as_ref().expect("sdm");
+        assert!(sdm.uid_mirror);
+        assert!(sdm.tt_status_mirror);
+        assert_eq!(sdm.offsets.uid, Some(0x20));
+        assert_eq!(sdm.offsets.tt_status, Some(0x22));
+
+        let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
+        let n = fs.encode_change(&mut buf).expect("encode");
+        assert_eq!(&buf[..n], TT_CHANGE_FS_PAYLOAD);
     }
 
     // -- Hardware-validated factory file settings --------------------------------

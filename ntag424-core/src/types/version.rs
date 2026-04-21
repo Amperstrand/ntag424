@@ -24,6 +24,11 @@ impl Version {
         self.part1[2]
     }
 
+    /// Returns whether the hardware subtype indicates Tag Tamper-capable silicon.
+    pub fn has_tag_tamper_support(&self) -> bool {
+        self.hw_sub_type() & 0xF0 == 0x80
+    }
+
     pub fn hw_major_version(&self) -> u8 {
         self.part1[3]
     }
@@ -114,4 +119,29 @@ impl Version {
 /// Decode a BCD-encoded byte into its decimal value (e.g. `0x26` → `26`).
 fn bcd_decode(byte: u8) -> u8 {
     (byte >> 4) * 10 + (byte & 0x0F)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn version_with_hw_sub_type(hw_sub_type: u8) -> Version {
+        Version {
+            part1: [0x00, 0x00, hw_sub_type, 0x00, 0x00, 0x00, 0x00],
+            part2: [0x00; 7],
+            part3: [0x00; 14],
+        }
+    }
+
+    #[test]
+    fn tag_tamper_detection_ignores_low_nibble_for_tt_capable_subtypes() {
+        assert!(version_with_hw_sub_type(0x80).has_tag_tamper_support());
+        assert!(version_with_hw_sub_type(0x8F).has_tag_tamper_support());
+    }
+
+    #[test]
+    fn tag_tamper_detection_ignores_low_nibble_for_non_tt_subtypes() {
+        assert!(!version_with_hw_sub_type(0x20).has_tag_tamper_support());
+        assert!(!version_with_hw_sub_type(0x2F).has_tag_tamper_support());
+    }
 }

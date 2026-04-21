@@ -811,6 +811,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: false,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -897,6 +898,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: false,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -939,6 +941,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -1000,6 +1003,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: false,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key2),
@@ -1096,6 +1100,7 @@ mod tests {
             uid_mirror: false,
             read_ctr_mirror: true,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -1123,6 +1128,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: false,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -1150,6 +1156,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -1175,6 +1182,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),
@@ -1232,6 +1240,7 @@ mod tests {
             uid_mirror: true,
             read_ctr_mirror: true,
             enc_file_data: true,
+            tt_status_mirror: false,
             access: SdmAccessRights {
                 meta_read: SdmMetaRead::Encrypted(KeyNumber::Key0),
                 file_read: SdmFileRead::Key(KeyNumber::Key0),

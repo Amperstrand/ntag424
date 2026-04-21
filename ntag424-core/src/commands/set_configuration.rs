@@ -16,7 +16,8 @@ const CMD: u8 = 0x5C;
 /// before calling this. Each option set on `configuration` is sent as its
 /// own APDU — `SetConfiguration` is single-option per command — in the
 /// canonical order from Table 50: PICC, Secure Messaging, Capability,
-/// Failed-Auth-Counter, HW. `CmdCtr` advances by one per option on success.
+/// Tag Tamper, Failed-Auth-Counter, HW. `CmdCtr` advances by one per option on
+/// success.
 ///
 /// All option payloads fit in a single 16-byte block after ISO/IEC 9797-1
 /// Method 2 padding (the largest defined option, Capability, is 10 bytes),

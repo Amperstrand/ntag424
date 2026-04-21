@@ -1,17 +1,21 @@
 //! Configuration payloads for the `SetConfiguration` command (NT4H2421Gx
 //! §10.5.1, Tables 49 and 50).
 
+use super::file_settings::AccessCondition;
+
 /// Builder for the `SetConfiguration` data payload.
 ///
-/// Each option (PICC, secure messaging, capability, failed-authentication
-/// counter, HW) is independent and only emitted on the wire if the caller
-/// explicitly set it through one of the `with_*` methods. Unset options are
-/// omitted, so the corresponding tag-side configuration stays unchanged.
+/// Each option (PICC, secure messaging, capability, Tag Tamper,
+/// failed-authentication counter, HW) is independent and only emitted on the
+/// wire if the caller explicitly set it through one of the `with_*` methods.
+/// Unset options are omitted, so the corresponding tag-side configuration
+/// stays unchanged.
 #[derive(Debug, Default, Clone)]
 pub struct Configuration {
     picc: Option<[u8; 1]>,
     secure_messaging: Option<[u8; 2]>,
     capability: Option<[u8; 10]>,
+    tag_tamper: Option<[u8; 2]>,
     failed_auth_counter: Option<[u8; 5]>,
     hw: Option<[u8; 1]>,
 }
@@ -94,6 +98,22 @@ impl Configuration {
         self
     }
 
+    /// Enable Tag Tamper and configure who may call `GetTTStatus`.
+    ///
+    /// <div class="warning">This change is <strong>permanent</strong>.</div>
+    ///
+    /// Once enabled on a Tag Tamper-capable chip, the feature cannot be
+    /// disabled again. Measurements start from the next activation onward.
+    pub fn with_tag_tamper_enabled(mut self, status_access: AccessCondition) -> Self {
+        let status_access = match status_access {
+            AccessCondition::Key(key) => key.as_byte(),
+            AccessCondition::Free => 0x0E,
+            AccessCondition::NoAccess => 0x0F,
+        };
+        self.tag_tamper = Some([0x01, status_access]);
+        self
+    }
+
     /// Configure the failed-authentication counter.
     ///
     /// `limit` must be non-zero when `enabled` is true (tag default: 1000);
@@ -126,6 +146,7 @@ impl Configuration {
             (0x00u8, self.picc.as_ref().map(|b| b.as_slice())),
             (0x04, self.secure_messaging.as_ref().map(|b| b.as_slice())),
             (0x05, self.capability.as_ref().map(|b| b.as_slice())),
+            (0x07, self.tag_tamper.as_ref().map(|b| b.as_slice())),
             (
                 0x0A,
                 self.failed_auth_counter.as_ref().map(|b| b.as_slice()),
@@ -134,5 +155,36 @@ impl Configuration {
         ]
         .into_iter()
         .filter_map(|(id, data)| data.map(|d| (id, d)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::KeyNumber;
+
+    #[test]
+    fn tag_tamper_builder_emits_option_07_payload() {
+        let built: alloc::vec::Vec<_> = Configuration::new()
+            .with_tag_tamper_enabled(AccessCondition::Key(KeyNumber::Key4))
+            .build()
+            .map(|(id, data)| (id, data.to_vec()))
+            .collect();
+
+        assert_eq!(built, alloc::vec![(0x07, alloc::vec![0x01, 0x04])]);
+    }
+
+    #[test]
+    fn build_emits_tag_tamper_in_table_50_order() {
+        let option_ids: alloc::vec::Vec<_> = Configuration::new()
+            .with_failed_auth_counter(true, 1000, 10)
+            .with_tag_tamper_enabled(AccessCondition::NoAccess)
+            .with_pdcap2_5(0xAA)
+            .with_random_uid_enabled()
+            .build()
+            .map(|(id, _)| id)
+            .collect();
+
+        assert_eq!(option_ids, alloc::vec![0x00, 0x05, 0x07, 0x0A]);
     }
 }

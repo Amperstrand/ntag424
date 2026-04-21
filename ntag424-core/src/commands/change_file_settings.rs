@@ -176,6 +176,7 @@ mod tests {
                 uid_mirror: true,
                 read_ctr_mirror: true,
                 enc_file_data: false,
+                tt_status_mirror: false,
                 access: SdmAccessRights {
                     meta_read: SdmMetaRead::Encrypted(KeyNumber::Key2),
                     file_read: SdmFileRead::Key(KeyNumber::Key1),
