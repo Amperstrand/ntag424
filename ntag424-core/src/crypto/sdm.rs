@@ -18,8 +18,6 @@
 
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
-#[cfg(feature = "alloc")]
-use alloc::vec;
 
 use core::ops::Range;
 
@@ -27,10 +25,11 @@ use aes::{
     Aes128,
     cipher::{Array, BlockCipherEncrypt, KeyInit},
 };
+use arrayvec::ArrayVec;
 use thiserror::Error;
 
-use crate::types::KeyNumber;
 use crate::types::file_settings::{PiccDataMirror, SdmSettings};
+use crate::types::{KeyNumber, TagTamperStatusReadout};
 
 use super::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
 use super::suite::{aes_cbc_decrypt, cmac_aes, cmac_lrp, truncate_mac};
@@ -83,6 +82,8 @@ pub struct SdmVerification {
     pub uid: Option<[u8; 7]>,
     /// `SDMReadCtr` value, if counter mirroring was enabled.
     pub read_ctr: Option<u32>,
+    /// Tag Tamper status (`TTPermStatus || TTCurrStatus`), if mirrored.
+    pub tamper_status: Option<TagTamperStatusReadout>,
     /// Decrypted `SDMENCFileData`, if encrypted file data mirroring was
     /// enabled. Only present when the `alloc` feature is active.
     #[cfg(feature = "alloc")]
@@ -137,9 +138,20 @@ pub struct SecureDynamicMessageVerifier {
     file_read_key: KeyNumber,
     mac_input_offset: u32,
     mac_offset: u32,
+    /// File byte offset of the 2-byte Tag Tamper status, if mirrored.
+    tamper_status_offset: Option<u32>,
     /// ASCII hex byte range for `SDMENCFileData`, if configured.
     enc_data: Option<Range<u32>>,
 }
+
+/// Unauthenticated NDEF reads are capped at 256 bytes, so the decrypted
+/// `SDMENCFileData` payload can never exceed that size.
+const MAX_SDM_ENC_FILE_DATA_BYTES: usize = 256;
+
+#[cfg(feature = "alloc")]
+type LrpSessionState = Box<Lrp>;
+#[cfg(not(feature = "alloc"))]
+type LrpSessionState = Lrp;
 
 impl SecureDynamicMessageVerifier {
     /// Create a new verifier, validating that the SDM settings are
@@ -220,6 +232,21 @@ impl SecureDynamicMessageVerifier {
             }
         }
 
+        let tamper_status_offset = settings.tamper_status;
+
+        if let (Some(offset), Some(range)) = (tamper_status_offset, enc_data.as_ref())
+            && offset >= range.start
+            && offset < range.end
+        {
+            let relative_ascii = (offset - range.start) as usize;
+            let enc_ascii_len = (range.end - range.start) as usize;
+            if !relative_ascii.is_multiple_of(2) || relative_ascii + 4 > enc_ascii_len {
+                return Err(SdmError::InvalidConfiguration(
+                    "tamper_status inside enc_data must map to exactly 2 decrypted bytes",
+                ));
+            }
+        }
+
         Ok(Self {
             mode,
             picc_source,
@@ -227,6 +254,7 @@ impl SecureDynamicMessageVerifier {
             file_read_key,
             mac_input_offset,
             mac_offset,
+            tamper_status_offset,
             enc_data,
         })
     }
@@ -311,15 +339,19 @@ impl SecureDynamicMessageVerifier {
         }
 
         // -- Step 4: Decrypt SDMENCFileData if configured --
-        #[cfg(feature = "alloc")]
         let enc_file_data =
             self.decrypt_enc_file_data(ndef_data, &keys, read_ctr_bytes.as_ref())?;
+        let tamper_status = self.extract_tamper_status(
+            ndef_data,
+            enc_file_data.as_ref().map(|data| data.as_slice()),
+        )?;
 
         Ok(SdmVerification {
             uid,
             read_ctr: read_ctr_bytes.map(|c| u32::from_le_bytes([c[0], c[1], c[2], 0])),
+            tamper_status,
             #[cfg(feature = "alloc")]
-            enc_file_data,
+            enc_file_data: enc_file_data.map(|data| data.into_iter().collect()),
         })
     }
 
@@ -380,13 +412,12 @@ impl SecureDynamicMessageVerifier {
     }
 
     /// Decrypt SDMENCFileData (§9.3.6).
-    #[cfg(feature = "alloc")]
     fn decrypt_enc_file_data(
         &self,
         ndef_data: &[u8],
         keys: &SdmKeys,
         read_ctr: Option<&[u8; 3]>,
-    ) -> Result<Option<alloc::vec::Vec<u8>>, SdmError> {
+    ) -> Result<Option<ArrayVec<u8, MAX_SDM_ENC_FILE_DATA_BYTES>>, SdmError> {
         let range = match &self.enc_data {
             Some(r) => r,
             None => return Ok(None),
@@ -396,8 +427,15 @@ impl SecureDynamicMessageVerifier {
         ensure_len(ndef_data, start + ascii_len)?;
 
         let binary_len = ascii_len / 2;
-        let mut ct = vec![0u8; binary_len];
-        decode_hex_into(&mut ct, ndef_data, start)?;
+        let mut ct = ArrayVec::<u8, MAX_SDM_ENC_FILE_DATA_BYTES>::new();
+        for _ in 0..binary_len {
+            ct.try_push(0).map_err(|_| {
+                SdmError::InvalidConfiguration(
+                    "enc_data decrypted length exceeds verifier buffer limit",
+                )
+            })?;
+        }
+        decode_hex_into(ct.as_mut_slice(), ndef_data, start)?;
 
         let ctr = read_ctr.copied().unwrap_or([0; 3]);
 
@@ -407,21 +445,57 @@ impl SecureDynamicMessageVerifier {
                 let mut iv_input = [0u8; 16];
                 iv_input[..3].copy_from_slice(&ctr);
                 let iv = aes_ecb_encrypt_block(enc_key, &iv_input);
-                aes_cbc_decrypt(enc_key, &iv, &mut ct);
+                aes_cbc_decrypt(enc_key, &iv, ct.as_mut_slice());
             }
             SdmKeys::Lrp { enc, .. } => {
                 // Counter = SDMReadCtr || 000000 (6 bytes, §9.3.6.2).
                 let mut counter = [0u8; 6];
                 counter[..3].copy_from_slice(&ctr);
-                enc.lricb_decrypt_in_place(&mut counter, &mut ct).ok_or(
-                    SdmError::InvalidConfiguration(
+                enc.lricb_decrypt_in_place(&mut counter, ct.as_mut_slice())
+                    .ok_or(SdmError::InvalidConfiguration(
                         "LRICB decryption failed: invalid buffer length",
-                    ),
-                )?;
+                    ))?;
             }
         }
 
         Ok(Some(ct))
+    }
+
+    fn extract_tamper_status(
+        &self,
+        ndef_data: &[u8],
+        enc_file_data: Option<&[u8]>,
+    ) -> Result<Option<TagTamperStatusReadout>, SdmError> {
+        let Some(offset) = self.tamper_status_offset.map(|offset| offset as usize) else {
+            return Ok(None);
+        };
+
+        if let Some(range) = &self.enc_data {
+            let start = range.start as usize;
+            let end = range.end as usize;
+            if offset >= start && offset < end {
+                let relative_ascii = offset - start;
+                let relative_plain = relative_ascii / 2;
+                let plain = enc_file_data.ok_or(SdmError::InvalidConfiguration(
+                    "tamper_status inside enc_data requires decrypted file data",
+                ))?;
+                if relative_ascii + 4 > end - start || relative_plain + 2 > plain.len() {
+                    return Err(SdmError::InvalidConfiguration(
+                        "tamper_status offset exceeds enc_data bounds",
+                    ));
+                }
+                return Ok(Some(TagTamperStatusReadout::new(
+                    plain[relative_plain],
+                    plain[relative_plain + 1],
+                )));
+            }
+        }
+
+        ensure_len(ndef_data, offset + 2)?;
+        Ok(Some(TagTamperStatusReadout::new(
+            ndef_data[offset],
+            ndef_data[offset + 1],
+        )))
     }
 }
 
@@ -442,8 +516,8 @@ enum SdmKeys {
         mac_key: [u8; 16],
     },
     Lrp {
-        enc: Box<Lrp>,
-        mac: Box<Lrp>,
+        enc: LrpSessionState,
+        mac: LrpSessionState,
     },
 }
 
@@ -576,9 +650,19 @@ fn derive_sdm_keys_lrp(
     let uk_enc = uk_iter.next().unwrap();
 
     SdmKeys::Lrp {
-        mac: Box::new(Lrp::from_parts(plaintexts, uk_mac)),
-        enc: Box::new(Lrp::from_parts(plaintexts, uk_enc)),
+        mac: make_lrp_session_state(Lrp::from_parts(plaintexts, uk_mac)),
+        enc: make_lrp_session_state(Lrp::from_parts(plaintexts, uk_enc)),
     }
+}
+
+#[cfg(feature = "alloc")]
+fn make_lrp_session_state(lrp: Lrp) -> LrpSessionState {
+    Box::new(lrp)
+}
+
+#[cfg(not(feature = "alloc"))]
+fn make_lrp_session_state(lrp: Lrp) -> LrpSessionState {
+    lrp
 }
 
 /// AES-128 ECB encrypt a single block.
@@ -621,7 +705,6 @@ fn decode_hex_array<const N: usize>(data: &[u8], offset: usize) -> Result<[u8; N
     Ok(out)
 }
 
-#[cfg(feature = "alloc")]
 fn decode_hex_into(out: &mut [u8], data: &[u8], offset: usize) -> Result<(), SdmError> {
     for (i, byte) in out.iter_mut().enumerate() {
         let hi = hex_nibble(data[offset + 2 * i], offset + 2 * i)?;
@@ -648,13 +731,14 @@ fn ensure_len(data: &[u8], needed: usize) -> Result<(), SdmError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::suite::aes_cbc_encrypt;
     use super::*;
     use crate::testing::hex_array;
-    use crate::types::KeyNumber;
     use crate::types::file_settings::{
-        AccessCondition, EncryptedPiccDataMirror, PiccDataContent, PiccDataMirror, SdmReadAccess,
-        SdmSettings,
+        AccessCondition, EncryptedPiccDataMirror, PiccDataContent, PiccDataMirror,
+        PlainPiccDataMirror, SdmReadAccess, SdmSettings,
     };
+    use crate::types::{KeyNumber, TagTamperStatus};
 
     // -- Helper: build a synthetic NDEF file for testing ---------------------
 
@@ -830,7 +914,50 @@ mod tests {
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
         assert_eq!(result.read_ctr, Some(61));
+        assert_eq!(result.tamper_status, None);
         assert_eq!(result.enc_file_data, None);
+    }
+
+    #[test]
+    fn verify_extracts_clear_tamper_status() {
+        let key = [0u8; 16];
+        let uid = hex_array::<7>("04DE5F1EACC040");
+        let mut ndef = alloc::vec::Vec::new();
+        ndef.extend_from_slice(b"HELLOWORLD");
+        ndef.extend_from_slice(b"04DE5F1EACC040");
+        ndef.extend_from_slice(b"CO");
+
+        let keys = derive_sdm_keys_aes(&key, Some(&uid), None);
+        let mac_key = match &keys {
+            SdmKeys::Aes { mac_key, .. } => *mac_key,
+            _ => unreachable!(),
+        };
+        let mac = truncate_mac(&cmac_aes(&mac_key, &ndef[10..26]));
+        let mac_hex: alloc::string::String =
+            mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
+        ndef.extend_from_slice(mac_hex.as_bytes());
+
+        let settings = SdmSettings {
+            picc_data: PiccDataMirror::Plain(PlainPiccDataMirror {
+                uid: Some(10),
+                read_counter: None,
+            }),
+            read_access: Some(SdmReadAccess {
+                key: KeyNumber::Key0,
+                mac_input: 10,
+                mac: 26,
+                encrypted_file_data: None,
+            }),
+            counter_access: AccessCondition::NoAccess,
+            tamper_status: Some(24),
+            read_counter_limit: None,
+        };
+
+        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let result = v.verify(&ndef, &key).unwrap();
+        let tt = result.tamper_status.expect("tag tamper");
+        assert_eq!(tt.permanent(), TagTamperStatus::Close);
+        assert_eq!(tt.current(), TagTamperStatus::Open);
     }
 
     #[test]
@@ -1151,9 +1278,57 @@ mod tests {
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(uid));
         assert_eq!(result.read_ctr, Some(1));
+        assert_eq!(result.tamper_status, None);
         assert_eq!(
             result.enc_file_data.as_deref(),
             Some(b"xxxxxxxxxxxxxxxx".as_slice()),
+        );
+    }
+
+    #[test]
+    fn verify_extracts_tamper_status_from_enc_file_data() {
+        let key = [0u8; 16];
+        let picc_hex = "FDE4AFA99B5C820A2C1BB0F1C792D0EB";
+        let uid = hex_array::<7>("04958CAA5C5E80");
+        let ctr = hex_array::<3>("010000");
+        let keys = derive_sdm_keys_aes(&key, Some(&uid), Some(&ctr));
+        let (enc_key, mac_key) = match &keys {
+            SdmKeys::Aes { enc_key, mac_key } => (*enc_key, *mac_key),
+            _ => unreachable!(),
+        };
+
+        let mut iv_in = [0u8; 16];
+        iv_in[..3].copy_from_slice(&ctr);
+        let iv = aes_ecb_encrypt_block(&enc_key, &iv_in);
+
+        let mut pt = *b"xxCOxxxxxxxxxxxx";
+        aes_cbc_encrypt(&enc_key, &iv, &mut pt);
+        let enc_hex: alloc::string::String = pt.iter().map(|b| alloc::format!("{b:02X}")).collect();
+
+        let mac = truncate_mac(&cmac_aes(&mac_key, enc_hex.as_bytes()));
+        let mac_hex: alloc::string::String =
+            mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
+
+        let mut settings = encrypted_settings_with_enc_data(
+            PiccDataContent::UidAndReadCounter,
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            74,
+            Some(42..74),
+        );
+        settings.tamper_status = Some(46);
+
+        let ndef = build_ndef(b"HELLOWORLD", Some(picc_hex), Some(&enc_hex), b"", &mac_hex);
+        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let result = v.verify(&ndef, &key).unwrap();
+        let tt = result.tamper_status.expect("tag tamper");
+        assert_eq!(tt.permanent(), TagTamperStatus::Close);
+        assert_eq!(tt.current(), TagTamperStatus::Open);
+        assert_eq!(
+            result.enc_file_data.as_deref(),
+            Some(b"xxCOxxxxxxxxxxxx".as_slice())
         );
     }
 
