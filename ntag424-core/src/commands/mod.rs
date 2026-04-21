@@ -16,8 +16,8 @@ mod set_configuration;
 mod write_data;
 
 pub(crate) use authenticate::{
-    authenticate_ev2_first_aes, authenticate_ev2_first_lrp, authenticate_ev2_non_first_aes,
-    authenticate_ev2_non_first_lrp,
+    AuthResult, authenticate_ev2_first_aes, authenticate_ev2_first_lrp,
+    authenticate_ev2_non_first_aes, authenticate_ev2_non_first_lrp,
 };
 pub(crate) use change_file_settings::change_file_settings;
 pub(crate) use change_key::{change_key, change_master_key};

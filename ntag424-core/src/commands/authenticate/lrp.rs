@@ -1,4 +1,5 @@
 use crate::Transport;
+use crate::commands::authenticate::AuthResult;
 use crate::crypto::suite::{Direction, LrpSuite, SessionSuite};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
@@ -104,7 +105,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     key_no: KeyNumber,
     key: &[u8; 16],
     rnd_a: [u8; 16],
-) -> Result<(LrpSuite, [u8; 4]), SessionError<T::Error>> {
+) -> Result<AuthResult<LrpSuite>, SessionError<T::Error>> {
     // Part 1: CLA=90 CMD=71 P1=00 P2=00 Lc=08
     //   [KeyNo | LenCap=06 | PCDcap2 (6 bytes)] Le=00.
     // LenCap=06 means all 6 PCDcap2 bytes are carried (§10.4.3, Table 37).
@@ -142,7 +143,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
 
     // Derive the session suite once; reused for the PCDResponse MAC,
     // the PICCResponse MAC check, and the PICCData decrypt.
-    let mut suite = LrpSuite::derive(key, &rnd_a, &rnd_b);
+    let suite = LrpSuite::derive(key, &rnd_a, &rnd_b);
 
     // PCDResponse = MAC_LRP(SesAuthMACKey; RndA || RndB), untruncated
     // (§9.2.5: "MACs are not truncated during the authentication").
@@ -169,8 +170,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     let picc_data: [u8; 16] = data2[..16].try_into().unwrap();
     let picc_response: [u8; 16] = data2[16..].try_into().unwrap();
 
-    let ti = verify_and_extract_ti(&mut suite, &rnd_a, &rnd_b, &picc_data, &picc_response)?;
-    Ok((suite, ti))
+    verify_and_extract_auth_result(suite, &rnd_a, &rnd_b, &picc_data, &picc_response)
 }
 
 /// Build the authentication Part 2 APDU.
@@ -197,13 +197,13 @@ fn build_part2_apdu(rnd_a: &[u8; 16], pcd_response: &[u8; 16]) -> [u8; 38] {
 /// - `PICCData` at `EncCtr=0` decrypts to `TI || PDCap2 || PCDCap2`;
 ///   the trailing 6 bytes (echoed `PCDCap2`) must match what we sent
 ///   in Part 1 (§9.2.5: "PCDCap2 … sent back for verification").
-fn verify_and_extract_ti<E: core::error::Error + core::fmt::Debug>(
-    suite: &mut LrpSuite,
+fn verify_and_extract_auth_result<E: core::error::Error + core::fmt::Debug>(
+    mut suite: LrpSuite,
     rnd_a: &[u8; 16],
     rnd_b: &[u8; 16],
     picc_data: &[u8; 16],
     picc_response: &[u8; 16],
-) -> Result<[u8; 4], SessionError<E>> {
+) -> Result<AuthResult<LrpSuite>, SessionError<E>> {
     let mut verify_input = [0u8; 48];
     verify_input[..16].copy_from_slice(rnd_b);
     verify_input[16..32].copy_from_slice(rnd_a);
@@ -225,7 +225,19 @@ fn verify_and_extract_ti<E: core::error::Error + core::fmt::Debug>(
 
     let mut ti = [0u8; 4];
     ti.copy_from_slice(&plain[..4]);
-    Ok(ti)
+
+    let mut pd_cap2 = [0u8; 6];
+    pd_cap2.copy_from_slice(&plain[4..10]);
+
+    let mut pcd_cap2 = [0u8; 6];
+    pcd_cap2.copy_from_slice(&plain[10..16]);
+
+    Ok(AuthResult {
+        suite,
+        ti,
+        pd_cap2,
+        pcd_cap2,
+    })
 }
 
 #[cfg(test)]
@@ -269,9 +281,9 @@ mod tests {
         let picc_data: [u8; 16] = hex_array("F4FC209D9D60623588B299FA5D6B2D71");
         let picc_response: [u8; 16] = hex_array("0125F8547D9FB8D572C90D2C2A14E235");
 
-        let mut suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
-        let ti = verify_and_extract_ti::<NeverError>(
-            &mut suite,
+        let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
+        let auth_result = verify_and_extract_auth_result::<NeverError>(
+            suite,
             &rnd_a,
             &rnd_b,
             &picc_data,
@@ -280,11 +292,13 @@ mod tests {
         .expect("valid transcript should verify");
 
         // TI from step 25 of AN12321 Table 2.
-        assert_eq!(ti, hex_array::<4>("58EE9424"));
+        assert_eq!(auth_result.ti, hex_array::<4>("58EE9424"));
+        assert_eq!(auth_result.pd_cap2, PCDCAP2);
+        assert_eq!(auth_result.pcd_cap2, PCDCAP2);
         // EncCtr must be 1 after the one-block PICCData decryption in auth
         // (§9.2.4: "00000000h is already used for the response of part 2,
         // so the actual secure messaging starts from 00000001h").
-        assert_eq!(suite.enc_ctr(), 1);
+        assert_eq!(auth_result.suite.enc_ctr(), 1);
     }
 
     /// Real NTAG 424 DNA hardware — `AuthenticateLRPFirst` with Key 0
@@ -311,7 +325,7 @@ mod tests {
         let picc_data: [u8; 16] = hex_array("1C8EE9654067C50B188BD7652CEA8ABF");
         let picc_response: [u8; 16] = hex_array("4DCAF2776C80ABACEC992D6DF2D6E4EE");
 
-        let mut suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
+        let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
 
         // Verify our PCDResponse computation matches the wire data.
         let mut mac_input = [0u8; 32];
@@ -319,8 +333,8 @@ mod tests {
         mac_input[16..].copy_from_slice(&rnd_b);
         assert_eq!(suite.mac_full(&mac_input), pcd_response);
 
-        let ti = verify_and_extract_ti::<NeverError>(
-            &mut suite,
+        let auth_result = verify_and_extract_auth_result::<NeverError>(
+            suite,
             &rnd_a,
             &rnd_b,
             &picc_data,
@@ -328,8 +342,10 @@ mod tests {
         )
         .expect("valid hardware transcript should verify");
 
-        assert_eq!(ti, hex_array::<4>("9D96C13C"));
-        assert_eq!(suite.enc_ctr(), 1);
+        assert_eq!(auth_result.ti, hex_array::<4>("9D96C13C"));
+        assert_eq!(auth_result.pd_cap2, PCDCAP2);
+        assert_eq!(auth_result.pcd_cap2, PCDCAP2);
+        assert_eq!(auth_result.suite.enc_ctr(), 1);
     }
 
     /// A corrupted `PICCResponse` must be rejected.
@@ -341,9 +357,9 @@ mod tests {
         let picc_data: [u8; 16] = hex_array("F4FC209D9D60623588B299FA5D6B2D71");
         let mut picc_response: [u8; 16] = hex_array("0125F8547D9FB8D572C90D2C2A14E235");
         picc_response[0] ^= 0x01;
-        let mut suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
-        match verify_and_extract_ti::<NeverError>(
-            &mut suite,
+        let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
+        match verify_and_extract_auth_result::<NeverError>(
+            suite,
             &rnd_a,
             &rnd_b,
             &picc_data,
@@ -386,16 +402,21 @@ mod tests {
         mac_input[32..].copy_from_slice(&picc_data);
         let picc_response = forge.mac_full(&mac_input);
 
-        let mut suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
-        match verify_and_extract_ti::<NeverError>(
-            &mut suite,
+        let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b);
+        match verify_and_extract_auth_result::<NeverError>(
+            suite,
             &rnd_a,
             &rnd_b,
             &picc_data,
             &picc_response,
         ) {
             Err(SessionError::AuthenticationMismatch) => (),
-            Ok(ti) => panic!("verify accepted wrong PCDCap2 echo, got TI={ti:x?}"),
+            Ok(auth_result) => {
+                panic!(
+                    "verify accepted wrong PCDCap2 echo, got TI={:x?}",
+                    auth_result.ti
+                )
+            }
             Err(e) => panic!("unexpected error: {e:?}"),
         }
     }

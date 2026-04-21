@@ -77,6 +77,8 @@ impl Configuration {
     }
 
     /// Set the user-configured `PDCap2.5` capability byte.
+    ///
+    /// Is sent during first authentication and can be read using [`crate::Session::pcd_cap2`].
     pub fn with_pdcap2_5(mut self, byte: u8) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[8] = byte;
@@ -84,6 +86,8 @@ impl Configuration {
     }
 
     /// Set the user-configured `PDCap2.6` capability byte.
+    ///
+    /// Is sent during first authentication and can be read using [`crate::Session::pcd_cap2`].
     pub fn with_pdcap2_6(mut self, byte: u8) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[9] = byte;

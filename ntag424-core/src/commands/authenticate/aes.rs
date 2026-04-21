@@ -1,4 +1,5 @@
 use crate::Transport;
+use crate::commands::authenticate::AuthResult;
 use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt, aes_cbc_encrypt};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
@@ -73,7 +74,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     key_no: KeyNumber,
     key: &[u8; 16],
     rnd_a: [u8; 16],
-) -> Result<(AesSuite, [u8; 4]), SessionError<T::Error>> {
+) -> Result<AuthResult<AesSuite>, SessionError<T::Error>> {
     // Part 1: CLA=90 CMD=71 P1=00 P2=00 Lc=02 [KeyNo LenCap=00] Le=00.
     // LenCap = 0 means no `PCDcap2` is carried (§10.4.1, Table 25).
     let part1_apdu = [0x90, 0x71, 0x00, 0x00, 0x02, key_no.as_byte(), 0x00, 0x00];
@@ -140,7 +141,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     rnd_a: &[u8; 16],
     rnd_b: &[u8; 16],
     enc: &[u8; 32],
-) -> Result<(AesSuite, [u8; 4]), SessionError<E>> {
+) -> Result<AuthResult<AesSuite>, SessionError<E>> {
     let mut resp = *enc;
     aes_cbc_decrypt(key, &[0u8; 16], &mut resp);
 
@@ -157,7 +158,18 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
         return Err(SessionError::AuthenticationMismatch);
     }
 
-    Ok((AesSuite::derive(key, rnd_a, rnd_b), ti))
+    let mut pd_cap2 = [0u8; 6];
+    pd_cap2.copy_from_slice(&resp[20..26]);
+
+    let mut pcd_cap2 = [0u8; 6];
+    pcd_cap2.copy_from_slice(&resp[26..32]);
+
+    Ok(AuthResult {
+        suite: AesSuite::derive(key, rnd_a, rnd_b),
+        ti,
+        pd_cap2,
+        pcd_cap2,
+    })
 }
 
 /// Verify the 16-byte NonFirst Part 2 response and derive the new session suite.
@@ -219,11 +231,13 @@ mod tests {
 
         let resp_enc: [u8; 32] =
             hex_array("0CC9A8094A8EEA683ECAAC5C7BF20584206D0608D477110FC6B3D5D3F65C3A6A");
-        let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
+        let auth_result = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Ok(v) => v,
             Err(e) => panic!("finish_auth rejected a valid transcript: {e:?}"),
         };
-        assert_eq!(ti, hex_array::<4>("7614281A"));
+        assert_eq!(auth_result.ti, hex_array::<4>("7614281A"));
+        assert_eq!(auth_result.pd_cap2, [0; 6]);
+        assert_eq!(auth_result.pcd_cap2, [0; 6]);
         // The full KDF is pinned by `crypto::suite::tests::aes_session_keys_an12196`.
     }
 
@@ -246,11 +260,13 @@ mod tests {
 
         let resp_enc: [u8; 32] =
             hex_array("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
-        let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
+        let auth_result = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Ok(v) => v,
             Err(e) => panic!("finish_auth rejected a valid transcript: {e:?}"),
         };
-        assert_eq!(ti, hex_array::<4>("9D00C4DF"));
+        assert_eq!(auth_result.ti, hex_array::<4>("9D00C4DF"));
+        assert_eq!(auth_result.pd_cap2, [0; 6]);
+        assert_eq!(auth_result.pcd_cap2, [0; 6]);
     }
 
     /// A corrupted `RndA'` in the Part 2 response must be rejected.
@@ -328,11 +344,13 @@ mod tests {
 
         let resp_enc: [u8; 32] =
             hex_array("94A3D20D1035D7FF691B611360578F7765EC56EC456739A4533FDBA50F9CDFBB");
-        let (_suite, ti) = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
+        let auth_result = match finish_auth::<NeverError>(&key, &rnd_a, &rnd_b, &resp_enc) {
             Ok(v) => v,
             Err(e) => panic!("finish_auth rejected a valid hardware transcript: {e:?}"),
         };
-        assert_eq!(ti, hex_array::<4>("704B5F99"));
+        assert_eq!(auth_result.ti, hex_array::<4>("704B5F99"));
+        assert_eq!(auth_result.pd_cap2, [0; 6]);
+        assert_eq!(auth_result.pcd_cap2, [0; 6]);
     }
 
     /// Real NTAG 424 DNA hardware — `AuthenticateEV2NonFirst` with Key 0

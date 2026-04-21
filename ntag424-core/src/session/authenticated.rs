@@ -1,25 +1,30 @@
 use super::*;
+use crate::commands::AuthResult;
 
 /// State of an authenticated session.
 ///
 /// The session suite `S` determines the cryptographic algorithms, the tag
 /// supports AES and LRP.
 pub struct Authenticated<S: SessionSuite> {
-    suite: S,
+    auth_result: AuthResult<S>,
     cmd_counter: u16,
-    /// Transaction identifier, constant for the lifetime of the authenticated
-    /// session.
-    ///
-    /// Used together with `cmd_counter` to prevent replay attacks.
-    ti: [u8; 4],
 }
 
 impl<S: SessionSuite> Authenticated<S> {
+    #[cfg(test)]
     pub(crate) fn new(suite: S, ti: [u8; 4]) -> Self {
-        Self {
+        Self::with_auth_result(AuthResult {
             suite,
-            cmd_counter: 0,
             ti,
+            pd_cap2: [0; 6],
+            pcd_cap2: [0; 6],
+        })
+    }
+
+    pub(crate) fn with_auth_result(auth_result: AuthResult<S>) -> Self {
+        Self {
+            auth_result,
+            cmd_counter: 0,
         }
     }
 
@@ -28,24 +33,36 @@ impl<S: SessionSuite> Authenticated<S> {
     /// Preserves `ti` and `cmd_counter` from the prior session while
     /// replacing the suite with newly derived keys. Used by NonFirst
     /// auth (§9.1.6, §9.2.6).
+    #[cfg(test)]
     pub(crate) fn non_first(suite: S, ti: [u8; 4], cmd_counter: u16) -> Self {
-        Self {
-            suite,
+        Self::non_first_with_auth_result(
+            AuthResult {
+                suite,
+                ti,
+                pd_cap2: [0; 6],
+                pcd_cap2: [0; 6],
+            },
             cmd_counter,
-            ti,
+        )
+    }
+
+    pub(crate) fn non_first_with_auth_result(auth_result: AuthResult<S>, cmd_counter: u16) -> Self {
+        Self {
+            auth_result,
+            cmd_counter,
         }
     }
 
     pub(crate) fn suite(&self) -> &S {
-        &self.suite
+        &self.auth_result.suite
     }
 
     pub(crate) fn suite_mut(&mut self) -> &mut S {
-        &mut self.suite
+        &mut self.auth_result.suite
     }
 
     pub(crate) fn ti_bytes(&self) -> &[u8; 4] {
-        &self.ti
+        &self.auth_result.ti
     }
 
     pub(crate) fn counter(&self) -> u16 {
@@ -357,7 +374,21 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// of the transaction (§9.1.1).
     #[doc(hidden)] // not needed by typical users, but exposed for advanced use cases and testing
     pub fn ti(&self) -> &[u8; 4] {
-        &self.state.ti
+        &self.state.auth_result.ti
+    }
+
+    #[doc(hidden)]
+    pub fn pd_cap2(&self) -> &[u8; 6] {
+        &self.state.auth_result.pd_cap2
+    }
+
+    /// Return the PICC's capabilities as observed during authentication.
+    ///
+    /// The last two bytes can be set with
+    /// (Configuration::with_pdcap2_5)[`crate::types::Configuration::with_pdcap2_5`] and
+    /// (Configuration::with_pdcap2_6)[`crate::types::Configuration::with_pdcap2_6`] respectively.
+    pub fn pcd_cap2(&self) -> &[u8; 6] {
+        &self.state.auth_result.pcd_cap2
     }
 
     /// Current value of the shared Command Counter.
@@ -406,10 +437,13 @@ impl Session<Authenticated<AesSuite>> {
         key: &[u8; 16],
         rnd_a: [u8; 16],
     ) -> Result<Self, SessionError<T::Error>> {
-        let ti = *self.state.ti_bytes();
         let cmd_counter = self.state.counter();
         let suite = authenticate_ev2_non_first_aes(transport, key_no, key, rnd_a).await?;
-        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        let auth_result = AuthResult {
+            suite,
+            ..self.state.auth_result
+        };
+        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter);
         Ok(self)
     }
 }
@@ -427,10 +461,13 @@ impl Session<Authenticated<LrpSuite>> {
         key: &[u8; 16],
         rnd_a: [u8; 16],
     ) -> Result<Self, SessionError<T::Error>> {
-        let ti = *self.state.ti_bytes();
         let cmd_counter = self.state.counter();
         let suite = authenticate_ev2_non_first_lrp(transport, key_no, key, rnd_a).await?;
-        self.state = Authenticated::non_first(suite, ti, cmd_counter);
+        let auth_result = AuthResult {
+            suite,
+            ..self.state.auth_result
+        };
+        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter);
         Ok(self)
     }
 }

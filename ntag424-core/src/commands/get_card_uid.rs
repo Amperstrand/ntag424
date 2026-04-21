@@ -35,7 +35,7 @@ pub(crate) async fn get_card_uid<T: Transport, S: SessionSuite>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::suite::{AesSuite, Direction, LrpSuite, aes_cbc_decrypt};
+    use crate::crypto::suite::{AesSuite, Direction, LrpSuite};
     use crate::session::Authenticated;
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
