@@ -24,6 +24,13 @@ impl Configuration {
     /// Enable Random UID mode (PICCConfig bit 1).
     ///
     /// <div class="warning">This change is <strong>permanent</strong>.</div>
+    ///
+    /// Depending on tag usage this feature may help to fulfill GDPR regulations
+    /// regarding personal tracking and personal data.
+    ///
+    /// If you use [derived keys](`crate::key_diversification`) based on the UID, be aware that
+    /// you can no longer read the real UID _before_ authentication, which
+    /// should be considered in your key diversification and provisioning strategy.
     pub fn with_random_uid_enabled(mut self) -> Self {
         // TODO: extend docs, briefly explain the consequences
         let bytes = self.picc.get_or_insert([0]);

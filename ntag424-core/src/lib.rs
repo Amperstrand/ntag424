@@ -2,21 +2,28 @@
 //!
 //! # High level hardware overview
 //!
-//! The NTAG 424 DNA is a NFC tag that can perform AES-128 crypto operations for
-//! authentication and secure messaging. It has a file system with configurable access
-//! permissions through keys stored on chip.
+//! The NTAG 424 DNA is a NFC chip that can generate cryptographically signed or encrypted
+//! identifiers on the fly, readable by standard NFC readers. This allows to
+//! uniquely identify a tag while verifying its authenticity,
+//! which is useful for anti-counterfeiting and authentication where it
+//! is important to not just have a tag with a unique identifier,
+//! but also to be able to verify that the tag is genuine and not a clone.
+//! The cryptography is based on AES-128 operations and has preventions against
+//! side-channel and replay attacks.
 //!
-//! The tag stores three files:
+//! The chip utilizes a file system with configurable access
+//! permissions through keys stored on chip. It stores three files:
 //!
 //! 1. The NFC _Capability Container_ (CC) file, which describes the tag's capabilities. This file
 //!    is mostly static.
 //! 2. A 256 byte long file containing data using the _NFC Data Exchange Format_ (NDEF).
-//!    This file can have dynamically computed data inserted by the tag.
+//!    This file can have dynamically computed data inserted by the tag and is
+//!    read by standard NFC readers.
 //! 3. A 128 byte long file, called _proprietary file_, containing raw data free for
-//!    the application to use.
+//!    an application to use.
 //!
-//! Furthermore, the tag stores a set of five[^1] application defined AES-128 keys,
-//! numbered 0 to 4, with the first key, key 0, being
+//! Furthermore, the tag stores a set of five application defined AES-128 keys[^1],
+//! numbered 0 to 4, with the key 0 being
 //! the _Application Master Key_. The master key is needed to change any of the keys or to configure the tag.
 //!
 //! For each file one can configure read and write permissions, either using
@@ -50,10 +57,11 @@
 //! # Provisioning
 //!
 //! The implementation of the tag's initial setup should be carefully designed to match the
-//! application's needs. The following is a non-exhaustive list of steps that should be considered for a secure setup of the tag.
+//! application's needs. The following list contains steps that should be considered for a secure setup of the tag.
 //!
 //! - Generate and store strong random keys for all five application keys. You may use [key diversification](`key_diversification`)
-//!   to derive keys from a single master key if needed.
+//!   to derive keys from a single master key if needed. Access to those keys should be carefully
+//!   controlled.
 //! - Review the [tag configuration](`crate::types::Configuration`) and decide on whether
 //!   to [enable LRP mode](`crate::Session::enable_lrp`)[^2]. *Attention*: enabling LRP mode is a
 //!   permanent change.
@@ -61,7 +69,7 @@
 //!   - Write the NDEF file with the desired template, e.g. a URL with placeholders.
 //!   - Enable SDM via the [file settings](`crate::Session::change_file_settings`) for the NDEF file,
 //!     also configure the file permissions and cryptographic settings in this step.
-//! - Prepare the proprietary file, write an initial content if needed, and configure the file
+//! - Prepare the proprietary file if needed, write an initial content, and configure the file's
 //!   permissions.
 //!
 //! ## Example
@@ -183,7 +191,8 @@
 //!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
 //! [^2]: LRP mode is a AES based cipher that is more resistent against side-channel attacks, but is
-//! not supported by all NFC readers.  This crate supports both AES and LRP mode.
+//! not supported by all NFC readers. Unauthenticated reads are _not_ affected by this.
+//! This crate supports both AES and LRP mode.
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
