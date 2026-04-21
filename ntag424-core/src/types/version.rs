@@ -80,8 +80,7 @@ impl Version {
     /// The 7-byte UID of the tag. For tags in random-ID mode, this is the
     /// randomized ID.
     ///
-    /// Use `GetCardUID` (INS `51`) after authentication to obtain the real UID
-    /// on randomized tags.
+    /// Use [`Session::get_uid`](`crate::Session::get_uid`) to obtain the real UID on random-ID tags.
     pub fn uid(&self) -> &[u8; 7] {
         // TODO: clarify padding for random ID which are shorter
         // TODO: reference `get_uid` for real UID on random-ID tags once implemented
@@ -110,7 +109,7 @@ impl Version {
 
     /// Calendar year of production as the last two decimal digits.
     ///
-    /// For example raw byte `0x26` corresponds to year 2026.
+    /// For example 26 corresponds to year 2026.
     pub fn calendar_year_of_production(&self) -> u8 {
         bcd_decode(self.part3[13])
     }

@@ -1,11 +1,14 @@
 /// One TagTamper status byte as returned by `GetTTStatus`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TagTamperStatus {
-    /// `43h` / ASCII `C`.
+    /// Loop is still closed.
     Close,
-    /// `4Fh` / ASCII `O`.
+    /// Detection is open.
+    ///
+    /// Once the permanent status returned by [`TagTamperStatusReadout::permanent`]
+    /// becomes open, it remains open.
     Open,
-    /// `49h` / ASCII `I`.
+    /// Tag tamper detection is not [enabled](`crate::types::Configuration::with_tag_tamper_enabled`).
     Invalid,
     /// Any non-specified byte returned by the PICC.
     Unknown(u8),
@@ -22,7 +25,7 @@ impl From<u8> for TagTamperStatus {
     }
 }
 
-/// TagTamper status pair returned by `GetTTStatus`.
+/// TagTamper status pair returned by [`Session::get_tt_status`](`crate::Session::get_tt_status`).
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TagTamperStatusReadout {
     permanent: TagTamperStatus,

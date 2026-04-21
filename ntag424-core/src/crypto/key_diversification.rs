@@ -1,8 +1,8 @@
 //! AES-128 key diversification.
 //!
 //! The methods implemented in this module allow to generate unique
-//! AES-128 keys from a master key combined with tag specific information.
-//! This is useful to avoid storing multiple keys, every key can
+//! AES-128 keys from a master key if combined with tag specific information.
+//! This is useful to avoid storing multiple keys, keys can
 //! be derived on the fly when needed.
 //!
 //! The diversification process is based on AES-CMAC and follows the
@@ -11,7 +11,7 @@
 //! - The [`diversify_aes128`] function takes a master key and
 //!   a generic diversification input, and produces a unique AES-128 key.
 //! - The [`diversify_ntag424`] function is a helper that assembles the diversification input
-//!   in the recommended format for NTAG 424 DNA,
+//!   using the recommended input for NTAG 424 DNA,
 //!   which includes the tag's UID, a fixed AID, a key number,
 //!   and an application-defined system identifier.
 //!
@@ -41,6 +41,7 @@
 //!      0x7C, 0xA8, 0x02, 0x47, 0x3F, 0xDA, 0x91, 0x75],
 //! );
 //! ```
+// TODO: add a complete example which generates all keys and updates them!
 
 use crate::types::KeyNumber;
 

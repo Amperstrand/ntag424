@@ -1,0 +1,15 @@
+A CLI tool for interacting with "NTAG 424 DNA" tags using PC/SC
+
+Usage: ntag424 <COMMAND>
+
+Commands:
+  list           List available smart card readers
+  hw-test-aes    Hardware coverage tests for a factory-state AES tag (all-zero keys)
+  hw-test-lrp    Hardware coverage tests for an LRP-enabled tag (all-zero keys, otherwise factory state)
+  config-sdm     Configure NDEF file for SDM with AES encryption (Key0, all-zero)
+  config-tt-sdm  Enable Tag Tamper, configure TT SDM mirroring, then read `GetTTStatus`
+  test-sdm-read  Read NDEF with AES auth and get file counters
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
