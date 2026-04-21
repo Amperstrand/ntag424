@@ -141,7 +141,7 @@ pub enum PiccDataContent {
 }
 
 impl PiccDataContent {
-    fn from_flags(uid: bool, read_counter: bool) -> Self {
+    pub const fn from_flags(uid: bool, read_counter: bool) -> Self {
         match (uid, read_counter) {
             (false, false) => Self::None,
             (true, false) => Self::Uid,
@@ -150,11 +150,11 @@ impl PiccDataContent {
         }
     }
 
-    fn includes_uid(self) -> bool {
+    pub const fn includes_uid(self) -> bool {
         matches!(self, Self::Uid | Self::UidAndReadCounter)
     }
 
-    fn includes_read_counter(self) -> bool {
+    pub const fn includes_read_counter(self) -> bool {
         matches!(self, Self::ReadCounter | Self::UidAndReadCounter)
     }
 }
@@ -171,7 +171,11 @@ pub struct PlainPiccDataMirror {
 }
 
 impl PlainPiccDataMirror {
-    fn content(self) -> PiccDataContent {
+    pub const fn new(uid: Option<u32>, read_counter: Option<u32>) -> Self {
+        Self { uid, read_counter }
+    }
+
+    const fn content(self) -> PiccDataContent {
         PiccDataContent::from_flags(self.uid.is_some(), self.read_counter.is_some())
     }
 }
@@ -187,6 +191,16 @@ pub struct EncryptedPiccDataMirror {
     pub content: PiccDataContent,
 }
 
+impl EncryptedPiccDataMirror {
+    pub const fn new(key: KeyNumber, offset: u32, content: PiccDataContent) -> Self {
+        Self {
+            key,
+            offset,
+            content,
+        }
+    }
+}
+
 /// How `PICCData` is mirrored into the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PiccDataMirror {
@@ -200,7 +214,15 @@ pub enum PiccDataMirror {
 }
 
 impl PiccDataMirror {
-    fn content(self) -> PiccDataContent {
+    pub const fn plain(uid: Option<u32>, read_counter: Option<u32>) -> Self {
+        Self::Plain(PlainPiccDataMirror::new(uid, read_counter))
+    }
+
+    pub const fn encrypted(key: KeyNumber, offset: u32, content: PiccDataContent) -> Self {
+        Self::Encrypted(EncryptedPiccDataMirror::new(key, offset, content))
+    }
+
+    const fn content(self) -> PiccDataContent {
         match self {
             Self::None => PiccDataContent::None,
             Self::Plain(plain) => plain.content(),
@@ -208,11 +230,11 @@ impl PiccDataMirror {
         }
     }
 
-    pub fn includes_uid(self) -> bool {
+    pub const fn includes_uid(self) -> bool {
         self.content().includes_uid()
     }
 
-    pub fn includes_read_counter(self) -> bool {
+    pub const fn includes_read_counter(self) -> bool {
         self.content().includes_read_counter()
     }
 }
@@ -233,6 +255,22 @@ pub struct SdmReadAccess {
     /// ASCII hex, while only the first half of the static file placeholder is
     /// taken as plaintext before encryption.
     pub encrypted_file_data: Option<Range<u32>>,
+}
+
+impl SdmReadAccess {
+    pub const fn new(key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+        Self {
+            key,
+            mac_input,
+            mac,
+            encrypted_file_data: None,
+        }
+    }
+
+    pub const fn with_encrypted_file_data(mut self, range: Range<u32>) -> Self {
+        self.encrypted_file_data = Some(range);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,11 +369,25 @@ pub struct SdmSettings {
 }
 
 impl SdmSettings {
+    /// Construct disabled SDM settings.
+    pub const fn new() -> Self {
+        Self {
+            picc_data: PiccDataMirror::None,
+            read_access: None,
+            counter_access: AccessCondition::NoAccess,
+            tamper_status: None,
+            read_counter_limit: None,
+        }
+    }
+
     /// Start an [`SdmSettingsBuilder`].
     ///
     /// The builder keeps the high-level SDM features and their offsets in sync.
-    pub fn builder() -> SdmSettingsBuilder {
-        SdmSettingsBuilder::default()
+    pub const fn builder() -> SdmSettingsBuilder {
+        SdmSettingsBuilder {
+            inner: Self::new(),
+            pending_encrypted_file_data: None,
+        }
     }
 }
 
@@ -376,10 +428,10 @@ impl SdmSettingsBuilder {
     /// Mutually exclusive with
     /// [`mirror_encrypted_picc_data`](Self::mirror_encrypted_picc_data) —
     /// calling that method afterwards clears this mirror.
-    pub fn mirror_plain_uid(mut self, offset: u32) -> Self {
+    pub const fn mirror_plain_uid(mut self, offset: u32) -> Self {
         let mut plain = match self.inner.picc_data {
             PiccDataMirror::Plain(plain) => plain,
-            _ => PlainPiccDataMirror::default(),
+            _ => PlainPiccDataMirror::new(None, None),
         };
         plain.uid = Some(offset);
         self.inner.picc_data = PiccDataMirror::Plain(plain);
@@ -393,10 +445,10 @@ impl SdmSettingsBuilder {
     /// Mutually exclusive with
     /// [`mirror_encrypted_picc_data`](Self::mirror_encrypted_picc_data) —
     /// calling that method afterwards clears this mirror.
-    pub fn mirror_plain_read_counter(mut self, offset: u32) -> Self {
+    pub const fn mirror_plain_read_counter(mut self, offset: u32) -> Self {
         let mut plain = match self.inner.picc_data {
             PiccDataMirror::Plain(plain) => plain,
-            _ => PlainPiccDataMirror::default(),
+            _ => PlainPiccDataMirror::new(None, None),
         };
         plain.read_counter = Some(offset);
         self.inner.picc_data = PiccDataMirror::Plain(plain);
@@ -404,7 +456,7 @@ impl SdmSettingsBuilder {
     }
 
     /// Backwards-compatible alias for [`mirror_plain_read_counter`](Self::mirror_plain_read_counter).
-    pub fn mirror_plain_read_ctr(self, offset: u32) -> Self {
+    pub const fn mirror_plain_read_ctr(self, offset: u32) -> Self {
         self.mirror_plain_read_counter(offset)
     }
 
@@ -415,18 +467,18 @@ impl SdmSettingsBuilder {
     ///
     /// Mutually exclusive with [`mirror_plain_uid`](Self::mirror_plain_uid)
     /// / [`mirror_plain_read_ctr`](Self::mirror_plain_read_ctr).
-    pub fn mirror_encrypted_picc_data(
+    pub const fn mirror_encrypted_picc_data(
         mut self,
         key: KeyNumber,
         offset: u32,
         include_uid: bool,
         include_read_ctr: bool,
     ) -> Self {
-        self.inner.picc_data = PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
+        self.inner.picc_data = PiccDataMirror::encrypted(
             key,
             offset,
-            content: PiccDataContent::from_flags(include_uid, include_read_ctr),
-        });
+            PiccDataContent::from_flags(include_uid, include_read_ctr),
+        );
         self
     }
 
@@ -464,18 +516,20 @@ impl SdmSettingsBuilder {
     ///   not `picc_data`.
     /// - `enable_file_read(key, 75, 75)` — MAC over empty input (degenerate
     ///   but allowed).
-    pub fn enable_read_access(mut self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+    pub const fn enable_read_access(mut self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+        let encrypted_file_data = self.pending_encrypted_file_data;
+        self.pending_encrypted_file_data = None;
         self.inner.read_access = Some(SdmReadAccess {
             key,
             mac_input,
             mac,
-            encrypted_file_data: self.pending_encrypted_file_data.take(),
+            encrypted_file_data,
         });
         self
     }
 
     /// Backwards-compatible alias for [`enable_read_access`](Self::enable_read_access).
-    pub fn enable_file_read(self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
+    pub const fn enable_file_read(self, key: KeyNumber, mac_input: u32, mac: u32) -> Self {
         self.enable_read_access(key, mac_input, mac)
     }
 
@@ -486,18 +540,22 @@ impl SdmSettingsBuilder {
     /// 32. The actual plaintext length encrypted by the tag is half that
     /// placeholder length. This also requires
     /// [`enable_read_access`](Self::enable_read_access).
-    pub fn mirror_encrypted_file_data(mut self, range: Range<u32>) -> Self {
-        if let Some(read_access) = &mut self.inner.read_access {
-            read_access.encrypted_file_data = Some(range);
-        } else {
-            self.pending_encrypted_file_data = Some(range);
+    pub const fn mirror_encrypted_file_data(mut self, range: Range<u32>) -> Self {
+        match self.inner.read_access {
+            Some(mut read_access) => {
+                read_access.encrypted_file_data = Some(range);
+                self.inner.read_access = Some(read_access);
+            }
+            None => {
+                self.pending_encrypted_file_data = Some(range);
+            }
         }
         self
     }
 
     /// Backwards-compatible alias for
     /// [`mirror_encrypted_file_data`](Self::mirror_encrypted_file_data).
-    pub fn mirror_enc_file_data(self, range: Range<u32>) -> Self {
+    pub const fn mirror_enc_file_data(self, range: Range<u32>) -> Self {
         self.mirror_encrypted_file_data(range)
     }
 
@@ -508,32 +566,32 @@ impl SdmSettingsBuilder {
     /// part of the encrypted region; otherwise they are mirrored in the clear.
     ///
     /// The tag must support this feature, check the (tag's version)[`crate::types::Version::has_tag_tamper_support`]
-    pub fn mirror_tt_status(mut self, offset: u32) -> Self {
+    pub const fn mirror_tt_status(mut self, offset: u32) -> Self {
         self.inner.tamper_status = Some(offset);
         self
     }
 
     /// Set the `SDMReadCtrLimit`. After `SDMReadCtr` reaches this value,
     /// further unauthenticated reads of the file fail.
-    pub fn limit_read_ctr(mut self, value: u32) -> Self {
+    pub const fn limit_read_ctr(mut self, value: u32) -> Self {
         self.inner.read_counter_limit = Some(value);
         self
     }
 
     /// Set the `SDMCtrRet` access right (controls who may issue
     /// `GetFileCounters`).
-    pub fn allow_counter_read(mut self, access: AccessCondition) -> Self {
+    pub const fn allow_counter_read(mut self, access: AccessCondition) -> Self {
         self.inner.counter_access = access;
         self
     }
 
     /// Backwards-compatible alias for [`allow_counter_read`](Self::allow_counter_read).
-    pub fn allow_ctr_ret(self, access: AccessCondition) -> Self {
+    pub const fn allow_ctr_ret(self, access: AccessCondition) -> Self {
         self.allow_counter_read(access)
     }
 
     /// Finalise the [`SdmSettings`] value.
-    pub fn build(self) -> Result<SdmSettings, FileSettingsError> {
+    pub const fn build(self) -> Result<SdmSettings, FileSettingsError> {
         if self.pending_encrypted_file_data.is_some() {
             return Err(FileSettingsError::InconsistentOffsets(
                 "encrypted_file_data",
@@ -554,13 +612,7 @@ impl SdmSettingsBuilder {
 
 impl Default for SdmSettings {
     fn default() -> Self {
-        Self {
-            picc_data: PiccDataMirror::None,
-            read_access: None,
-            counter_access: AccessCondition::NoAccess,
-            tamper_status: None,
-            read_counter_limit: None,
-        }
+        Self::new()
     }
 }
 
@@ -1055,6 +1107,21 @@ mod tests {
         assert_eq!(sdm, an12196_change_settings().sdm.unwrap());
     }
 
+    const CONST_BUILDER_SDM: SdmSettings = match SdmSettings::builder()
+        .mirror_encrypted_picc_data(KeyNumber::Key2, 0x20, true, true)
+        .enable_read_access(KeyNumber::Key1, 0x43, 0x43)
+        .allow_counter_read(AccessCondition::Key(KeyNumber::Key1))
+        .build()
+    {
+        Ok(sdm) => sdm,
+        Err(_) => panic!("const SDM builder failed"),
+    };
+
+    #[test]
+    fn builder_is_const_constructable() {
+        assert_eq!(CONST_BUILDER_SDM, an12196_change_settings().sdm.unwrap());
+    }
+
     #[test]
     fn read_ctr_limit_sentinel_decodes_as_none() {
         // SDM with read_ctr_limit_enabled=1 but value = 0x00FF_FFFF.
@@ -1108,6 +1175,37 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(sdm.tamper_status, Some(0x24));
+    }
+
+    const CONST_DIRECT_SDM: SdmSettings = SdmSettings {
+        picc_data: PiccDataMirror::plain(Some(0x20), None),
+        read_access: Some(
+            SdmReadAccess::new(KeyNumber::Key1, 0x43, 0x43).with_encrypted_file_data(0x43..0x63),
+        ),
+        counter_access: AccessCondition::Key(KeyNumber::Key1),
+        tamper_status: Some(0x24),
+        read_counter_limit: Some(0x1234),
+    };
+
+    #[test]
+    fn direct_sdm_parts_are_const_constructable() {
+        assert_eq!(
+            CONST_DIRECT_SDM.picc_data,
+            PiccDataMirror::Plain(PlainPiccDataMirror {
+                uid: Some(0x20),
+                read_counter: None,
+            })
+        );
+        assert_eq!(
+            CONST_DIRECT_SDM
+                .read_access
+                .as_ref()
+                .unwrap()
+                .encrypted_file_data,
+            Some(0x43..0x63)
+        );
+        assert_eq!(CONST_DIRECT_SDM.tamper_status, Some(0x24));
+        assert_eq!(CONST_DIRECT_SDM.read_counter_limit, Some(0x1234));
     }
 
     #[test]

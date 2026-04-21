@@ -21,10 +21,9 @@
 //!
 //! # Range annotations
 //!
-//! - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`.
-//!   If omitted, the MAC window starts
-//!   at the first unescaped `/`, `?`, or `#` in the abbreviated URI body, or at
-//!   the end of the body if none exists.
+//! - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`. If
+//!   omitted, the MAC window starts at the first unescaped `/`, `?`, or `#` in
+//!   the abbreviated URI body, or at the end of the body if none exists.
 //! - `[...]` reserves an `SDMENCFileData` window. The bracket contents are used
 //!   only to define the resulting ASCII length, and are rendered as `'0'`
 //!   bytes in the initial NDEF file. `{uid}`, `{ctr}`, `{picc...}`, and
@@ -35,7 +34,7 @@
 //! # Example
 //!
 //! ```
-//! use ntag424_core::sdm::{CryptoMode, build_sdm_ndef_plan, SdmUrlOptions};
+//! use ntag424_core::sdm::{sdm_url_config, CryptoMode, SdmUrlOptions};
 //! use ntag424_core::types::KeyNumber;
 //!
 //! let opts = SdmUrlOptions {
@@ -43,7 +42,7 @@
 //!     mac_key: KeyNumber::Key2,
 //!     ..SdmUrlOptions::default()
 //! };
-//! let plan = build_sdm_ndef_plan(
+//! let plan = sdm_url_config(
 //!     "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
 //!     CryptoMode::Aes,
 //!     opts,
@@ -53,11 +52,14 @@
 //! let _ = plan.sdm_settings;
 //! ```
 
+#[cfg(feature = "alloc")]
 use alloc::borrow::ToOwned;
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use core::ops::Range;
 
+#[cfg(feature = "alloc")]
 use thiserror::Error;
 
 use crate::crypto::sdm::CryptoMode;
@@ -67,86 +69,59 @@ use crate::types::file_settings::{
 };
 
 const URI_AT: u32 = 7;
+const DEFAULT_CONST_PLAN_CAPACITY: usize = 256;
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 /// Error returned when parsing an SDM URL template.
+#[cfg(feature = "alloc")]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SdmUrlError {
-    /// `{mac}` is absent from the template.
     #[error("{{mac}} placeholder is required")]
     MissingMac,
-    /// `{picc...}` and `{uid}` / `{ctr}` cannot both appear in the same template.
     #[error("{{picc...}} is mutually exclusive with {{uid}} and {{ctr}}")]
     PiccWithPlainMirrors,
-    /// The template has no dynamic mirrors at all.
     #[error("template requires at least one of {{picc...}}, {{uid}}, {{ctr}}, {{tt}}")]
     NoMirror,
-    /// A placeholder appears more than once.
     #[error("duplicate placeholder: {0}")]
     DuplicatePlaceholder(&'static str),
-    /// An encrypted file-data range requires both UID and counter mirroring.
     #[error("encrypted file data requires both UID and SDMReadCtr mirroring")]
     EncFileDataRequiresUidAndCtr,
-    /// The encrypted file-data range length is invalid.
     #[error("encrypted file data range must be a positive multiple of 32 ASCII bytes, got {0}")]
     InvalidEncRangeLength(u32),
-    /// A placeholder name is not recognized.
     #[error("invalid placeholder: {0}")]
     InvalidPlaceholder(String),
-    /// A placeholder or marker was not closed.
     #[error("unterminated {0}")]
     Unterminated(&'static str),
-    /// A range close marker appears without a matching open marker.
     #[error("unexpected {0}")]
     UnexpectedMarker(&'static str),
-    /// A range is declared more than once.
     #[error("duplicate {0}")]
     DuplicateRange(&'static str),
-    /// A placeholder is not allowed inside an encrypted file-data range.
     #[error("{0} is not allowed inside [...]")]
     PlaceholderInEncRange(&'static str),
-    /// Nested ranges are not supported.
     #[error("nested {0} is not allowed")]
     NestedRange(&'static str),
-    /// The explicit MAC start marker must appear before `{mac}`.
     #[error("the [[ marker must appear before {{mac}}")]
     MacStartAfterMac,
-    /// The resulting NDEF file exceeds `max_file_size` bytes.
     #[error("NDEF file too long: {got} bytes, max {max}")]
-    FileTooLong {
-        /// Actual number of bytes produced.
-        got: usize,
-        /// The limit from [`SdmUrlOptions::max_file_size`].
-        max: u16,
-    },
-    /// Building [`SdmSettings`] failed.
+    FileTooLong { got: usize, max: u16 },
     #[error(transparent)]
     FileSettings(#[from] FileSettingsError),
 }
 
-/// Options controlling key assignment and limits for [`build_sdm_ndef_plan`].
-#[derive(Debug, Clone)]
+/// Options controlling key assignment and limits for SDM URL plan builders.
+#[derive(Debug, Clone, Copy)]
 pub struct SdmUrlOptions {
-    /// Key used to encrypt PICCData (only relevant when `{picc...}` is present).
     pub picc_key: KeyNumber,
-    /// Key used to compute the SDMMAC and optional `SDMENCFileData`.
     pub mac_key: KeyNumber,
-    /// Who may call `GetFileCounters`.
-    ///
-    /// Defaults to [`AccessCondition::NoAccess`].
     pub ctr_ret: AccessCondition,
-    /// Maximum NDEF file size in bytes.
-    ///
-    /// The NTAG 424 DNA NDEF file is 256 bytes. An error is returned if the
-    /// generated NDEF content (NLEN + message) exceeds this limit.
     pub max_file_size: u16,
 }
 
-impl Default for SdmUrlOptions {
-    fn default() -> Self {
+impl SdmUrlOptions {
+    pub const fn new() -> Self {
         Self {
             picc_key: KeyNumber::Key2,
             mac_key: KeyNumber::Key2,
@@ -156,21 +131,99 @@ impl Default for SdmUrlOptions {
     }
 }
 
-/// Output of [`build_sdm_ndef_plan`].
+impl Default for SdmUrlOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Output of [`sdm_url_config`].
+#[cfg(feature = "alloc")]
 #[derive(Debug)]
-pub struct SdmNdefPlan {
-    /// NDEF file bytes to write to the tag (2-byte NLEN + NDEF message).
-    ///
-    /// Placeholder positions are filled with `'0'` ASCII characters of the
-    /// correct length so the file is valid NDEF from the start.
+pub struct SdmUrlConfig {
     pub ndef_bytes: Vec<u8>,
-    /// SDM settings configured for the given template.
-    ///
-    /// Pass this inside a [`FileSettings`] to `ChangeFileSettings`.
-    ///
-    /// [`FileSettings`]: crate::types::file_settings::FileSettings
     pub sdm_settings: SdmSettings,
 }
+
+/// Fixed-capacity byte buffer returned by the hidden const SDM URL builder.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstNdefBytes<const N: usize> {
+    bytes: [u8; N],
+    len: usize,
+}
+
+impl<const N: usize> ConstNdefBytes<N> {
+    const fn new() -> Self {
+        Self {
+            bytes: [0; N],
+            len: 0,
+        }
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    const fn push(&mut self, byte: u8) -> Result<(), TemplateCoreError> {
+        if self.len == N {
+            return Err(TemplateCoreError::OutputBufferTooSmall {
+                needed: self.len + 1,
+                capacity: N,
+            });
+        }
+        self.bytes[self.len] = byte;
+        self.len += 1;
+        Ok(())
+    }
+
+    const fn push_zeroes(&mut self, count: usize) -> Result<(), TemplateCoreError> {
+        let mut i = 0;
+        while i < count {
+            match self.push(b'0') {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+            i += 1;
+        }
+        Ok(())
+    }
+
+    const fn extend_bytes(
+        &mut self,
+        src: &[u8],
+        start: usize,
+        count: usize,
+    ) -> Result<(), TemplateCoreError> {
+        let mut i = 0;
+        while i < count {
+            match self.push(src[start + i]) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+            i += 1;
+        }
+        Ok(())
+    }
+}
+
+/// Output of the hidden const SDM URL builder.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstSdmNdefPlan<const N: usize> {
+    pub ndef_bytes: ConstNdefBytes<N>,
+    pub sdm_settings: SdmSettings,
+}
+
+#[doc(hidden)]
+pub type __ConstSdmNdefPlan<const N: usize> = ConstSdmNdefPlan<N>;
+
+#[doc(hidden)]
+pub const __SDM_URL_PLAN_CAPACITY: usize = DEFAULT_CONST_PLAN_CAPACITY;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Placeholder {
@@ -181,71 +234,133 @@ enum Placeholder {
     Mac,
 }
 
-#[derive(Debug)]
-struct ParsedTemplate {
-    uri_content: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TemplateCoreError {
+    MissingMac,
+    PiccWithPlainMirrors,
+    NoMirror,
+    DuplicatePlaceholder(&'static str),
+    EncFileDataRequiresUidAndCtr,
+    InvalidEncRangeLength(u32),
+    InvalidPlaceholder { start: usize, end: usize },
+    Unterminated(&'static str),
+    UnexpectedMarker(&'static str),
+    DuplicateRange(&'static str),
+    PlaceholderInEncRange(&'static str),
+    NestedRange(&'static str),
+    MacStartAfterMac,
+    OutputBufferTooSmall { needed: usize, capacity: usize },
+    FileTooLong { got: usize, max: u16 },
+    FileSettings(&'static str),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedTemplate<const N: usize> {
+    uri_content: ConstNdefBytes<N>,
     uid_offset: Option<u32>,
     ctr_offset: Option<u32>,
     picc: Option<(u32, PiccDataContent)>,
     tt_offset: Option<u32>,
     mac_offset: u32,
     mac_input: u32,
-    enc_range: Option<Range<u32>>,
+    enc_range: Option<(u32, u32)>,
 }
 
 // ---------------------------------------------------------------------------
-// Implementation
+// Public API
 // ---------------------------------------------------------------------------
 
-/// Parse a URL template and produce NDEF file bytes and [`SdmSettings`].
-///
-/// See the [module documentation](self) for placeholder syntax and examples.
-pub fn build_sdm_ndef_plan(
+#[cfg(feature = "alloc")]
+pub fn sdm_url_config(
     url: &str,
     mode: CryptoMode,
     opts: SdmUrlOptions,
-) -> Result<SdmNdefPlan, SdmUrlError> {
-    // NFC Forum URI Record type prefix abbreviation table (NFC Forum URI spec, Table 3).
-    const PREFIXES: &[(&str, u8)] = &[
-        ("https://www.", 0x02),
-        ("http://www.", 0x01),
-        ("https://", 0x04),
-        ("http://", 0x03),
-    ];
-    let (prefix_code, abbrev) = PREFIXES
-        .iter()
-        .find_map(|(p, code)| url.strip_prefix(p).map(|rest| (*code, rest)))
-        .unwrap_or((0x00, url));
+) -> Result<SdmUrlConfig, SdmUrlError> {
+    match build_sdm_ndef_plan_core::<DEFAULT_CONST_PLAN_CAPACITY>(url, mode, opts) {
+        Ok(plan) => Ok(SdmUrlConfig {
+            ndef_bytes: plan.ndef_bytes.as_slice().to_vec(),
+            sdm_settings: plan.sdm_settings,
+        }),
+        Err(err) => Err(map_runtime_error(url, err)),
+    }
+}
 
-    let parsed = parse_template(abbrev, mode)?;
+#[doc(hidden)]
+pub const fn build_sdm_ndef_plan_const<const N: usize>(
+    url: &str,
+    mode: CryptoMode,
+    opts: SdmUrlOptions,
+) -> ConstSdmNdefPlan<N> {
+    match build_sdm_ndef_plan_core::<N>(url, mode, opts) {
+        Ok(plan) => plan,
+        Err(err) => panic_on_const_error(err),
+    }
+}
 
-    // NDEF URI record payload: [prefix_code] + URI body bytes.
-    let mut payload = Vec::with_capacity(1 + parsed.uri_content.len());
-    payload.push(prefix_code);
-    payload.extend_from_slice(parsed.uri_content.as_bytes());
-    let pl = payload.len();
-    if pl > 255 {
-        return Err(SdmUrlError::FileTooLong {
-            got: 2 + 4 + pl,
+// ---------------------------------------------------------------------------
+// Shared core
+// ---------------------------------------------------------------------------
+
+const fn build_sdm_ndef_plan_core<const N: usize>(
+    url: &str,
+    mode: CryptoMode,
+    opts: SdmUrlOptions,
+) -> Result<ConstSdmNdefPlan<N>, TemplateCoreError> {
+    let bytes = url.as_bytes();
+    let (prefix_code, abbrev_start) = detect_uri_prefix(bytes);
+    let parsed = match parse_template::<N>(bytes, abbrev_start, mode) {
+        Ok(parsed) => parsed,
+        Err(err) => return Err(err),
+    };
+
+    let payload_len = 1 + parsed.uri_content.len();
+    if payload_len > 255 {
+        return Err(TemplateCoreError::FileTooLong {
+            got: 2 + 4 + payload_len,
+            max: opts.max_file_size,
+        });
+    }
+    let ndef_msg_len = 4 + payload_len;
+    let total_len = 2 + ndef_msg_len;
+    if total_len > opts.max_file_size as usize {
+        return Err(TemplateCoreError::FileTooLong {
+            got: total_len,
             max: opts.max_file_size,
         });
     }
 
-    // NDEF message: Short Record, TNF=1 Well-Known, type 'U' (0x55).
-    let mut ndef_msg = Vec::with_capacity(4 + pl);
-    ndef_msg.extend_from_slice(&[0xD1, 0x01, pl as u8, 0x55]);
-    ndef_msg.extend_from_slice(&payload);
-
-    // NDEF file: 2-byte big-endian NLEN + NDEF message.
-    let mut ndef_bytes = Vec::with_capacity(2 + ndef_msg.len());
-    ndef_bytes.extend_from_slice(&(ndef_msg.len() as u16).to_be_bytes());
-    ndef_bytes.extend_from_slice(&ndef_msg);
-
-    if ndef_bytes.len() > opts.max_file_size as usize {
-        return Err(SdmUrlError::FileTooLong {
-            got: ndef_bytes.len(),
-            max: opts.max_file_size,
-        });
+    let mut ndef_bytes = ConstNdefBytes::<N>::new();
+    match ndef_bytes.push(((ndef_msg_len as u16) >> 8) as u8) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push((ndef_msg_len as u16) as u8) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push(0xD1) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push(0x01) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push(payload_len as u8) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push(0x55) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.push(prefix_code) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    }
+    match ndef_bytes.extend_bytes(&parsed.uri_content.bytes, 0, parsed.uri_content.len()) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
     }
 
     let mut builder = SdmSettings::builder();
@@ -267,180 +382,260 @@ pub fn build_sdm_ndef_plan(
     if let Some(tt_offset) = parsed.tt_offset {
         builder = builder.mirror_tt_status(tt_offset);
     }
-    if let Some(enc_range) = parsed.enc_range.clone() {
-        builder = builder.mirror_encrypted_file_data(enc_range);
+    if let Some((start, end)) = parsed.enc_range {
+        builder = builder.mirror_encrypted_file_data(start..end);
     }
 
-    let sdm_settings = builder
+    let sdm_settings = match builder
         .enable_read_access(opts.mac_key, parsed.mac_input, parsed.mac_offset)
         .allow_counter_read(opts.ctr_ret)
-        .build()?;
+        .build()
+    {
+        Ok(settings) => settings,
+        Err(FileSettingsError::InconsistentOffsets(field)) => {
+            return Err(TemplateCoreError::FileSettings(field));
+        }
+        Err(_) => return Err(TemplateCoreError::FileSettings("sdm_settings")),
+    };
 
-    Ok(SdmNdefPlan {
+    Ok(ConstSdmNdefPlan {
         ndef_bytes,
         sdm_settings,
     })
 }
 
-fn parse_template(abbrev: &str, mode: CryptoMode) -> Result<ParsedTemplate, SdmUrlError> {
-    let mut uri_content = String::with_capacity(abbrev.len());
+const fn parse_template<const N: usize>(
+    url: &[u8],
+    start: usize,
+    mode: CryptoMode,
+) -> Result<ParsedTemplate<N>, TemplateCoreError> {
+    let mut uri_content = ConstNdefBytes::<N>::new();
     let mut uid_offset = None;
     let mut ctr_offset = None;
     let mut picc = None;
     let mut tt_offset = None;
     let mut mac_offset = None;
-
     let mut path_boundary = None;
-
-    let mut saw_mac_range = false;
-    let mut mac_range_start = None;
-
+    let mut saw_mac_start = false;
+    let mut mac_start = None;
     let mut in_enc_range = false;
     let mut enc_range_start = None;
     let mut enc_range_end = None;
 
-    let mut i = 0usize;
-    while i < abbrev.len() {
-        let rest = &abbrev[i..];
+    let mut i = start;
+    while i < url.len() {
+        let b = url[i];
 
         if in_enc_range {
-            if rest.starts_with(']') {
-                enc_range_end = Some(current_file_offset(&uri_content));
+            if b == b']' {
+                enc_range_end = Some(current_file_offset_len(uri_content.len()));
                 in_enc_range = false;
                 i += 1;
                 continue;
             }
-            if rest.starts_with("[[") {
-                return Err(SdmUrlError::NestedRange("[[ inside [...]"));
+            if b == b'[' && i + 1 < url.len() && url[i + 1] == b'[' {
+                return Err(TemplateCoreError::NestedRange("[[ inside [...]"));
             }
-            if rest.starts_with('[') {
-                return Err(SdmUrlError::NestedRange("[...]"));
+            if b == b'[' {
+                return Err(TemplateCoreError::NestedRange("[...]"));
             }
-            if rest.starts_with('\\') {
-                let next = next_escaped_char(rest)?;
-                push_fill_bytes(&mut uri_content, next.len_utf8());
-                i += 1 + next.len_utf8();
+            if b == b'\\' {
+                let width = match escaped_width(url, i) {
+                    Ok(width) => width,
+                    Err(err) => return Err(err),
+                };
+                match uri_content.push_zeroes(width) {
+                    Ok(()) => {}
+                    Err(err) => return Err(err),
+                }
+                i += 1 + width;
                 continue;
             }
-            if rest.starts_with('{') {
-                let (placeholder, consumed, display) = parse_placeholder(rest)?;
+            if b == b'{' {
+                let (placeholder, consumed, display, _start, _end) = match parse_placeholder(url, i)
+                {
+                    Ok(parsed) => parsed,
+                    Err(err) => return Err(err),
+                };
                 match placeholder {
                     Placeholder::Tt => {
-                        set_once(&mut tt_offset, current_file_offset(&uri_content), "{tt}")?;
-                        push_fill_bytes(&mut uri_content, placeholder_fill_len(placeholder, mode));
+                        tt_offset = match set_once(
+                            tt_offset,
+                            current_file_offset_len(uri_content.len()),
+                            "{tt}",
+                        ) {
+                            Ok(value) => value,
+                            Err(err) => return Err(err),
+                        };
+                        match uri_content.push_zeroes(placeholder_fill_len(placeholder, mode)) {
+                            Ok(()) => {}
+                            Err(err) => return Err(err),
+                        }
                     }
-                    _ => return Err(SdmUrlError::PlaceholderInEncRange(display)),
+                    _ => return Err(TemplateCoreError::PlaceholderInEncRange(display)),
                 }
                 i += consumed;
                 continue;
             }
 
-            let ch = rest.chars().next().unwrap();
-            push_fill_bytes(&mut uri_content, ch.len_utf8());
-            i += ch.len_utf8();
+            let width = utf8_char_width(b);
+            match uri_content.push_zeroes(width) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+            i += width;
             continue;
         }
 
-        if rest.starts_with("[[") {
-            if saw_mac_range {
-                return Err(SdmUrlError::DuplicateRange("[["));
+        if b == b'[' && i + 1 < url.len() && url[i + 1] == b'[' {
+            if saw_mac_start {
+                return Err(TemplateCoreError::DuplicateRange("[["));
             }
-            saw_mac_range = true;
-            mac_range_start = Some(current_file_offset(&uri_content));
+            saw_mac_start = true;
+            mac_start = Some(current_file_offset_len(uri_content.len()));
             i += 2;
             continue;
         }
-        if rest.starts_with('[') {
-            if enc_range_start.is_some() || in_enc_range {
-                return Err(SdmUrlError::DuplicateRange("[...]"));
+        if b == b'[' {
+            if enc_range_start.is_some() {
+                return Err(TemplateCoreError::DuplicateRange("[...]"));
             }
             in_enc_range = true;
-            enc_range_start = Some(current_file_offset(&uri_content));
+            enc_range_start = Some(current_file_offset_len(uri_content.len()));
             i += 1;
             continue;
         }
-        if rest.starts_with(']') {
-            return Err(SdmUrlError::UnexpectedMarker("]"));
+        if b == b']' {
+            return Err(TemplateCoreError::UnexpectedMarker("]"));
         }
-        if rest.starts_with('\\') {
-            let next = next_escaped_char(rest)?;
-            push_literal_char(&mut uri_content, next, &mut path_boundary);
-            i += 1 + next.len_utf8();
+        if b == b'\\' {
+            let width = match escaped_width(url, i) {
+                Ok(width) => width,
+                Err(err) => return Err(err),
+            };
+            let escaped = url[i + 1];
+            if path_boundary.is_none() && (escaped == b'/' || escaped == b'?' || escaped == b'#') {
+                path_boundary = Some(current_file_offset_len(uri_content.len()));
+            }
+            match uri_content.extend_bytes(url, i + 1, width) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+            i += 1 + width;
             continue;
         }
-        if rest.starts_with('{') {
-            let (placeholder, consumed, display) = parse_placeholder(rest)?;
-            let offset = current_file_offset(&uri_content);
+        if b == b'{' {
+            let (placeholder, consumed, display, _start, _end) = match parse_placeholder(url, i) {
+                Ok(parsed) => parsed,
+                Err(err) => return Err(err),
+            };
+            let offset = current_file_offset_len(uri_content.len());
             match placeholder {
                 Placeholder::Uid => {
-                    set_once(&mut uid_offset, offset, display)?;
+                    uid_offset = match set_once(uid_offset, offset, display) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err),
+                    };
                 }
                 Placeholder::Ctr => {
-                    set_once(&mut ctr_offset, offset, display)?;
+                    ctr_offset = match set_once(ctr_offset, offset, display) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err),
+                    };
                 }
                 Placeholder::Picc(content) => {
-                    set_once(&mut picc, (offset, content), "{picc}")?;
+                    picc = match set_once(picc, (offset, content), "{picc}") {
+                        Ok(value) => value,
+                        Err(err) => return Err(err),
+                    };
                 }
                 Placeholder::Tt => {
-                    set_once(&mut tt_offset, offset, display)?;
+                    tt_offset = match set_once(tt_offset, offset, display) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err),
+                    };
                 }
                 Placeholder::Mac => {
-                    set_once(&mut mac_offset, offset, display)?;
+                    mac_offset = match set_once(mac_offset, offset, display) {
+                        Ok(value) => value,
+                        Err(err) => return Err(err),
+                    };
                 }
             }
-            push_fill_bytes(&mut uri_content, placeholder_fill_len(placeholder, mode));
+            match uri_content.push_zeroes(placeholder_fill_len(placeholder, mode)) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
             i += consumed;
             continue;
         }
 
-        let ch = rest.chars().next().unwrap();
-        push_literal_char(&mut uri_content, ch, &mut path_boundary);
-        i += ch.len_utf8();
+        let width = utf8_char_width(b);
+        if path_boundary.is_none() && (b == b'/' || b == b'?' || b == b'#') {
+            path_boundary = Some(current_file_offset_len(uri_content.len()));
+        }
+        match uri_content.extend_bytes(url, i, width) {
+            Ok(()) => {}
+            Err(err) => return Err(err),
+        }
+        i += width;
     }
 
     if in_enc_range {
-        return Err(SdmUrlError::Unterminated("[...]"));
+        return Err(TemplateCoreError::Unterminated("[...]"));
     }
 
-    let mac_offset = mac_offset.ok_or(SdmUrlError::MissingMac)?;
-
+    let mac_offset = match mac_offset {
+        Some(offset) => offset,
+        None => return Err(TemplateCoreError::MissingMac),
+    };
     if picc.is_some() && (uid_offset.is_some() || ctr_offset.is_some()) {
-        return Err(SdmUrlError::PiccWithPlainMirrors);
+        return Err(TemplateCoreError::PiccWithPlainMirrors);
     }
     if picc.is_none() && uid_offset.is_none() && ctr_offset.is_none() && tt_offset.is_none() {
-        return Err(SdmUrlError::NoMirror);
+        return Err(TemplateCoreError::NoMirror);
     }
 
-    let includes_uid = picc
-        .map(|(_, content)| picc_content_includes_uid(content))
-        .unwrap_or(uid_offset.is_some());
-    let includes_ctr = picc
-        .map(|(_, content)| picc_content_includes_ctr(content))
-        .unwrap_or(ctr_offset.is_some());
-
-    let enc_range = match (enc_range_start, enc_range_end) {
-        (Some(start), Some(end)) => {
-            let len = end.saturating_sub(start);
-            if len == 0 || !len.is_multiple_of(32) {
-                return Err(SdmUrlError::InvalidEncRangeLength(len));
-            }
-            if !includes_uid || !includes_ctr {
-                return Err(SdmUrlError::EncFileDataRequiresUidAndCtr);
-            }
-            Some(start..end)
-        }
-        (None, None) => None,
-        _ => unreachable!(),
+    let includes_uid = match picc {
+        Some((_, content)) => picc_content_includes_uid(content),
+        None => uid_offset.is_some(),
+    };
+    let includes_ctr = match picc {
+        Some((_, content)) => picc_content_includes_ctr(content),
+        None => ctr_offset.is_some(),
     };
 
-    let default_mac_input = path_boundary.unwrap_or_else(|| current_file_offset(&uri_content));
-    let mac_input = if saw_mac_range {
-        mac_range_start.expect("mac range start")
+    let enc_range = if enc_range_start.is_some() || enc_range_end.is_some() {
+        let start = match enc_range_start {
+            Some(start) => start,
+            None => return Err(TemplateCoreError::Unterminated("[...]")),
+        };
+        let end = match enc_range_end {
+            Some(end) => end,
+            None => return Err(TemplateCoreError::Unterminated("[...]")),
+        };
+        let len = end.saturating_sub(start);
+        if len == 0 || len % 32 != 0 {
+            return Err(TemplateCoreError::InvalidEncRangeLength(len));
+        }
+        if !includes_uid || !includes_ctr {
+            return Err(TemplateCoreError::EncFileDataRequiresUidAndCtr);
+        }
+        Some((start, end))
     } else {
-        default_mac_input
+        None
+    };
+
+    let default_mac_input = match path_boundary {
+        Some(boundary) => boundary,
+        None => current_file_offset_len(uri_content.len()),
+    };
+    let mac_input = match mac_start {
+        Some(start) => start,
+        None => default_mac_input,
     };
     if mac_input > mac_offset {
-        return Err(SdmUrlError::MacStartAfterMac);
+        return Err(TemplateCoreError::MacStartAfterMac);
     }
 
     Ok(ParsedTemplate {
@@ -454,6 +649,10 @@ fn parse_template(abbrev: &str, mode: CryptoMode) -> Result<ParsedTemplate, SdmU
         enc_range,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 const fn placeholder_fill_len(placeholder: Placeholder, mode: CryptoMode) -> usize {
     match placeholder {
@@ -482,63 +681,204 @@ const fn picc_content_includes_ctr(content: PiccDataContent) -> bool {
     )
 }
 
-fn parse_placeholder(input: &str) -> Result<(Placeholder, usize, &'static str), SdmUrlError> {
-    let Some(close) = input.find('}') else {
-        return Err(SdmUrlError::Unterminated("placeholder"));
-    };
-    let spec = &input[1..close];
-    let placeholder = match spec {
-        "uid" => (Placeholder::Uid, "{uid}"),
-        "ctr" => (Placeholder::Ctr, "{ctr}"),
-        "tt" => (Placeholder::Tt, "{tt}"),
-        "mac" => (Placeholder::Mac, "{mac}"),
-        "picc" => (
-            Placeholder::Picc(PiccDataContent::UidAndReadCounter),
-            "{picc}",
-        ),
-        "picc:uid" => (Placeholder::Picc(PiccDataContent::Uid), "{picc}"),
-        "picc:ctr" => (Placeholder::Picc(PiccDataContent::ReadCounter), "{picc}"),
-        "picc:uid+ctr" | "picc:ctr+uid" => (
-            Placeholder::Picc(PiccDataContent::UidAndReadCounter),
-            "{picc}",
-        ),
-        _ => {
-            return Err(SdmUrlError::InvalidPlaceholder(input[..=close].to_owned()));
+const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
+    if bytes_eq_at(url, 0, b"https://www.") {
+        (0x02, 12)
+    } else if bytes_eq_at(url, 0, b"http://www.") {
+        (0x01, 11)
+    } else if bytes_eq_at(url, 0, b"https://") {
+        (0x04, 8)
+    } else if bytes_eq_at(url, 0, b"http://") {
+        (0x03, 7)
+    } else {
+        (0x00, 0)
+    }
+}
+
+const fn bytes_eq_at(haystack: &[u8], start: usize, needle: &[u8]) -> bool {
+    if haystack.len() < start + needle.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < needle.len() {
+        if haystack[start + i] != needle[i] {
+            return false;
         }
-    };
-    Ok((placeholder.0, close + 1, placeholder.1))
+        i += 1;
+    }
+    true
 }
 
-fn next_escaped_char(rest: &str) -> Result<char, SdmUrlError> {
-    rest[1..]
-        .chars()
-        .next()
-        .ok_or(SdmUrlError::Unterminated("escape sequence"))
+const fn utf8_char_width(first: u8) -> usize {
+    if first < 0x80 {
+        1
+    } else if first & 0xE0 == 0xC0 {
+        2
+    } else if first & 0xF0 == 0xE0 {
+        3
+    } else {
+        4
+    }
 }
 
-fn set_once<T>(slot: &mut Option<T>, value: T, name: &'static str) -> Result<(), SdmUrlError> {
+const fn escaped_width(url: &[u8], backslash: usize) -> Result<usize, TemplateCoreError> {
+    if backslash + 1 >= url.len() {
+        return Err(TemplateCoreError::Unterminated("escape sequence"));
+    }
+    Ok(utf8_char_width(url[backslash + 1]))
+}
+
+const fn current_file_offset_len(uri_len: usize) -> u32 {
+    URI_AT + uri_len as u32
+}
+
+const fn parse_placeholder(
+    url: &[u8],
+    start: usize,
+) -> Result<(Placeholder, usize, &'static str, usize, usize), TemplateCoreError> {
+    let mut end = start + 1;
+    while end < url.len() {
+        if url[end] == b'}' {
+            let spec_start = start + 1;
+            let spec_len = end - spec_start;
+            let placeholder = if bytes_match(url, spec_start, spec_len, b"uid") {
+                (Placeholder::Uid, "{uid}")
+            } else if bytes_match(url, spec_start, spec_len, b"ctr") {
+                (Placeholder::Ctr, "{ctr}")
+            } else if bytes_match(url, spec_start, spec_len, b"tt") {
+                (Placeholder::Tt, "{tt}")
+            } else if bytes_match(url, spec_start, spec_len, b"mac") {
+                (Placeholder::Mac, "{mac}")
+            } else if bytes_match(url, spec_start, spec_len, b"picc") {
+                (
+                    Placeholder::Picc(PiccDataContent::UidAndReadCounter),
+                    "{picc}",
+                )
+            } else if bytes_match(url, spec_start, spec_len, b"picc:uid") {
+                (Placeholder::Picc(PiccDataContent::Uid), "{picc}")
+            } else if bytes_match(url, spec_start, spec_len, b"picc:ctr") {
+                (Placeholder::Picc(PiccDataContent::ReadCounter), "{picc}")
+            } else if bytes_match(url, spec_start, spec_len, b"picc:uid+ctr")
+                || bytes_match(url, spec_start, spec_len, b"picc:ctr+uid")
+            {
+                (
+                    Placeholder::Picc(PiccDataContent::UidAndReadCounter),
+                    "{picc}",
+                )
+            } else {
+                return Err(TemplateCoreError::InvalidPlaceholder {
+                    start,
+                    end: end + 1,
+                });
+            };
+            return Ok((
+                placeholder.0,
+                end + 1 - start,
+                placeholder.1,
+                start,
+                end + 1,
+            ));
+        }
+        end += 1;
+    }
+    Err(TemplateCoreError::Unterminated("placeholder"))
+}
+
+const fn bytes_match(haystack: &[u8], start: usize, len: usize, needle: &[u8]) -> bool {
+    len == needle.len() && bytes_eq_at(haystack, start, needle)
+}
+
+const fn set_once<T: Copy>(
+    slot: Option<T>,
+    value: T,
+    name: &'static str,
+) -> Result<Option<T>, TemplateCoreError> {
     if slot.is_some() {
-        return Err(SdmUrlError::DuplicatePlaceholder(name));
+        return Err(TemplateCoreError::DuplicatePlaceholder(name));
     }
-    *slot = Some(value);
-    Ok(())
+    Ok(Some(value))
 }
 
-fn current_file_offset(uri_content: &str) -> u32 {
-    URI_AT + uri_content.len() as u32
-}
-
-fn push_fill_bytes(out: &mut String, count: usize) {
-    for _ in 0..count {
-        out.push('0');
+#[cfg(feature = "alloc")]
+fn map_runtime_error(url: &str, err: TemplateCoreError) -> SdmUrlError {
+    match err {
+        TemplateCoreError::MissingMac => SdmUrlError::MissingMac,
+        TemplateCoreError::PiccWithPlainMirrors => SdmUrlError::PiccWithPlainMirrors,
+        TemplateCoreError::NoMirror => SdmUrlError::NoMirror,
+        TemplateCoreError::DuplicatePlaceholder(name) => SdmUrlError::DuplicatePlaceholder(name),
+        TemplateCoreError::EncFileDataRequiresUidAndCtr => {
+            SdmUrlError::EncFileDataRequiresUidAndCtr
+        }
+        TemplateCoreError::InvalidEncRangeLength(len) => SdmUrlError::InvalidEncRangeLength(len),
+        TemplateCoreError::InvalidPlaceholder { start, end } => {
+            SdmUrlError::InvalidPlaceholder(url[start..end].to_owned())
+        }
+        TemplateCoreError::Unterminated(name) => SdmUrlError::Unterminated(name),
+        TemplateCoreError::UnexpectedMarker(name) => SdmUrlError::UnexpectedMarker(name),
+        TemplateCoreError::DuplicateRange(name) => SdmUrlError::DuplicateRange(name),
+        TemplateCoreError::PlaceholderInEncRange(name) => SdmUrlError::PlaceholderInEncRange(name),
+        TemplateCoreError::NestedRange(name) => SdmUrlError::NestedRange(name),
+        TemplateCoreError::MacStartAfterMac => SdmUrlError::MacStartAfterMac,
+        TemplateCoreError::OutputBufferTooSmall { needed, capacity } => SdmUrlError::FileTooLong {
+            got: needed,
+            max: capacity as u16,
+        },
+        TemplateCoreError::FileTooLong { got, max } => SdmUrlError::FileTooLong { got, max },
+        TemplateCoreError::FileSettings(field) => {
+            SdmUrlError::FileSettings(FileSettingsError::InconsistentOffsets(field))
+        }
     }
 }
 
-fn push_literal_char(out: &mut String, ch: char, path_boundary: &mut Option<u32>) {
-    if path_boundary.is_none() && matches!(ch, '/' | '?' | '#') {
-        *path_boundary = Some(current_file_offset(out));
+const fn panic_on_const_error(err: TemplateCoreError) -> ! {
+    match err {
+        TemplateCoreError::MissingMac => panic!("SDM URL template is missing {{mac}}"),
+        TemplateCoreError::PiccWithPlainMirrors => {
+            panic!("SDM URL template mixes {{picc...}} with {{uid}}/{{ctr}}")
+        }
+        TemplateCoreError::NoMirror => {
+            panic!("SDM URL template has no dynamic mirrors")
+        }
+        TemplateCoreError::DuplicatePlaceholder(_) => {
+            panic!("SDM URL template contains a duplicate placeholder")
+        }
+        TemplateCoreError::EncFileDataRequiresUidAndCtr => {
+            panic!("SDM encrypted file data requires UID and SDMReadCtr mirroring")
+        }
+        TemplateCoreError::InvalidEncRangeLength(_) => {
+            panic!("SDM encrypted file data range must be a positive multiple of 32 bytes")
+        }
+        TemplateCoreError::InvalidPlaceholder { .. } => {
+            panic!("SDM URL template contains an invalid placeholder")
+        }
+        TemplateCoreError::Unterminated(_) => {
+            panic!("SDM URL template contains an unterminated marker")
+        }
+        TemplateCoreError::UnexpectedMarker(_) => {
+            panic!("SDM URL template contains an unexpected marker")
+        }
+        TemplateCoreError::DuplicateRange(_) => {
+            panic!("SDM URL template contains a duplicate range marker")
+        }
+        TemplateCoreError::PlaceholderInEncRange(_) => {
+            panic!("SDM URL template contains a forbidden placeholder inside [...]")
+        }
+        TemplateCoreError::NestedRange(_) => {
+            panic!("SDM URL template contains a nested range")
+        }
+        TemplateCoreError::MacStartAfterMac => {
+            panic!("SDM URL [[ marker must appear before {{mac}}")
+        }
+        TemplateCoreError::OutputBufferTooSmall { .. } => {
+            panic!("SDM const output buffer is too small")
+        }
+        TemplateCoreError::FileTooLong { .. } => {
+            panic!("SDM URL template produces an NDEF file that is too long")
+        }
+        TemplateCoreError::FileSettings(_) => {
+            panic!("SDM URL template produced inconsistent SDM settings")
+        }
     }
-    out.push(ch);
 }
 
 // ---------------------------------------------------------------------------
@@ -561,13 +901,13 @@ mod tests {
         }
     }
 
-    fn read_access(plan: &SdmNdefPlan) -> &SdmReadAccess {
+    fn read_access(plan: &SdmUrlConfig) -> &SdmReadAccess {
         plan.sdm_settings.read_access.as_ref().unwrap()
     }
 
     #[test]
     fn picc_mac_aes() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?p={picc}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -601,7 +941,7 @@ mod tests {
 
     #[test]
     fn picc_uid_only_uses_new_syntax() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?p={picc:uid}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -620,7 +960,7 @@ mod tests {
 
     #[test]
     fn picc_mac_lrp() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?p={picc}&m={mac}",
             CryptoMode::Lrp,
             key0_opts(),
@@ -638,7 +978,7 @@ mod tests {
 
     #[test]
     fn uid_ctr_mac() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?u={uid}&n={ctr}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -657,7 +997,7 @@ mod tests {
 
     #[test]
     fn query_only_url_mac_input() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com?p={picc}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -669,7 +1009,7 @@ mod tests {
 
     #[test]
     fn explicit_mac_start_overrides_default() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?u={uid}&[[x={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -687,7 +1027,7 @@ mod tests {
 
     #[test]
     fn encrypted_range_sets_sdm_enc_file_data() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?u={uid}&c={ctr}&e=[................................]&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -705,7 +1045,7 @@ mod tests {
 
     #[test]
     fn tt_mirror_is_supported() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?u={uid}&tt={tt}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -718,7 +1058,7 @@ mod tests {
 
     #[test]
     fn tt_can_live_inside_enc_range() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             "https://example.com/?u={uid}&c={ctr}&[[e=[............{tt}................]&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -735,7 +1075,7 @@ mod tests {
 
     #[test]
     fn escapes_render_literal_syntax() {
-        let plan = build_sdm_ndef_plan(
+        let plan = sdm_url_config(
             r"https://example.com/?lit=\{uid\}\[\]&u={uid}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -750,8 +1090,53 @@ mod tests {
     }
 
     #[test]
+    fn const_builder_matches_runtime() {
+        const CONST_PLAN: ConstSdmNdefPlan<256> = build_sdm_ndef_plan_const(
+            "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
+            CryptoMode::Aes,
+            SdmUrlOptions {
+                picc_key: KeyNumber::Key0,
+                mac_key: KeyNumber::Key0,
+                ctr_ret: AccessCondition::NoAccess,
+                max_file_size: 256,
+            },
+        );
+
+        let runtime = sdm_url_config(
+            "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
+            CryptoMode::Aes,
+            key0_opts(),
+        )
+        .unwrap();
+
+        assert_eq!(CONST_PLAN.sdm_settings, runtime.sdm_settings);
+        assert_eq!(
+            CONST_PLAN.ndef_bytes.as_slice(),
+            runtime.ndef_bytes.as_slice()
+        );
+    }
+
+    #[test]
+    fn macro_returns_static_refs() {
+        let (ndef, settings) = crate::sdm_url_config!(
+            "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
+            CryptoMode::Aes
+        );
+
+        let runtime = sdm_url_config(
+            "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
+            CryptoMode::Aes,
+            SdmUrlOptions::new(),
+        )
+        .unwrap();
+
+        assert_eq!(ndef, runtime.ndef_bytes.as_slice());
+        assert_eq!(settings, &runtime.sdm_settings);
+    }
+
+    #[test]
     fn error_missing_mac() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?p={picc}",
             CryptoMode::Aes,
             key0_opts(),
@@ -762,7 +1147,7 @@ mod tests {
 
     #[test]
     fn error_picc_with_uid() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?p={picc}&u={uid}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -773,14 +1158,14 @@ mod tests {
 
     #[test]
     fn error_no_mirror() {
-        let err = build_sdm_ndef_plan("https://example.com/?m={mac}", CryptoMode::Aes, key0_opts())
+        let err = sdm_url_config("https://example.com/?m={mac}", CryptoMode::Aes, key0_opts())
             .unwrap_err();
         assert_eq!(err, SdmUrlError::NoMirror);
     }
 
     #[test]
     fn error_duplicate_picc() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?p={picc}&q={picc:uid}&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -791,7 +1176,7 @@ mod tests {
 
     #[test]
     fn error_uid_inside_encrypted_range() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?u={uid}&c={ctr}&e=[xx{uid}xxxxxxxxxxxxxxxxxxxx]&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -802,7 +1187,7 @@ mod tests {
 
     #[test]
     fn error_enc_range_requires_uid_and_ctr() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?u={uid}&e=[................................]&m={mac}",
             CryptoMode::Aes,
             key0_opts(),
@@ -813,7 +1198,7 @@ mod tests {
 
     #[test]
     fn error_mac_start_after_mac() {
-        let err = build_sdm_ndef_plan(
+        let err = sdm_url_config(
             "https://example.com/?u={uid}&m={mac}[[x=",
             CryptoMode::Aes,
             key0_opts(),
@@ -826,7 +1211,7 @@ mod tests {
     fn error_file_too_long() {
         let long_path = "a".repeat(240);
         let url = alloc::format!("https://example.com/{}?p={{picc}}&m={{mac}}", long_path);
-        let err = build_sdm_ndef_plan(&url, CryptoMode::Aes, key0_opts()).unwrap_err();
+        let err = sdm_url_config(&url, CryptoMode::Aes, key0_opts()).unwrap_err();
         assert!(matches!(err, SdmUrlError::FileTooLong { .. }));
     }
 }

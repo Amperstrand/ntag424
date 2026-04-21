@@ -207,7 +207,7 @@ mod testing;
 mod transport;
 pub mod types;
 
-#[cfg(all(feature = "sdm", feature = "alloc"))]
+#[cfg(feature = "sdm")]
 mod sdm_url;
 
 #[cfg(feature = "key_diversification")]
@@ -227,16 +227,56 @@ pub mod sdm {
     //! [`verify`](SecureDynamicMessageVerifier::verify) with the raw NDEF file
     //! bytes and application key.
     //!
-    //! With the `alloc` feature enabled, [`build_sdm_ndef_plan`] is also
+    //! With the `alloc` feature enabled, [`sdm_url_config`] is also
     //! available for converting a URL template into ready-to-write NDEF bytes
     //! and matching [`SdmSettings`] for provisioning.
     //!
     //! [`SdmSettings`]: crate::types::file_settings::SdmSettings
     pub use crate::crypto::sdm::*;
 
-    #[cfg(feature = "alloc")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
     pub use crate::sdm_url::*;
+}
+
+#[cfg(feature = "sdm")]
+/// Build SDM URL configuration for provisioning.
+///
+/// Returns `(&'static [u8], &'static SdmSettings)`.
+///
+/// Invalid templates fail during compilation. It is intended for compile-time
+/// provisioning data that will be written to a tag at runtime.
+///
+/// Two forms are supported:
+///
+/// ```rust
+/// # use ntag424_core::sdm::CryptoMode;
+/// let (ndef, sdm) = ntag424_core::sdm_url_config!(
+///     "https://example.com/?[[p={picc}&m={mac}",
+///     CryptoMode::Aes,
+/// );
+/// # let _ = (ndef, sdm);
+/// ```
+///
+/// ```rust
+/// # use ntag424_core::sdm::{CryptoMode, SdmUrlOptions};
+/// let (ndef, sdm) = ntag424_core::sdm_url_config!(
+///     "https://example.com/?u={uid}&m={mac}",
+///     CryptoMode::Aes,
+///     SdmUrlOptions::new(),
+/// );
+/// # let _ = (ndef, sdm);
+/// ```
+#[macro_export]
+macro_rules! sdm_url_config {
+    ($url:literal, $mode:expr $(,)?) => {
+        $crate::sdm_url_config!($url, $mode, $crate::sdm::SdmUrlOptions::new())
+    };
+    ($url:literal, $mode:expr, $opts:expr $(,)?) => {{
+        static PLAN: $crate::sdm::__ConstSdmNdefPlan<{ $crate::sdm::__SDM_URL_PLAN_CAPACITY }> =
+            $crate::sdm::build_sdm_ndef_plan_const::<{ $crate::sdm::__SDM_URL_PLAN_CAPACITY }>(
+                $url, $mode, $opts,
+            );
+        (PLAN.ndef_bytes.as_slice(), &PLAN.sdm_settings)
+    }};
 }
 
 pub use transport::{Response, Transport};
