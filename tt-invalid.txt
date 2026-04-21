@@ -1,0 +1,52 @@
+NDEF (46 bytes): 00  , D1 01  (  U 04  e  x  a  m  p  l  e  .  c  o  m  /  ?  t  t  =  0  0  0  0  &  c  =  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+Settings: FileSettings {
+    file_type: StandardData,
+    file_size: 0,
+    comm_mode: Plain,
+    access_rights: AccessRights {
+        read: Free,
+        write: Free,
+        read_write: Free,
+        change: Key(
+            Key0,
+        ),
+    },
+    sdm: Some(
+        SdmSettings {
+            picc_data: None,
+            read_access: Some(
+                SdmReadAccess {
+                    key: Key0,
+                    mac_input: 18,
+                    mac: 30,
+                    encrypted_file_data: None,
+                },
+            ),
+            counter_access: Key(
+                Key0,
+            ),
+            tamper_status: Some(
+                23,
+            ),
+            read_counter_limit: None,
+        },
+    ),
+}
+  RndA=D9  i  $ CE    BD D4 97 13  C  n 07 E9  o 7F 0D
+> 00 A4 04 00 07 D2 76 00 00 85 01 01 00
+< 90 00
+> 90 71 00 00 08 00 06 02 00 00 00 00 00 00
+< 01 06 C2 85 B7 F8 FC DE FF 1F CE 64 E9 61 58 B3 DE 91 AF
+> 90 AF 00 00 20 D9 69 24 CE 20 BD D4 97 13 43 6E 07 E9 6F 7F 0D 1C 25 10 06 CA 81 02 C7 33 9F 5C B3 E2 B5 87 E9 00
+< BD CE 7A 31 14 E5 66 4D 64 11 BF 0B 2E 64 C3 19 7C 91 59 7A BA EB 2C 66 71 D5 E4 DD 7A 98 2D 66 91 00
+AuthenticateLRPFirst Key0: OK
+> 90 60 00 00 08 81 8A A4 33 F5 B9 86 A5 00
+< 04 04 08 30 00 11 05 91 AF
+> 90 AF 00 00 00
+< 04 04 02 01 02 11 05 91 AF
+> 90 AF 00 00 00
+< 04 98 4C 7A 0B 10 90 CF 5D 90 45 10 46 21 47 78 C6 5B 17 52 21 F8 91 00
+GetVersion: HWSubType=0x08  tt_support=true
+> 90 F7 00 00 08 79 A8 07 E9 4C 96 8F 33 00
+< FD 42 25 A3 20 43 32 1F FA 19 EB 4A C0 F2 E2 A4 A9 E6 D6 A8 9F B6 D6 86 91 00
+GetTTStatus (before enable): permanent=Invalid  current=Invalid

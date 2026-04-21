@@ -172,22 +172,20 @@ mod tests {
                 read_write: AccessCondition::Key(KeyNumber::Key0),
                 change: AccessCondition::Key(KeyNumber::Key0),
             },
-            sdm: Some(SdmSettings {
-                picc_data: PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
-                    key: KeyNumber::Key2,
-                    offset: 0x20,
-                    content: PiccDataContent::UidAndReadCounter,
-                }),
-                read_access: Some(SdmReadAccess {
-                    key: KeyNumber::Key1,
-                    mac_input: 0x43,
-                    mac: 0x43,
-                    encrypted_file_data: None,
-                }),
-                counter_access: AccessCondition::Key(KeyNumber::Key1),
-                tamper_status: None,
-                read_counter_limit: None,
-            }),
+            sdm: Some(
+                SdmSettings::try_from_parts(
+                    PiccDataMirror::encrypted(
+                        KeyNumber::Key2,
+                        0x20,
+                        PiccDataContent::UidAndReadCounter,
+                    ),
+                    Some(SdmReadAccess::new(KeyNumber::Key1, 0x43, 0x43)),
+                    AccessCondition::Key(KeyNumber::Key1),
+                    None,
+                    None,
+                )
+                .expect("valid SDM settings"),
+            ),
         };
 
         let (expected_apdu, resp_body) =

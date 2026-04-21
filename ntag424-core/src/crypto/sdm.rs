@@ -173,30 +173,30 @@ impl SecureDynamicMessageVerifier {
     ///
     /// [`SdmSettings`]: crate::types::file_settings::SdmSettings
     pub fn try_new(settings: SdmSettings, mode: CryptoMode) -> Result<Self, SdmError> {
-        let read_access = settings.read_access.ok_or(SdmError::InvalidConfiguration(
+        let read_access = settings.read_access().ok_or(SdmError::InvalidConfiguration(
             "SDM read access is missing — no MAC key configured",
         ))?;
-        let file_read_key = read_access.key;
+        let file_read_key = read_access.key();
 
-        let (picc_source, meta_read_key) = match settings.picc_data {
+        let (picc_source, meta_read_key) = match settings.picc_data() {
             PiccDataMirror::Encrypted(encrypted) => (
                 PiccSource::Encrypted {
-                    offset: encrypted.offset,
+                    offset: encrypted.offset(),
                 },
-                Some(encrypted.key),
+                Some(encrypted.key()),
             ),
             PiccDataMirror::Plain(plain) => (
                 PiccSource::Plain {
-                    uid_offset: plain.uid,
-                    read_ctr_offset: plain.read_counter,
+                    uid_offset: plain.uid(),
+                    read_ctr_offset: plain.read_counter(),
                 },
                 None,
             ),
             PiccDataMirror::None => (PiccSource::None, None),
         };
 
-        let mac_input_offset = read_access.mac_input;
-        let mac_offset = read_access.mac;
+        let mac_input_offset = read_access.mac_input();
+        let mac_offset = read_access.mac();
 
         if mac_input_offset > mac_offset {
             return Err(SdmError::InvalidConfiguration(
@@ -204,13 +204,13 @@ impl SecureDynamicMessageVerifier {
             ));
         }
 
-        let enc_data = if let Some(range) = read_access.encrypted_file_data {
-            if !settings.picc_data.includes_uid() {
+        let enc_data = if let Some(range) = read_access.encrypted_file_data().cloned() {
+            if !settings.picc_data().includes_uid() {
                 return Err(SdmError::InvalidConfiguration(
                     "enc_file_data requires UID mirroring",
                 ));
             }
-            if !settings.picc_data.includes_read_counter() {
+            if !settings.picc_data().includes_read_counter() {
                 return Err(SdmError::InvalidConfiguration(
                     "enc_file_data requires read_ctr mirroring",
                 ));
@@ -237,7 +237,7 @@ impl SecureDynamicMessageVerifier {
             }
         }
 
-        let tamper_status_offset = settings.tamper_status;
+        let tamper_status_offset = settings.tamper_status();
 
         if let (Some(offset), Some(range)) = (tamper_status_offset, enc_data.as_ref())
             && offset >= range.start
@@ -794,22 +794,18 @@ mod tests {
         mac: u32,
         encrypted_file_data: Option<Range<u32>>,
     ) -> SdmSettings {
-        SdmSettings {
-            picc_data: PiccDataMirror::Encrypted(EncryptedPiccDataMirror {
-                key: picc_key,
-                offset: picc_offset,
-                content,
-            }),
-            read_access: Some(SdmReadAccess {
-                key: read_key,
-                mac_input,
-                mac,
-                encrypted_file_data,
-            }),
-            counter_access: AccessCondition::NoAccess,
-            tamper_status: None,
-            read_counter_limit: None,
-        }
+        SdmSettings::try_from_parts(
+            PiccDataMirror::encrypted(picc_key, picc_offset, content),
+            Some(
+                SdmReadAccess::new(read_key, mac_input, mac).with_optional_encrypted_file_data(
+                    encrypted_file_data,
+                ),
+            ),
+            AccessCondition::NoAccess,
+            None,
+            None,
+        )
+        .unwrap()
     }
 
     // -- Unit tests for internal primitives ---------------------------------
@@ -941,21 +937,14 @@ mod tests {
             mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
         ndef.extend_from_slice(mac_hex.as_bytes());
 
-        let settings = SdmSettings {
-            picc_data: PiccDataMirror::Plain(PlainPiccDataMirror {
-                uid: Some(10),
-                read_counter: None,
-            }),
-            read_access: Some(SdmReadAccess {
-                key: KeyNumber::Key0,
-                mac_input: 10,
-                mac: 26,
-                encrypted_file_data: None,
-            }),
-            counter_access: AccessCondition::NoAccess,
-            tamper_status: Some(24),
-            read_counter_limit: None,
-        };
+        let settings = SdmSettings::try_from_parts(
+            PiccDataMirror::plain(Some(10), None),
+            Some(SdmReadAccess::new(KeyNumber::Key0, 10, 26)),
+            AccessCondition::NoAccess,
+            Some(24),
+            None,
+        )
+        .unwrap();
 
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
@@ -1313,16 +1302,14 @@ mod tests {
         let mac_hex: alloc::string::String =
             mac.iter().map(|b| alloc::format!("{b:02X}")).collect();
 
-        let mut settings = encrypted_settings_with_enc_data(
-            PiccDataContent::UidAndReadCounter,
-            KeyNumber::Key0,
-            KeyNumber::Key0,
-            10,
-            42,
-            74,
-            Some(42..74),
-        );
-        settings.tamper_status = Some(44);
+        let settings = SdmSettings::try_from_parts(
+            PiccDataMirror::encrypted(KeyNumber::Key0, 10, PiccDataContent::UidAndReadCounter),
+            Some(SdmReadAccess::new(KeyNumber::Key0, 42, 74).with_encrypted_file_data(42..74)),
+            AccessCondition::NoAccess,
+            Some(44),
+            None,
+        )
+        .unwrap();
 
         let ndef = build_ndef(b"HELLOWORLD", Some(picc_hex), Some(&enc_hex), b"", &mac_hex);
         let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();

@@ -52,13 +52,13 @@ From the two datasheets' `GetVersion` Part 1 tables:
 
 So the practical test is:
 
-- upper nibble `0x2?` / datasheet notation `X2h` => **no Tag Tamper support**
-- upper nibble `0x8?` / datasheet notation `X8h` => **Tag Tamper-capable silicon**
+- low nibble `?2h` / datasheet notation `X2h` => **no Tag Tamper support**
+- low nibble `?8h` / datasheet notation `X8h` => **Tag Tamper-capable silicon**
 
-The low nibble still encodes the back-modulation variant:
+The high nibble still encodes the back-modulation variant:
 
-- `0Xh` = strong back modulation
-- `8Xh` = standard back modulation
+- `0xh` = strong back modulation
+- `8xh` = standard back modulation
 
 So a reader should treat `HWSubType` as a bit of mixed information:
 
@@ -80,22 +80,19 @@ states:
 
 ### Current codebase mapping
 
-In this repository, the reader-side hook for this decision is already exposed by
+In this repository, the reader-side hook for this decision is exposed by
 `ntag424-core/src/types/version.rs`.
 
-The relevant accessor is:
+The relevant accessors are:
 
 - `Version::hw_sub_type()` (`version.rs:23-25`)
+- `Version::has_tag_tamper_support()` (`version.rs:27-30`)
 
 That means the natural implementation strategy is:
 
 1. obtain a `Version` with `Session::get_version()`
-2. inspect `version.hw_sub_type()`
-3. classify the chip as TT-capable or not from that byte
-
-`version.rs` currently exposes the raw byte only, so the Tag Tamper detection
-logic still lives at the call site; there is no dedicated helper yet for
-"is this a Tag Tamper chip?".
+2. inspect `version.hw_sub_type()` when the raw byte matters
+3. use `version.has_tag_tamper_support()` for the TT-capable / non-TT split
 
 ## `SetConfiguration`: enabling Tag Tamper
 

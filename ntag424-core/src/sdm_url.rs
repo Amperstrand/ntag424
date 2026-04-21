@@ -14,7 +14,7 @@
 //! | `{picc:uid}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with UID only |
 //! | `{picc:ctr}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with counter only |
 //! | `{picc:uid+ctr}`     | 32 (AES) / 48 (LRP) ASCII hex chars | Explicit UID + counter form |
-//! | `{tt}`               | 4 ASCII hex chars                  | Tag tamper status |
+//! | `{tt}`               | 2 ASCII chars                      | Tag tamper status |
 //! | `{mac}`              | 16 ASCII hex chars                 | SDMMAC; **always required** |
 //!
 //! `{picc...}` is mutually exclusive with plain `{uid}` / `{ctr}`.
@@ -386,9 +386,18 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
         builder = builder.mirror_encrypted_file_data(start..end);
     }
 
+    let includes_ctr = match parsed.picc {
+        Some((_, content)) => picc_content_includes_ctr(content),
+        None => parsed.ctr_offset.is_some(),
+    };
+    let counter_access = if includes_ctr {
+        opts.ctr_ret
+    } else {
+        AccessCondition::NoAccess
+    };
     let sdm_settings = match builder
         .enable_read_access(opts.mac_key, parsed.mac_input, parsed.mac_offset)
-        .allow_counter_read(opts.ctr_ret)
+        .allow_counter_read(counter_access)
         .build()
     {
         Ok(settings) => settings,
@@ -658,7 +667,7 @@ const fn placeholder_fill_len(placeholder: Placeholder, mode: CryptoMode) -> usi
     match placeholder {
         Placeholder::Uid => 14,
         Placeholder::Ctr => 6,
-        Placeholder::Tt => 4,
+        Placeholder::Tt => 2,
         Placeholder::Mac => 16,
         Placeholder::Picc(_) => match mode {
             CryptoMode::Aes => 32,
@@ -1053,7 +1062,23 @@ mod tests {
         .unwrap();
 
         let tt_offset = plan.sdm_settings.tamper_status.unwrap() as usize;
-        assert_eq!(&plan.ndef_bytes[tt_offset..tt_offset + 4], b"0000");
+        assert_eq!(&plan.ndef_bytes[tt_offset..tt_offset + 2], b"00");
+    }
+
+    #[test]
+    fn tt_only_template_forces_counter_access_off_without_ctr_mirror() {
+        let plan = sdm_url_config(
+            "https://example.com/?tt={tt}&m={mac}",
+            CryptoMode::Aes,
+            SdmUrlOptions {
+                ctr_ret: AccessCondition::Key(KeyNumber::Key0),
+                ..key0_opts()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(plan.sdm_settings.counter_access, AccessCondition::NoAccess);
+        assert_eq!(plan.sdm_settings.tamper_status, Some(URI_AT + 15));
     }
 
     #[test]
@@ -1069,7 +1094,7 @@ mod tests {
         let enc_range = read_access.encrypted_file_data.clone().unwrap();
         let tt_offset = plan.sdm_settings.tamper_status.unwrap();
         assert!(tt_offset >= enc_range.start);
-        assert!(tt_offset + 4 <= enc_range.end);
+        assert!(tt_offset + 2 <= enc_range.end);
         assert_eq!(read_access.mac_input, URI_AT + 39);
     }
 

@@ -26,7 +26,7 @@ impl Version {
 
     /// Returns whether the hardware subtype indicates Tag Tamper-capable silicon.
     pub fn has_tag_tamper_support(&self) -> bool {
-        self.hw_sub_type() & 0xF0 == 0x80
+        self.hw_sub_type() & 0x0F == 0x08
     }
 
     pub fn hw_major_version(&self) -> u8 {
@@ -133,14 +133,20 @@ mod tests {
     }
 
     #[test]
-    fn tag_tamper_detection_ignores_low_nibble_for_tt_capable_subtypes() {
-        assert!(version_with_hw_sub_type(0x80).has_tag_tamper_support());
-        assert!(version_with_hw_sub_type(0x8F).has_tag_tamper_support());
+    fn tag_tamper_detection_accepts_both_back_modulation_variants() {
+        assert!(version_with_hw_sub_type(0x08).has_tag_tamper_support());
+        assert!(version_with_hw_sub_type(0x88).has_tag_tamper_support());
     }
 
     #[test]
-    fn tag_tamper_detection_ignores_low_nibble_for_non_tt_subtypes() {
-        assert!(!version_with_hw_sub_type(0x20).has_tag_tamper_support());
-        assert!(!version_with_hw_sub_type(0x2F).has_tag_tamper_support());
+    fn tag_tamper_detection_rejects_non_tt_low_nibbles() {
+        assert!(!version_with_hw_sub_type(0x02).has_tag_tamper_support());
+        assert!(!version_with_hw_sub_type(0x82).has_tag_tamper_support());
+    }
+
+    #[test]
+    fn tag_tamper_detection_looks_at_the_x8h_suffix_not_the_high_nibble() {
+        assert!(version_with_hw_sub_type(0x08).has_tag_tamper_support());
+        assert!(!version_with_hw_sub_type(0x80).has_tag_tamper_support());
     }
 }
