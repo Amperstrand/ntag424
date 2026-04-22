@@ -174,7 +174,7 @@ impl SecureDynamicMessageVerifier {
     /// [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
     pub fn try_new(settings: Sdm, mode: CryptoMode) -> Result<Self, SdmError> {
         let file_read = settings.file_read().ok_or(SdmError::InvalidConfiguration(
-            "SDM read access is missing — no MAC key configured",
+            "SDM read access is missing - no MAC key configured",
         ))?;
         let file_read_key = file_read.key().key();
 
@@ -238,7 +238,7 @@ impl SecureDynamicMessageVerifier {
 
     /// Verify the SDMMAC in the NDEF file data and extract dynamic values.
     ///
-    /// `ndef_data` is the raw file content — byte offsets index directly
+    /// `ndef_data` is the raw file content - byte offsets index directly
     /// into this buffer. `key` is the application key used for both
     /// `SDMMetaRead` (PICCData decryption) and `SDMFileRead` (session key
     /// derivation, MAC, and optional `SDMENCFileData` decryption).
@@ -684,7 +684,7 @@ fn ensure_len(data: &[u8], needed: usize) -> Result<(), SdmError> {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — AN12196 rev. 2.0 §3.3 / §3.4
+// Tests - AN12196 rev. 2.0 §3.3 / §3.4
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -794,7 +794,7 @@ mod tests {
 
     // -- Unit tests for internal primitives ---------------------------------
 
-    // AN12196 §3.3, Table 1 — SDM session key derivation (AES).
+    // AN12196 §3.3, Table 1 - SDM session key derivation (AES).
     #[test]
     fn session_keys_an12196_t1() {
         let key = hex_array::<16>("5ACE7E50AB65D5D51FD5BF5A16B8205B");
@@ -811,7 +811,7 @@ mod tests {
         }
     }
 
-    // AN12196 §3.4.2.2, Table 2 — PICCData decryption (AES).
+    // AN12196 §3.4.2.2, Table 2 - PICCData decryption (AES).
     #[test]
     fn picc_data_an12196_t2() {
         let enc = hex_array::<16>("EF963FF7828658A599F3041510671E88");
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(picc.read_ctr, Some(hex_array("3D0000")));
     }
 
-    // AN12196 §3.4.3.2, Table 3 — SDMENCFileData decryption (AES).
+    // AN12196 §3.4.3.2, Table 3 - SDMENCFileData decryption (AES).
     #[test]
     fn enc_file_data_an12196_t3() {
         let uid = hex_array::<7>("04958CAA5C5E80");
@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(&ct, b"xxxxxxxxxxxxxxxx");
     }
 
-    // AN12196 §3.4.4.2.1, Table 4 — SDMMAC with empty input.
+    // AN12196 §3.4.4.2.1, Table 4 - SDMMAC with empty input.
     #[test]
     fn mac_empty_an12196_t4() {
         let uid = hex_array::<7>("04DE5F1EACC040");
@@ -858,7 +858,7 @@ mod tests {
         assert!(keys.verify_mac(b"", &hex_array("94EED9EE65337086")));
     }
 
-    // AN12196 §3.4.4.2.2, Table 5 — SDMMAC with non-empty input.
+    // AN12196 §3.4.4.2.2, Table 5 - SDMMAC with non-empty input.
     #[test]
     fn mac_nonempty_an12196_t5() {
         let uid = hex_array::<7>("04958CAA5C5E80");
@@ -1080,7 +1080,7 @@ mod tests {
         assert_eq!(result.read_ctr, Some(106));
     }
 
-    /// LRP session key derivation — intermediate master key check.
+    /// LRP session key derivation - intermediate master key check.
     #[test]
     fn lrp_session_key_master_derivation() {
         // From test_lrp_sdm.py: key=0, UID=042E1D222A6380, ctr=6A0000

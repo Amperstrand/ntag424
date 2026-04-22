@@ -25,7 +25,7 @@ pub const NXP_ORIGINALITY_PUBLIC_KEY_SEC1: [u8; 57] = [
 /// Length in bytes of a raw originality signature (28-byte `r` ‖ 28-byte `s`).
 pub const SIGNATURE_LEN: usize = 56;
 
-/// P-224 scalar-field byte width — size of the zero-extended prehash.
+/// P-224 scalar-field byte width - size of the zero-extended prehash.
 const FIELD_BYTES: usize = 28;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

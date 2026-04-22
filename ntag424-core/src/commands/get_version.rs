@@ -28,7 +28,7 @@ pub(crate) async fn get_version<T: Transport>(
     })
 }
 
-/// `GetVersion` inside an authenticated session — `CommMode.MAC`
+/// `GetVersion` inside an authenticated session - `CommMode.MAC`
 /// (NT4H2421Gx §10.2 Table 21).
 ///
 /// Wire: `90 60 00 00 08 <MACt(8)> 00`, three chained frames.
@@ -68,7 +68,7 @@ pub(crate) async fn get_version_mac<T: Transport, S: SessionSuite>(
 }
 
 /// Drive the three-frame GetVersion chain and return `(part1, part2, part3_full)`.
-/// `head` is the first APDU — `90 60 00 00 08 <MACt(8)> 00` for `CommMode.MAC`
+/// `head` is the first APDU - `90 60 00 00 08 <MACt(8)> 00` for `CommMode.MAC`
 /// (authenticated) or plain `90 60 00 00 00` for `CommMode.Plain`. Follow-on
 /// frames are always the plain `91 AF` continuation; the caller decodes any
 /// trailing `MACt` on the third response.
@@ -143,7 +143,7 @@ mod tests {
     /// and software version info (parts 1–2, 7 B each) and production data
     /// (part 3, 14 B including the 7-byte UID). No trailing MAC is present.
     ///
-    /// APDUs and responses validated on real NTAG 424 DNA hardware — both AES
+    /// APDUs and responses validated on real NTAG 424 DNA hardware - both AES
     /// and LRP tags return identical part1/part2; part3 varies only in the UID.
     #[test]
     fn get_version_plain_roundtrip() {
@@ -167,9 +167,9 @@ mod tests {
     }
 
     /// Authenticated `GetVersion` round-trip. Session keys are from AN12196 §5.6
-    /// (key 0x00 handshake — a published vector); response parts are from AN12196
+    /// (key 0x00 handshake - a published vector); response parts are from AN12196
     /// §5.5. The response MAC is derived by the test so its correctness is only as
-    /// good as the MAC implementation — but the wire format (8-byte command MAC
+    /// good as the MAC implementation - but the wire format (8-byte command MAC
     /// in Lc, 8-byte response `MACt` on the last frame) is confirmed on hardware:
     /// a real PICC accepts the command and returns a valid `MACt`.
     #[test]
@@ -220,7 +220,7 @@ mod tests {
 
     /// Tampering with the trailing `MACt` on the last frame surfaces as
     /// [`SessionError::ResponseMacMismatch`]. `CmdCtr` must not advance on
-    /// failure — the caller can retry or abort, and a stale counter would
+    /// failure - the caller can retry or abort, and a stale counter would
     /// de-sync the session.
     #[test]
     fn get_version_mac_rejects_bad_trailer() {

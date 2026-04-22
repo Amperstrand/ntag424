@@ -1,57 +1,3 @@
-//! URL-template → NDEF bytes + [`SdmSettings`] builder for SDM provisioning.
-//!
-//! Converts a URL string with placeholder tokens into the NDEF file content
-//! that must be written to the tag and the matching [`SdmSettings`] for
-//! `ChangeFileSettings`.
-//!
-//! # Placeholders
-//!
-//! | Token                | Expanded length                    | Notes |
-//! |----------------------|------------------------------------|-------|
-//! | `{uid}`              | 14 ASCII hex chars                 | Plain UID mirror |
-//! | `{ctr}`              | 6 ASCII hex chars                  | Plain SDMReadCtr mirror |
-//! | `{picc}`             | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with UID + counter |
-//! | `{picc:uid}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with UID only |
-//! | `{picc:ctr}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with counter only |
-//! | `{picc:uid+ctr}`     | 32 (AES) / 48 (LRP) ASCII hex chars | Explicit UID + counter form |
-//! | `{tt}`               | 2 ASCII chars                      | Tag tamper status |
-//! | `{mac}`              | 16 ASCII hex chars                 | SDMMAC; **always required** |
-//!
-//! `{picc...}` is mutually exclusive with plain `{uid}` / `{ctr}`.
-//!
-//! # Range annotations
-//!
-//! - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`. If
-//!   omitted, the MAC window starts at the first unescaped `/`, `?`, or `#` in
-//!   the abbreviated URI body, or at the end of the body if none exists.
-//! - `[...]` reserves an `SDMENCFileData` window. The bracket contents are used
-//!   only to define the resulting ASCII length, and are rendered as `'0'`
-//!   bytes in the initial NDEF file. `{uid}`, `{ctr}`, `{picc...}`, and
-//!   `{mac}` are rejected inside this range; `{tt}` is allowed.
-//!
-//! Escape reserved syntax with backslash, e.g. `\{`, `\[`, `\]`, `\\`.
-//!
-//! # Example
-//!
-//! ```
-//! use ntag424_core::sdm::{sdm_url_config, CryptoMode, SdmUrlOptions};
-//! use ntag424_core::types::KeyNumber;
-//!
-//! let opts = SdmUrlOptions {
-//!     picc_key: KeyNumber::Key2,
-//!     mac_key: KeyNumber::Key2,
-//!     ..SdmUrlOptions::default()
-//! };
-//! let plan = sdm_url_config(
-//!     "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
-//!     CryptoMode::Aes,
-//!     opts,
-//! ).unwrap();
-//!
-//! let _ = plan.ndef_bytes;
-//! let _ = plan.sdm_settings;
-//! ```
-
 #[cfg(feature = "alloc")]
 use alloc::borrow::ToOwned;
 #[cfg(feature = "alloc")]
@@ -280,6 +226,62 @@ struct ParsedTemplate<const N: usize> {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "alloc")]
+/// Create SDM configuration from a URL template string.
+///
+/// Converts a URL string with placeholder tokens into the NDEF file content
+/// and [`SdmUrlConfig`] object. The NDEF file content must be written to the tag,
+/// and settings must be appliedwith [`change_file_settings`](`crate::Session::change_file_settings`).
+///
+/// # Placeholders
+///
+/// | Token                | Expanded length                    | Notes |
+/// |----------------------|------------------------------------|-------|
+/// | `{uid}`              | 14 ASCII hex chars                 | Plain UID mirror |
+/// | `{ctr}`              | 6 ASCII hex chars                  | Plain SDMReadCtr mirror |
+/// | `{picc}`             | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with UID + counter |
+/// | `{picc:uid}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with UID only |
+/// | `{picc:ctr}`         | 32 (AES) / 48 (LRP) ASCII hex chars | Encrypted PICCData with counter only |
+/// | `{picc:uid+ctr}`     | 32 (AES) / 48 (LRP) ASCII hex chars | Explicit UID + counter form |
+/// | `{tt}`               | 2 ASCII chars                      | Tag tamper status |
+/// | `{mac}`              | 16 ASCII hex chars                 | SDMMAC; **always required** |
+///
+/// `{picc...}` is mutually exclusive with plain `{uid}` / `{ctr}`.
+///
+/// There is also a [`sdm_url_config!`](`crate::sdm_url_config!`)
+/// macro for compile time evaluation.
+///
+/// # Range annotations
+///
+/// - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`. If
+///   omitted, the MAC window starts at the first unescaped `/`, `?`, or `#` in
+///   the abbreviated URI body, or at the end of the body if none exists.
+/// - `[...]` reserves an `SDMENCFileData` window. The bracket contents are used
+///   only to define the resulting ASCII length, and are rendered as `'0'`
+///   bytes in the initial NDEF file. `{uid}`, `{ctr}`, `{picc...}`, and
+///   `{mac}` are rejected inside this range; `{tt}` is allowed.
+///
+/// Escape reserved syntax with backslash, e.g. `\{`, `\[`, `\]`, `\\`.
+///
+/// # Example
+///
+/// ```
+/// use ntag424_core::sdm::{sdm_url_config, CryptoMode, SdmUrlOptions};
+/// use ntag424_core::types::KeyNumber;
+///
+/// let opts = SdmUrlOptions {
+///     picc_key: KeyNumber::Key2,
+///     mac_key: KeyNumber::Key2,
+///     ..SdmUrlOptions::default()
+/// };
+/// let plan = sdm_url_config(
+///     "https://example.com/?[[p={picc:uid+ctr}&cmac={mac}",
+///     CryptoMode::Aes,
+///     opts,
+/// ).unwrap();
+///
+/// let _ = plan.ndef_bytes;
+/// let _ = plan.sdm_settings;
+/// ```
 pub fn sdm_url_config(
     url: &str,
     mode: CryptoMode,
@@ -339,45 +341,55 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
     }
 
     let mut ndef_bytes = ConstNdefBytes::<N>::new();
-    match ndef_bytes.push(((ndef_msg_len as u16) >> 8) as u8) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
+    macro_rules! try_push {
+        ($byte:expr, $($rest:expr),*) => {
+            try_push!($byte);
+            try_push!($($rest),*);
+        };
+        ($byte:expr) => {
+            match ndef_bytes.push($byte) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+        };
     }
-    match ndef_bytes.push((ndef_msg_len as u16) as u8) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
-    match ndef_bytes.push(0xD1) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
-    match ndef_bytes.push(0x01) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
-    match ndef_bytes.push(payload_len as u8) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
-    match ndef_bytes.push(0x55) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
-    match ndef_bytes.push(prefix_code) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    }
+    try_push!(
+        ((ndef_msg_len as u16) >> 8) as u8,
+        (ndef_msg_len as u16) as u8,
+        0xD1,
+        0x01,
+        payload_len as u8,
+        0x55,
+        prefix_code
+    );
     match ndef_bytes.extend_bytes(&parsed.uri_content.bytes, 0, parsed.uri_content.len()) {
         Ok(()) => {}
         Err(err) => return Err(err),
     }
 
+    macro_rules! try_offset {
+        (Some($opt:expr), $name:expr) => {
+            match $opt {
+                Some(opt) => Some(try_offset!(opt, $name)),
+                None => None,
+            }
+        };
+        ($opt:expr, $name:expr) => {
+            match Offset::new($opt) {
+                Ok(o) => o,
+                Err(_) => {
+                    return Err(TemplateCoreError::FileSettings(concat!(
+                        $name,
+                        " out of range"
+                    )))
+                }
+            }
+        };
+    }
+
     // Build picc_data
     let picc_data = if let Some((picc_offset, content)) = parsed.picc {
-        let offset = match Offset::new(picc_offset) {
-            Ok(o) => o,
-            Err(_) => return Err(TemplateCoreError::FileSettings("picc_offset out of range")),
-        };
+        let offset = try_offset!(picc_offset, "picc_offset");
         let enc_content = match content {
             PiccContent::Uid => EncryptedContent::Uid,
             PiccContent::Ctr => EncryptedContent::RCtr(ReadCtrFeatures {
@@ -395,90 +407,41 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
             content: enc_content,
         }
     } else {
-        match (parsed.uid_offset, parsed.ctr_offset) {
-            (Some(uid_off), Some(ctr_off)) => {
-                let uid = match Offset::new(uid_off) {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return Err(TemplateCoreError::FileSettings("uid_offset out of range"));
-                    }
-                };
-                let ctr = match Offset::new(ctr_off) {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return Err(TemplateCoreError::FileSettings("ctr_offset out of range"));
-                    }
-                };
-                PiccData::Plain(PlainMirror::Both {
-                    uid,
-                    read_ctr: ReadCtrMirror {
-                        offset: ctr,
-                        features: ReadCtrFeatures {
-                            limit: None,
-                            ret_access: opts.ctr_ret,
-                        },
+        let uid_offset = try_offset!(Some(parsed.uid_offset), "uid_offset");
+        let ctr_offset = try_offset!(Some(parsed.ctr_offset), "ctr_offset");
+        match (uid_offset, ctr_offset) {
+            (Some(uid), Some(ctr)) => PiccData::Plain(PlainMirror::Both {
+                uid,
+                read_ctr: ReadCtrMirror {
+                    offset: ctr,
+                    features: ReadCtrFeatures {
+                        limit: None,
+                        ret_access: opts.ctr_ret,
                     },
-                })
-            }
-            (Some(uid_off), None) => {
-                let uid = match Offset::new(uid_off) {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return Err(TemplateCoreError::FileSettings("uid_offset out of range"));
-                    }
-                };
-                PiccData::Plain(PlainMirror::Uid { uid })
-            }
-            (None, Some(ctr_off)) => {
-                let ctr = match Offset::new(ctr_off) {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return Err(TemplateCoreError::FileSettings("ctr_offset out of range"));
-                    }
-                };
-                PiccData::Plain(PlainMirror::RCtr {
-                    read_ctr: ReadCtrMirror {
-                        offset: ctr,
-                        features: ReadCtrFeatures {
-                            limit: None,
-                            ret_access: opts.ctr_ret,
-                        },
+                },
+            }),
+            (Some(uid), None) => PiccData::Plain(PlainMirror::Uid { uid }),
+            (None, Some(ctr)) => PiccData::Plain(PlainMirror::RCtr {
+                read_ctr: ReadCtrMirror {
+                    offset: ctr,
+                    features: ReadCtrFeatures {
+                        limit: None,
+                        ret_access: opts.ctr_ret,
                     },
-                })
-            }
+                },
+            }),
             (None, None) => PiccData::None,
         }
     };
 
-    // Build tamper_status
-    let tamper_status = match parsed.tt_offset {
-        Some(off) => match Offset::new(off) {
-            Ok(o) => Some(o),
-            Err(_) => return Err(TemplateCoreError::FileSettings("tt_offset out of range")),
-        },
-        None => None,
-    };
-
-    // Build mac_window
-    let mac_input_offset = match Offset::new(parsed.mac_input) {
-        Ok(o) => o,
-        Err(_) => return Err(TemplateCoreError::FileSettings("mac_input out of range")),
-    };
-    let mac_offset_val = match Offset::new(parsed.mac_offset) {
-        Ok(o) => o,
-        Err(_) => return Err(TemplateCoreError::FileSettings("mac_offset out of range")),
-    };
     let window = MacWindow {
-        input: mac_input_offset,
-        mac: mac_offset_val,
+        input: try_offset!(parsed.mac_input, "mac_input"),
+        mac: try_offset!(parsed.mac_offset, "mac_offset"),
     };
 
     // Build file_read
     let file_read = if let Some((enc_start, enc_end)) = parsed.enc_range {
-        let start = match Offset::new(enc_start) {
-            Ok(o) => o,
-            Err(_) => return Err(TemplateCoreError::FileSettings("enc_start out of range")),
-        };
+        let start = try_offset!(enc_start, "enc_start");
         let length = match EncLength::new(enc_end - enc_start) {
             Ok(l) => l,
             Err(_) => return Err(TemplateCoreError::FileSettings("enc_length invalid")),
@@ -495,6 +458,7 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
         })
     };
 
+    let tamper_status = try_offset!(Some(parsed.tt_offset), "tt_offset");
     let sdm_settings = match Sdm::try_new(picc_data, file_read, tamper_status) {
         Ok(sdm) => sdm,
         Err(FileSettingsError::MacInputAfterMac) => {

@@ -1,4 +1,4 @@
-//! `ChangeFileSettings` command — NT4H2421Gx §10.7.1, AN12196 §5.9.
+//! `ChangeFileSettings` command - NT4H2421Gx §10.7.1, AN12196 §5.9.
 
 use crate::{
     Transport,
@@ -75,7 +75,7 @@ pub(crate) async fn change_file_settings<T: Transport, S: SessionSuite>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    // Response is MACt(8) only — no encrypted RespData (§10.7.1).
+    // Response is MACt(8) only - no encrypted RespData (§10.7.1).
     channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
     Ok(())
 }

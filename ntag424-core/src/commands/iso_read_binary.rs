@@ -15,16 +15,16 @@ const ISO_READ_BINARY_MAX: usize = 256;
 ///
 /// Addressing follows ISO/IEC 7816-4 §5.1.1.1 (Table 87, field `P1`):
 ///
-/// - `short_file_id = None` — read from the currently-selected EF. `P1-P2`
+/// - `short_file_id = None` - read from the currently-selected EF. `P1-P2`
 ///   (15 bits) encode `offset`, so `offset` must be `≤ 0x7FFF`.
-/// - `short_file_id = Some(0x01..=0x1E)` — select and target the EF
+/// - `short_file_id = Some(0x01..=0x1E)` - select and target the EF
 ///   referenced by the short ISO FileID. `P1[7]=1`, `P1[4..0]=SFID`, and
 ///   `P2` carries an 8-bit `offset` (`0..=0xFF`).
 ///
 /// The number of bytes requested is `min(buf.len(), 256)`; when that hits
 /// the 256 cap the command asks for the entire file (`Le = 00h`). If the
 /// file has fewer bytes available past `offset` the PICC returns a shorter
-/// payload — the return value is the actual length copied into `buf`.
+/// payload - the return value is the actual length copied into `buf`.
 ///
 /// Panics if `buf` is empty, if `short_file_id` is `Some(0)` or
 /// `Some(v > 0x1E)`, or if `offset` exceeds the range allowed by the

@@ -17,7 +17,7 @@ use crate::types::KeyNumber;
 /// File type identifier (NT4H2421Gx §10.7.2, Table 73).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
-    /// `00h` — only file type currently defined for NTAG 424 DNA.
+    /// `00h` - only file type currently defined for NTAG 424 DNA.
     StandardData,
 }
 
@@ -33,11 +33,11 @@ impl FileType {
 /// Communication mode for a file (NT4H2421Gx §8.2.3, Table 22).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommMode {
-    /// `0Xb` — message in plaintext.
+    /// `0Xb` - message in plaintext.
     Plain,
-    /// `01b` — MAC for integrity and authenticity.
+    /// `01b` - MAC for integrity and authenticity.
     Mac,
-    /// `11b` — full protection (encryption + MAC).
+    /// `11b` - full protection (encryption + MAC).
     Full,
 }
 
@@ -88,23 +88,23 @@ impl fmt::Display for NibbleSlot {
 /// Describes which pair of SDM placeholder regions overlapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlapKind {
-    /// UID and SDMReadCtr plain-mirror placeholders overlap (N5).
+    /// UID and SDMReadCtr plain-mirror placeholders overlap.
     UidAndRCtr,
-    /// UID placeholder overlaps the tag tamper status placeholder (N5).
+    /// UID placeholder overlaps the tag tamper status placeholder.
     UidAndTamper,
-    /// SDMReadCtr placeholder overlaps the tag tamper status placeholder (N5).
+    /// SDMReadCtr placeholder overlaps the tag tamper status placeholder.
     RCtrAndTamper,
-    /// UID placeholder overlaps the SDMMAC placeholder (N5).
+    /// UID placeholder overlaps the SDMMAC placeholder.
     UidAndMac,
-    /// SDMReadCtr placeholder overlaps the SDMMAC placeholder (N5).
+    /// SDMReadCtr placeholder overlaps the SDMMAC placeholder.
     RCtrAndMac,
-    /// Tag tamper status placeholder overlaps the SDMMAC placeholder (N5).
+    /// Tag tamper status placeholder overlaps the SDMMAC placeholder.
     TamperAndMac,
-    /// SDMENCFileData range overlaps the UID placeholder (N5).
+    /// SDMENCFileData range overlaps the UID placeholder.
     EncAndUid,
-    /// SDMENCFileData range overlaps the SDMReadCtr placeholder (N5).
+    /// SDMENCFileData range overlaps the SDMReadCtr placeholder.
     EncAndRCtr,
-    /// Tag tamper status falls in the ciphertext half of SDMENCFileData (N6).
+    /// Tag tamper status falls in the ciphertext half of SDMENCFileData.
     TamperInCiphertextHalf,
 }
 
@@ -152,11 +152,17 @@ impl fmt::Display for ReservedByte {
 /// Used for file-level access rights (Read, Write, ReadWrite, Change).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// `0h..4h` — authentication with the given AppKey is required.
+    /// Authentication with the given AppKey is required.
+    ///
+    /// `0h..4h`
     Key(KeyNumber),
-    /// `Eh` — free access (no authentication).
+    /// Free access (no authentication).
+    ///
+    /// `Eh`
     Free,
-    /// `Fh` — no access.
+    /// No access.
+    ///
+    /// `Fh`
     NoAccess,
 }
 
@@ -185,7 +191,8 @@ impl Access {
     }
 }
 
-/// Access right for `SDMCtrRet` (controls who may call `GetFileCounters`).
+/// Access right for `SDMCtrRet` (controls who may call
+/// [`get_file_counters()`](`crate::Session::get_file_counters`)).
 ///
 /// Same nibble encoding as [`Access`] but represents the SDMCtrRet field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,7 +264,7 @@ impl AccessRights {
 
 /// Key used for `SDMFileRead` (session key derivation, MAC, optional ENC).
 ///
-/// Only `Key(KeyNumber)` is valid — `Free` and `NoAccess` are not permitted
+/// Only `Key(KeyNumber)` is valid - `Free` and `NoAccess` are not permitted
 /// for `SDMFileRead`. The absence of a file-read key is represented by
 /// `file_read: None` on [`Sdm`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,8 +299,9 @@ impl Offset {
     }
 }
 
-/// ASCII placeholder length for `SDMENCFileData` — must be a positive
-/// multiple of 32 (NT4H2421Gx Table 69, `SDMENCLength`).
+/// ASCII placeholder length for `SDMENCFileData`.
+///
+/// Must be a positive multiple of 32 (NT4H2421Gx Table 69, `SDMENCLength`).
 ///
 /// The tag encrypts the first half of this range as plaintext bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,10 +328,11 @@ impl EncLength {
 /// [`EncryptedContent`]; not present when only the UID is mirrored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadCtrFeatures {
-    /// `SDMReadCtrLimit` — how many unauthenticated reads are allowed.
+    /// `SDMReadCtrLimit` - how many unauthenticated reads are allowed.
+    ///
     /// `None` means unlimited (sentinel `0x00FF_FFFF` on the wire).
     pub limit: Option<u32>,
-    /// Who may call `GetFileCounters` (`SDMCtrRet`).
+    /// Who may call [`get_file_counters`](`crate::Session::get_file_counters`) (`SDMCtrRet`).
     pub ret_access: CtrRetAccess,
 }
 
@@ -336,9 +345,6 @@ pub struct ReadCtrMirror {
 }
 
 /// Plain (ASCII hex) mirroring of PICC metadata into the file.
-///
-/// S15/S16: at least one field must be present (`PiccData::None` instead of
-/// `PiccData::Plain` with no fields is caught at the type level).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlainMirror {
     /// Only the 7-byte UID (14 ASCII chars) is mirrored.
@@ -369,8 +375,6 @@ impl PlainMirror {
 }
 
 /// Content of the encrypted `PICCData` blob.
-///
-/// S17: `SDMENCFileData` (`FileRead::MacAndEnc`) requires `Both`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncryptedContent {
     /// Only the UID is inside the encrypted blob.
@@ -469,7 +473,7 @@ impl PiccData {
 
 /// MAC input/output window for `SDMMAC`.
 ///
-/// N2: `input.get() ≤ mac.get()` (checked by [`Sdm::try_new`]).
+/// `input.get() ≤ mac.get()` is checked by [`Sdm::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacWindow {
     /// First byte covered by `SDMMAC`.
@@ -480,23 +484,23 @@ pub struct MacWindow {
 
 /// `SDMENCFileData` placeholder range.
 ///
-/// N3: this range must lie within the MAC window (checked by [`Sdm::try_new`]).
+/// This range must lie within the MAC window (checked by [`Sdm::try_new`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncFileData {
     /// Start of the ASCII placeholder in the file.
     pub start: Offset,
-    /// Length of the ASCII placeholder — must be a positive multiple of 32.
+    /// Length of the ASCII placeholder - must be a positive multiple of 32.
     pub length: EncLength,
 }
 
 /// `SDMFileRead` configuration: MAC key, window, and optional ENC file data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileRead {
-    /// `SDMMAC` only — no `SDMENCFileData`.
+    /// `SDMMAC` only - no `SDMENCFileData`.
     MacOnly { key: FileReadKey, window: MacWindow },
     /// `SDMMAC` plus `SDMENCFileData`.
     ///
-    /// S17: requires [`PiccData::Encrypted`] with [`EncryptedContent::Both`],
+    /// Requires [`PiccData::Encrypted`] with [`EncryptedContent::Both`],
     /// or [`PiccData::Plain`] with [`PlainMirror::Both`].
     MacAndEnc {
         key: FileReadKey,
@@ -539,18 +543,22 @@ const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
 
 /// Secure Dynamic Messaging configuration (NT4H2421Gx §9.3, §10.7.1 Table 69).
 ///
-/// Construct via [`Sdm::try_new`]; invariants enforced at construction time
-/// cannot be bypassed after construction because all fields are private.
+/// Construct via [`Sdm::try_new`].
 ///
 /// SDM lets the tag deliver authenticated, replay-protected dynamic content
-/// to readers that have **not** authenticated — typically an NDEF URL with a
+/// to readers that have **not** authenticated - typically an NDEF URL with a
 /// fresh UID, monotonically increasing `SDMReadCtr`, optional encrypted file
 /// data (`SDMENCFileData`), and a truncated CMAC (`SDMMAC`).
+///
+/// You may use [`SecureDynamicMessageVerifier`](`crate::sdm::SecureDynamicMessageVerifier`)
+/// to verify and parse the SDM content given a configuration and keys,
+/// and [`sdm_url_config!`](`crate::sdm_url_config!`) as a convenience method
+/// to create the NDEF and configuration using a template.
 ///
 /// Mirror placeholders in the NDEF URL are ASCII hex strings; their widths are:
 /// UID = 14, SDMReadCtr = 6, TT status = 2, SDMMAC = 16 chars.
 /// PICCData (encrypted) width is mode-dependent (32 AES / 48 LRP) and is
-/// therefore **not** overlap-checked here — callers must ensure the PICCData
+/// therefore **not** overlap-checked here - callers must ensure the PICCData
 /// placeholder does not overlap with others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sdm {
@@ -578,21 +586,21 @@ impl Sdm {
     /// Construct and validate SDM settings.
     ///
     /// Checks:
-    /// - N2: `window.input ≤ window.mac`
-    /// - N3 (`MacAndEnc`): ENC range lies within the MAC window
-    /// - S17 (`MacAndEnc`): `picc_data` includes both UID and RCtr
-    /// - N5: pairwise non-overlap between plain UID, plain RCtr, TT status,
+    /// - `window.input ≤ window.mac`
+    /// - (`MacAndEnc`): ENC range lies within the MAC window
+    /// - (`MacAndEnc`): `picc_data` includes both UID and RCtr
+    /// - pairwise non-overlap between plain UID, plain RCtr, TT status,
     ///   SDMMAC, and SDMENCFileData placeholders (NT4H2421Gx Table 71).
     ///   Overlap with the encrypted PICCData blob is **not** checked here
     ///   because its width depends on the crypto suite (AES vs LRP).
-    /// - N6 (`MacAndEnc`): `tamper_status`, if inside the ENC range,
+    /// - (`MacAndEnc`): `tamper_status`, if inside the ENC range,
     ///   must be in the plaintext half
     pub const fn try_new(
         picc_data: PiccData,
         file_read: Option<FileRead>,
         tamper_status: Option<Offset>,
     ) -> Result<Self, FileSettingsError> {
-        // N2: mac_input <= mac
+        // mac_input <= mac
         if let Some(ref fr) = file_read {
             let w = fr.window();
             if w.input.0 > w.mac.0 {
@@ -600,7 +608,7 @@ impl Sdm {
             }
         }
 
-        // N5: pairwise overlap checks between plain-mirror placeholders.
+        // pairwise overlap checks between plain-mirror placeholders.
         // Extract plain UID and RCtr offsets (only present in PiccData::Plain).
         let plain_uid: Option<u32> = match picc_data {
             PiccData::Plain(PlainMirror::Uid { uid }) => Some(uid.0),
@@ -660,18 +668,18 @@ impl Sdm {
             return Err(FileSettingsError::MirrorsOverlap(OverlapKind::TamperAndMac));
         }
 
-        // N3 + S17 + N5 (ENC) + N6 checks for MacAndEnc
+        // checks for MacAndEnc
         if let Some(FileRead::MacAndEnc { window, enc, .. }) = file_read {
-            // S17: requires both UID and RCtr in picc_data
+            // requires both UID and RCtr in picc_data
             if !picc_data.includes_uid() || !picc_data.includes_rctr() {
                 return Err(FileSettingsError::EncRequiresBothMirrors);
             }
             let enc_end = enc.start.0 + enc.length.0;
-            // N3: enc within mac window
+            // enc within mac window
             if window.input.0 > enc.start.0 || window.mac.0 < enc_end {
                 return Err(FileSettingsError::EncOutsideMacWindow);
             }
-            // N5: ENC vs UID / RCtr (only meaningful when UID/RCtr are plain-mirrored)
+            // ENC vs UID / RCtr (only meaningful when UID/RCtr are plain-mirrored)
             if let Some(u) = plain_uid
                 && ranges_overlap(enc.start.0, enc.length.0, u, UID_PLACEHOLDER_LEN)
             {
@@ -682,7 +690,7 @@ impl Sdm {
             {
                 return Err(FileSettingsError::MirrorsOverlap(OverlapKind::EncAndRCtr));
             }
-            // N6: TT must not overlap ENC at all, unless fully within the plaintext half.
+            // TT must not overlap ENC at all, unless fully within the plaintext half.
             if let Some(tt_off) = tt
                 && ranges_overlap(tt_off, TT_PLACEHOLDER_LEN, enc.start.0, enc.length.0)
             {
@@ -727,7 +735,7 @@ impl FileSettingsView {
         let access_rights = AccessRights::from_le_bytes(r.array::<2>()?)?;
         let file_size = r.u24_le()?;
 
-        // S1: bits 7 and 5..2 of FileOption are RFU; bits 1..0 = CommMode, bit 6 = SDM enable.
+        // bits 7 and 5..2 of FileOption are RFU; bits 1..0 = CommMode, bit 6 = SDM enable.
         if file_option & 0b1011_1100 != 0 {
             return Err(FileSettingsError::ReservedBitSet {
                 byte: ReservedByte::FileOption,
@@ -739,7 +747,7 @@ impl FileSettingsView {
             let sdm_options = r.u8()?;
             let ar_bytes = r.array::<2>()?;
 
-            // S2: bits 2..1 of SDMOptions must be 0; bit 0 must be 1 (ASCII mode).
+            // bits 2..1 of SDMOptions must be 0; bit 0 must be 1 (ASCII mode).
             if sdm_options & 0b111 != 0b001 {
                 return Err(FileSettingsError::ReservedBitSet {
                     byte: ReservedByte::SdmOptions,
@@ -747,7 +755,7 @@ impl FileSettingsView {
                 });
             }
 
-            // S3: high nibble of SDMAccessRights byte[0] must be 0xF
+            // high nibble of SDMAccessRights byte[0] must be 0xF
             if ar_bytes[0] & 0xF0 != 0xF0 {
                 return Err(FileSettingsError::ReservedBitSet {
                     byte: ReservedByte::SdmAccessRights0,
@@ -790,7 +798,7 @@ impl FileSettingsView {
 
             let ctr_ret = CtrRetAccess::from_nibble(ctr_ret_nibble)?;
 
-            // S19: SDMCtrRet must be NoAccess (0xF) when SDMReadCtr is not mirrored.
+            // SDMCtrRet must be NoAccess (0xF) when SDMReadCtr is not mirrored.
             if !read_ctr_mirror && !matches!(ctr_ret, CtrRetAccess::NoAccess) {
                 return Err(FileSettingsError::InvalidSdmFlags);
             }
@@ -835,7 +843,7 @@ impl FileSettingsView {
                 None
             };
 
-            // S5: read_ctr_limit requires read_ctr_mirror
+            // read_ctr_limit requires read_ctr_mirror
             let ctr_limit = if read_ctr_limit_enabled {
                 if !read_ctr_mirror {
                     return Err(FileSettingsError::InvalidSdmFlags);
@@ -951,7 +959,7 @@ impl FileSettingsView {
 
 /// Input for `ChangeFileSettings` (NT4H2421Gx §10.7.1, Table 69).
 ///
-/// `FileType` and `FileSize` are omitted — they cannot be changed.
+/// `FileType` and `FileSize` are omitted - they cannot be changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsPatch {
     pub comm_mode: CommMode,
@@ -1067,13 +1075,13 @@ pub enum FileSettingsError {
     OffsetOutOfRange(u32),
     #[error("SDMENCLength must be a positive multiple of 32, got {0}")]
     EncLengthInvalid(u32),
-    #[error("SDMMACInputOffset must not exceed SDMMACOffset (N2)")]
+    #[error("SDMMACInputOffset must not exceed SDMMACOffset")]
     MacInputAfterMac,
-    #[error("SDMENCFileData range must lie within the MAC window (N3)")]
+    #[error("SDMENCFileData range must lie within the MAC window")]
     EncOutsideMacWindow,
     #[error("reserved bit(s) set in {byte}: mask {mask:#04x}")]
     ReservedBitSet { byte: ReservedByte, mask: u8 },
-    #[error("SDMENCFileData requires both UID and SDMReadCtr mirroring (S17)")]
+    #[error("SDMENCFileData requires both UID and SDMReadCtr mirroring")]
     EncRequiresBothMirrors,
     #[error("SDM mirror regions overlap: {0}")]
     MirrorsOverlap(OverlapKind),
@@ -1206,7 +1214,7 @@ mod tests {
         }
     }
 
-    /// AN12196 §5.4 Table 7 — `GetFileSettings` response for NDEF file with SDM
+    /// AN12196 §5.4 Table 7 - `GetFileSettings` response for NDEF file with SDM
     /// (Key0 encrypted PICCData, Key0 file-read/MAC, free CTR-ret, enc file data).
     const AN12196_GET_FS_PAYLOAD: &[u8] = &[
         0x00, 0x40, 0xEE, 0xEE, 0x00, 0x01, 0x00, 0xD1, 0xFE, 0x00, 0x1F, 0x00, 0x00, 0x44, 0x00,
@@ -1243,7 +1251,7 @@ mod tests {
         assert_eq!(sdm.tamper_status(), None);
     }
 
-    /// AN12196 §5.9 Table 18 — `ChangeFileSettings` CmdData for NDEF file.
+    /// AN12196 §5.9 Table 18 - `ChangeFileSettings` CmdData for NDEF file.
     /// Encrypted PICCData Key2, SDM read Key1, no enc-file data, CTR-ret Key1.
     const AN12196_CHANGE_FS_PAYLOAD: &[u8] = &[
         0x40, 0x00, 0xE0, 0xC1, 0xF1, 0x21, 0x20, 0x00, 0x00, 0x43, 0x00, 0x00, 0x43, 0x00, 0x00,
@@ -1310,7 +1318,7 @@ mod tests {
 
     #[test]
     fn rejects_enc_outside_mac_window() {
-        // N3: enc range must be inside the MAC window.
+        // enc range must be inside the MAC window.
         let enc = EncFileData {
             start: Offset(0x10),
             length: EncLength::new(32).unwrap(),
@@ -1372,7 +1380,7 @@ mod tests {
 
     #[test]
     fn try_new_enables_tt_status_mirroring() {
-        // TT-only without MAC — valid configuration.
+        // TT-only without MAC - valid configuration.
         let sdm = Sdm::try_new(
             PiccData::Plain(PlainMirror::Uid { uid: Offset(0x20) }),
             None,
@@ -1574,7 +1582,7 @@ mod tests {
 
     #[test]
     fn rejects_overlap_uid_and_tamper() {
-        // UID at 0x10 (14 bytes), TT at 0x1A — inside UID span.
+        // UID at 0x10 (14 bytes), TT at 0x1A - inside UID span.
         let picc = PiccData::Plain(PlainMirror::Uid { uid: Offset(0x10) });
         let err = Sdm::try_new(picc, None, Some(Offset(0x1A))).unwrap_err();
         assert_eq!(
@@ -1585,7 +1593,7 @@ mod tests {
 
     #[test]
     fn rejects_overlap_rctr_and_tamper() {
-        // RCtr at 0x10 (6 bytes), TT at 0x14 — overlaps RCtr.
+        // RCtr at 0x10 (6 bytes), TT at 0x14 - overlaps RCtr.
         let picc = PiccData::Plain(PlainMirror::RCtr {
             read_ctr: ReadCtrMirror {
                 offset: Offset(0x10),
@@ -1604,7 +1612,7 @@ mod tests {
 
     #[test]
     fn rejects_overlap_uid_and_mac() {
-        // UID at 0x10 (14 bytes), MAC window mac-offset at 0x15 — inside UID span.
+        // UID at 0x10 (14 bytes), MAC window mac-offset at 0x15 - inside UID span.
         let picc = PiccData::Plain(PlainMirror::Uid { uid: Offset(0x10) });
         let err = Sdm::try_new(picc, mac_only(0x00, 0x15), None).unwrap_err();
         assert_eq!(
@@ -1615,7 +1623,7 @@ mod tests {
 
     #[test]
     fn rejects_overlap_rctr_and_mac() {
-        // RCtr at 0x10 (6 bytes), MAC at 0x12 — inside RCtr span.
+        // RCtr at 0x10 (6 bytes), MAC at 0x12 - inside RCtr span.
         let picc = PiccData::Plain(PlainMirror::RCtr {
             read_ctr: ReadCtrMirror {
                 offset: Offset(0x10),
@@ -1634,7 +1642,7 @@ mod tests {
 
     #[test]
     fn rejects_overlap_tamper_and_mac() {
-        // TT at 0x10 (2 bytes), MAC at 0x11 — overlaps TT.
+        // TT at 0x10 (2 bytes), MAC at 0x11 - overlaps TT.
         let err =
             Sdm::try_new(PiccData::None, mac_only(0x00, 0x11), Some(Offset(0x10))).unwrap_err();
         assert_eq!(
@@ -1646,7 +1654,7 @@ mod tests {
     #[test]
     fn rejects_overlap_enc_and_uid() {
         // Plain UID at 0x10, ENC starts at 0x15 (overlaps UID's 14-byte span 0x10..0x1E).
-        // Use plain_both so S17 (requires both uid+rctr) passes.
+        // Use plain_both so validation (requires both uid+rctr) passes.
         let picc = plain_both(0x10, 0x60);
         let err = Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x15, 32), None).unwrap_err();
         assert_eq!(
@@ -1659,7 +1667,7 @@ mod tests {
     fn rejects_overlap_enc_and_rctr() {
         // Plain UID at 0x00, RCtr at 0x20 (6 bytes: 0x20..0x26).
         // ENC at 0x1E..0x3E overlaps RCtr.
-        // Use plain_both so S17 passes.
+        // Use plain_both so validation passes.
         let picc = plain_both(0x00, 0x20);
         let err = Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x1E, 32), None).unwrap_err();
         assert_eq!(
@@ -1671,7 +1679,7 @@ mod tests {
     #[test]
     fn rejects_tamper_in_ciphertext_half() {
         // ENC at 0x20..0x40 (32 bytes); plaintext half = 0x20..0x30.
-        // TT at 0x30 — exactly at the start of the ciphertext half.
+        // TT at 0x30 - exactly at the start of the ciphertext half.
         let err = Sdm::try_new(
             both_picc(0),
             mac_and_enc(0, 0x80, 0x20, 32),
@@ -1687,7 +1695,7 @@ mod tests {
     #[test]
     fn tamper_at_last_byte_of_plaintext_half_is_ok() {
         // ENC at 0x20..0x40 (32 bytes); plaintext half ends at 0x30.
-        // TT (2 bytes) at 0x2E — fits entirely in 0x2E..0x30, within the plain half.
+        // TT (2 bytes) at 0x2E - fits entirely in 0x2E..0x30, within the plain half.
         Sdm::try_new(
             both_picc(0),
             mac_and_enc(0, 0x80, 0x20, 32),
@@ -1755,8 +1763,8 @@ mod tests {
     fn decode_rejects_s19_ctr_ret_set_without_rctr_mirror() {
         // SDMOptions = 0x81: uid_mirror=1 (bit7), rctr_mirror=0 (bit6), ascii=1 (bit0).
         // AR bytes: v = u16::from_le_bytes([byte0, byte1]).
-        //   ctr_ret_nibble = v & 0xF = byte0 low nibble → Key0 (= 0x0) to trigger S19.
-        //   S3 requires byte0 high nibble = F → byte0 = 0xF0.
+        //   ctr_ret_nibble = v & 0xF = byte0 low nibble → Key0 (= 0x0) to trigger validation error.
+        //   validation requires byte0 high nibble = F → byte0 = 0xF0.
         //   byte1 = 0xFF (meta=F NoAccess, file=F NoAccess).
         // No uid offset is read (meta_plain = false since picc_meta_nibble = F ≠ E).
         let payload = [

@@ -80,13 +80,13 @@ pub const MAX_SYSTEM_ID_LEN: usize = 16;
 ///
 /// # Arguments
 ///
-/// * `master_key` — the base AES-128 key stored in the SAM / backend.
-/// * `uid` — the tag's permanent 7-byte UID (must **not** be the
+/// * `master_key` - the base AES-128 key stored in the SAM / backend.
+/// * `uid` - the tag's permanent 7-byte UID (must **not** be the
 ///   randomised UID, which changes on every read).
-/// * `key_number` — [`KeyNumber`] selecting which application key slot
+/// * `key_number` - [`KeyNumber`] selecting which application key slot
 ///   the derived key is destined for. Including this ensures each slot
 ///   receives a different diversified key even from the same master.
-/// * `system_identifier` — an application-defined label (up to 16 bytes)
+/// * `system_identifier` - an application-defined label (up to 16 bytes)
 ///   that binds the key to your system.
 ///
 /// # Panics
@@ -133,7 +133,7 @@ pub fn diversify_ntag424(
         system_identifier.len(),
     );
 
-    // M = UID (7) ‖ AID (7) ‖ KeyNo (1) ‖ SysId (0..=16)  — max 31 bytes.
+    // M = UID (7) ‖ AID (7) ‖ KeyNo (1) ‖ SysId (0..=16)  - max 31 bytes.
     let mut m = [0u8; 31];
     let len = 7 + 7 + 1 + system_identifier.len();
     m[..7].copy_from_slice(uid);
@@ -149,8 +149,8 @@ pub fn diversify_ntag424(
 ///
 /// # Arguments
 ///
-/// * `master_key` — 16-byte AES-128 master key (K).
-/// * `diversification_input` — 1 to 31 bytes of card-specific data (M).
+/// * `master_key` - 16-byte AES-128 master key (K).
+/// * `diversification_input` - 1 to 31 bytes of card-specific data (M).
 ///   For NTAG 424 DNA this is typically UID ‖ AID ‖ system identifier.
 ///
 /// # Panics
@@ -226,7 +226,7 @@ mod tests {
     use super::*;
     use crate::testing::{hex_array, hex_bytes};
 
-    /// AN10922 §2.2.1 — full AES-128 key diversification example with
+    /// AN10922 §2.2.1 - full AES-128 key diversification example with
     /// intermediate CMAC subkey verification.
     #[test]
     fn an10922_aes128_vector() {

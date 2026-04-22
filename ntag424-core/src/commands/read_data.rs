@@ -1,17 +1,17 @@
-//! `ReadData` command — NT4H2421Gx §10.8.1.
+//! `ReadData` command - NT4H2421Gx §10.8.1.
 //!
 //! The command reads bytes from a StandardData file. Its CommMode is
 //! defined per file (§8.2.3.5, Table 13), so three framings are
 //! exposed here:
 //!
-//! - [`read_data_plain`] — no secure messaging. Used either without an
+//! - [`read_data_plain`] - no secure messaging. Used either without an
 //!   authenticated session at all, or, per §8.2.3.3, inside an
 //!   authenticated session when the only satisfied access condition is
 //!   the free-access one (`Eh`).
-//! - [`read_data_mac`] — `CommMode.MAC` (§9.1.9): command gets an
+//! - [`read_data_mac`] - `CommMode.MAC` (§9.1.9): command gets an
 //!   8-byte `MACt` trailer, response data is plain with a trailing
 //!   `MACt`.
-//! - [`read_data_full`] — `CommMode.FULL` (§9.1.10): command has no
+//! - [`read_data_full`] - `CommMode.FULL` (§9.1.10): command has no
 //!   data field so only the response is encrypted; response is
 //!   `E(SesAuthENCKey; RespData || ISO/IEC 9797-1 M2 padding) || MACt`.
 //!
@@ -81,7 +81,7 @@ fn want_plain_bytes(length: u32, buf_len: usize) -> usize {
 /// `ReadData` (INS `AD`, §10.8.1) in `CommMode.Plain`.
 ///
 /// Wire: `90 AD 00 00 07 FileNo Offset(3 LE) Length(3 LE) 00`.
-/// Does not require or touch any secure-messaging state — safe to use
+/// Does not require or touch any secure-messaging state - safe to use
 /// either unauthenticated or while authenticated when access was granted
 /// via a free (`Eh`) access condition (§8.2.3.3).
 ///
@@ -177,7 +177,7 @@ pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
 /// ISO/IEC 9797-1 Method 2 padding, and copies the plaintext into `buf`.
 ///
 /// Padding rules (§9.1.4): the PICC always appends `0x80` then
-/// zero-pads to the next 16-byte boundary — i.e. when the plaintext
+/// zero-pads to the next 16-byte boundary - i.e. when the plaintext
 /// length is already a multiple of 16, a whole extra padding block is
 /// added.
 pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
@@ -232,7 +232,7 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
     // this point, so `CmdCtr` was advanced inside
     // `verify_response_mac_and_advance`. Malformed padding here is a
     // protocol-level anomaly (well-formed MAC over garbage plaintext
-    // from a conforming PICC "can't happen"), not a MAC mismatch — so
+    // from a conforming PICC "can't happen"), not a MAC mismatch - so
     // surface it as `UnexpectedLength` and leave the (now-advanced)
     // counter alone; it matches the PICC's state.
     let Some(pad_start) = strip_m2_padding(&scratch[..ct_len]) else {
@@ -508,7 +508,7 @@ mod tests {
     /// lacks the trailing `0x80` sentinel (§9.1.4 padding) "can't
     /// happen" for a conforming PICC. But when the PICC did return
     /// `91 00` with a verifying MAC it *also* advanced `CmdCtr`, so:
-    /// - error is `UnexpectedLength` (not `ResponseMacMismatch` — the
+    /// - error is `UnexpectedLength` (not `ResponseMacMismatch` - the
     ///   MAC checked out), and
     /// - our `CmdCtr` must be advanced to stay in sync with the PICC.
     #[test]

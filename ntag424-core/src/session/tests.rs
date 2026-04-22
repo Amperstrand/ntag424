@@ -16,11 +16,11 @@ use crate::testing::{
 #[test]
 fn authenticate_aes_an12196_key0_full_handshake() {
     let key = [0u8; 16];
-    // Step 10 — fixed RndA from the transcript (step 10).
+    // Step 10 - fixed RndA from the transcript (step 10).
     let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
 
     let transport = TestTransport::new([
-        // ISOSelectFile(NDEF app) — §10.9.1. Must precede AuthenticateEV2First
+        // ISOSelectFile(NDEF app) - §10.9.1. Must precede AuthenticateEV2First
         // on a freshly powered PICC (§8.2.1).
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         // Step 5 command / step 6–8 response.
@@ -50,11 +50,11 @@ fn authenticate_aes_an12196_key0_full_handshake() {
     ))
     .expect("handshake should succeed");
 
-    // Step 19 — TI chosen by the PICC.
+    // Step 19 - TI chosen by the PICC.
     assert_eq!(session.ti(), &hex_array::<4>("9D00C4DF"));
     // CmdCtr is zero immediately after AuthenticateEV2First (§9.1.2).
     assert_eq!(session.cmd_counter(), 0);
-    // Both queued exchanges consumed — no extra round-trips.
+    // Both queued exchanges consumed - no extra round-trips.
     assert_eq!(transport.remaining(), 0);
 }
 
@@ -76,7 +76,7 @@ fn authenticate_aes_surfaces_picc_auth_error() {
             0x91,
             0xAF,
         ),
-        // Same Part 2 APDU as the success case — the PICC can still
+        // Same Part 2 APDU as the success case - the PICC can still
         // refuse with 91 AE (e.g. wrong key).
         Exchange::new(
             &hex_bytes(
@@ -119,7 +119,7 @@ fn authenticate_lrp_an12321_key3_full_handshake() {
     let rnd_a: [u8; 16] = hex_array("74D7DF6A2CEC0B72B412DE0D2B1117E6");
 
     let mut transport = TestTransport::new([
-        // ISOSelectFile(NDEF app) — §10.9.1.
+        // ISOSelectFile(NDEF app) - §10.9.1.
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         // Part 1 command (step 10) / response (step 11).
         // Command: 90 71 00 00 08 || KeyNo=03 || LenCap=06 || PCDcap2=020000000000 || 00
@@ -155,7 +155,7 @@ fn authenticate_lrp_an12321_key3_full_handshake() {
     assert_eq!(session.ti(), &hex_array::<4>("58EE9424"));
     // CmdCtr is zero immediately after AuthenticateLRPFirst (§9.2.2).
     assert_eq!(session.cmd_counter(), 0);
-    // All queued exchanges consumed — no extra round-trips.
+    // All queued exchanges consumed - no extra round-trips.
     assert_eq!(transport.remaining(), 0);
 }
 
@@ -170,7 +170,7 @@ fn authenticate_lrp_rejects_wrong_auth_mode() {
 
     let mut transport = TestTransport::new([
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
-        // AuthMode = 00h (not 01h) — PICC is not in LRP mode.
+        // AuthMode = 00h (not 01h) - PICC is not in LRP mode.
         Exchange::new(
             &hex_bytes("9071000008030602000000000000"),
             &hex_bytes("0056109A31977C855319CD4618C9D2AED2"),
@@ -236,7 +236,7 @@ fn authenticate_lrp_surfaces_picc_auth_error() {
     }
 }
 
-/// AN12196 §5.14, Table 23 — full `AuthenticateEV2NonFirst` transcript
+/// AN12196 §5.14, Table 23 - full `AuthenticateEV2NonFirst` transcript
 /// with Key 0x00. Drives `Session::authenticate_aes_non_first` against a
 /// mock PICC after establishing an AES session via `AuthenticateEV2First`
 /// (§5.6 vectors). Verifies that TI and CmdCtr are preserved from the
@@ -244,9 +244,9 @@ fn authenticate_lrp_surfaces_picc_auth_error() {
 #[test]
 fn authenticate_aes_non_first_an12196_table23_full_handshake() {
     let key = [0u8; 16];
-    // RndA for First — AN12196 §5.6 step 10.
+    // RndA for First - AN12196 §5.6 step 10.
     let rnd_a_first: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
-    // RndA for NonFirst — AN12196 §5.14 Table 23 step 10.
+    // RndA for NonFirst - AN12196 §5.14 Table 23 step 10.
     let rnd_a_non_first: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
 
     let mut transport = TestTransport::new([

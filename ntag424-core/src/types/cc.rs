@@ -332,7 +332,7 @@ impl CapabilityContainer {
     /// Replace the NDEF file's File Size.
     ///
     /// This is the file's **maximum capacity** (set at IC personalisation),
-    /// not its current payload length — writing into the file does **not**
+    /// not its current payload length - writing into the file does **not**
     /// change this value and neither should this builder. Use it only when
     /// rebuilding a CC for an IC configured with non-default sizes (e.g.
     /// after extending the NDEF file via `SetConfiguration` option `0Ah`).
@@ -523,7 +523,7 @@ mod tests {
             0x06, 0xE1, 0x05, 0x00, 0x80, 0x82, 0x83, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        // The CC length field says 23 bytes — parsing should use exactly that.
+        // The CC length field says 23 bytes - parsing should use exactly that.
         assert_eq!(&cc_file[..23], &NTAG424_DEFAULT_CC);
 
         let cc = CapabilityContainer::from_bytes(&cc_file[..23]).unwrap();

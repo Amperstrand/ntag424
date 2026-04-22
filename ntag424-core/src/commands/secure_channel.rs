@@ -4,10 +4,10 @@
 //! [`SecureChannel`] wraps a live [`Authenticated<S>`] and exposes the
 //! three `CommMode` framings the command layer needs:
 //!
-//! - `CommMode.Plain` — pass-through via [`SecureChannel::send_plain`];
+//! - `CommMode.Plain` - pass-through via [`SecureChannel::send_plain`];
 //!   `CmdCtr` stays put. Used inside an authenticated session for
 //!   `ISOSelectFile`, `ISOReadBinary`, etc.
-//! - `CommMode.MAC` — single-frame helper [`SecureChannel::send_mac`]
+//! - `CommMode.MAC` - single-frame helper [`SecureChannel::send_mac`]
 //!   appends `MACt` to the command, verifies the trailing `MACt` on
 //!   the response, and advances `CmdCtr`.
 //! - Chained `CommMode.MAC` commands (e.g. `GetVersion`, §10.5.2)
@@ -52,7 +52,7 @@ const MAX_RESPONSE_DATA: usize = MAX_APDU_BODY - MAC_LEN;
 
 /// Stack-allocated buffer returned by [`SecureChannel::send_mac`].
 ///
-/// Holds up to [`MAX_RESPONSE_DATA`] (247) bytes — the largest
+/// Holds up to [`MAX_RESPONSE_DATA`] (247) bytes - the largest
 /// MAC-stripped response body a short-APDU frame can carry.
 pub(crate) type MacResponse = ArrayVec<u8, MAX_RESPONSE_DATA>;
 
@@ -297,7 +297,7 @@ mod tests {
         state
     }
 
-    /// AN12196 §5.4 "Get File Settings" — CommMode.MAC worked example.
+    /// AN12196 §5.4 "Get File Settings" - CommMode.MAC worked example.
     /// Pins `compute_cmd_mac` to the published `MACt`.
     #[test]
     fn compute_cmd_mac_matches_get_file_settings_vector() {
@@ -376,7 +376,7 @@ mod tests {
         let mut state = authenticated_aes([0u8; 16], mac_key, [0x7A, 0x21, 0x08, 0x5E], 0);
 
         // Hand-build a plausible GetFileSettings response body + MAC.
-        // We don't need real NTAG data here — the test pins the
+        // We don't need real NTAG data here - the test pins the
         // MAC-framing contract, not file-settings semantics.
         let resp_data = hex_bytes("0040EEEE000100D1FE001F00");
         let resp_mac = {
@@ -418,7 +418,7 @@ mod tests {
     fn strip_m2_padding_edge_cases() {
         // Normal: data || 0x80 || 0x00..
         assert_eq!(strip_m2_padding(&[1, 2, 3, 0x80, 0, 0, 0, 0]), Some(3));
-        // Padding is exactly one 0x80 at the last boundary — a full
+        // Padding is exactly one 0x80 at the last boundary - a full
         // extra block of 0x80 00..00 appended to already-aligned data.
         assert_eq!(strip_m2_padding(&[0x80, 0, 0, 0, 0, 0, 0, 0]), Some(0));
         // No 0x80 → malformed.

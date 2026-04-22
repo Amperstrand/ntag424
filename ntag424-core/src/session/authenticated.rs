@@ -398,8 +398,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// Return the PICC's capabilities as observed during authentication.
     ///
     /// The last two bytes can be set with
-    /// (Configuration::with_pdcap2_5)[`crate::types::Configuration::with_pdcap2_5`] and
-    /// (Configuration::with_pdcap2_6)[`crate::types::Configuration::with_pdcap2_6`] respectively.
+    /// [`Configuration::with_pdcap2_5`](`crate::types::Configuration::with_pdcap2_5`) and
+    /// [`Configuration::with_pdcap2_6`](`crate::types::Configuration::with_pdcap2_6`) respectively.
     pub fn pcd_cap2(&self) -> &[u8; 6] {
         &self.state.auth_result.pcd_cap2
     }
@@ -422,6 +422,10 @@ impl Session<Authenticated<AesSuite>> {
     /// Consumes the authenticated AES session: enabling LRP tears down the
     /// secure channel on the PICC. The
     /// next authentication must be [`Session::authenticate_lrp`].
+    ///
+    /// LRP mode is a AES based cipher that is more resistent against side-channel attacks, but is
+    /// not supported by all NFC readers. Unauthenticated reads are _not_ affected by this.
+    /// This crate supports both AES and LRP mode.
     pub async fn enable_lrp<T: Transport>(
         mut self,
         transport: &mut T,

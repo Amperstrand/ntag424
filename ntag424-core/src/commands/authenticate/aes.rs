@@ -46,7 +46,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
     if !code.ok() {
         return Err(SessionError::ErrorResponse(code.status()));
     }
-    // Response is only 16 bytes — no TI or cap fields (p. 26: "TI is not
+    // Response is only 16 bytes - no TI or cap fields (p. 26: "TI is not
     // reset and not exchanged").
     let resp_enc: [u8; 16] =
         r2.data
@@ -174,7 +174,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
 
 /// Verify the 16-byte NonFirst Part 2 response and derive the new session suite.
 ///
-/// The response carries only `E(Kx, RndA')` — no TI, no cap fields (§10.4.2,
+/// The response carries only `E(Kx, RndA')` - no TI, no cap fields (§10.4.2,
 /// Table 34–35, p. 50). Verifies `rotate_right(RndA', 1) == RndA`, then
 /// derives the new [`AesSuite`] via the same KDF as First (§9.1.7).
 fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
@@ -211,7 +211,7 @@ mod tests {
     }
     impl core::error::Error for NeverError {}
 
-    /// AN12196 §6.10 — `AuthenticateEV2First` with key 0x03 (all-zero default
+    /// AN12196 §6.10 - `AuthenticateEV2First` with key 0x03 (all-zero default
     /// value). Verifies the Part 2 APDU bytes and TI extraction.
     #[test]
     fn part2_apdu_and_finish_an12196_key3() {
@@ -241,7 +241,7 @@ mod tests {
         // The full KDF is pinned by `crypto::suite::tests::aes_session_keys_an12196`.
     }
 
-    /// AN12196 §6.6 — `AuthenticateEV2First` with key 0x00.
+    /// AN12196 §6.6 - `AuthenticateEV2First` with key 0x00.
     #[test]
     fn part2_apdu_and_finish_an12196_key0() {
         let key = [0u8; 16];
@@ -278,7 +278,7 @@ mod tests {
         let mut rnd_b = rnd_b_enc;
         aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
 
-        // Flip one byte — any single-bit change propagates to the recovered RndA.
+        // Flip one byte - any single-bit change propagates to the recovered RndA.
         let mut resp_enc: [u8; 32] =
             hex_array("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663");
         resp_enc[20] ^= 0x01;
@@ -289,7 +289,7 @@ mod tests {
         }
     }
 
-    /// AN12196 §5.14, Table 23 (p. 36) — `AuthenticateEV2NonFirst` with key
+    /// AN12196 §5.14, Table 23 (p. 36) - `AuthenticateEV2NonFirst` with key
     /// 0x00 (all-zero). Verifies the Part 2 APDU bytes, RndA' check, and
     /// derived session keys.
     #[test]
@@ -303,7 +303,7 @@ mod tests {
 
         let rnd_a: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
 
-        // C-APDU2 data: E(K0, RndA || RndB') — the 32-byte ciphertext from Table 23.
+        // C-APDU2 data: E(K0, RndA || RndB') - the 32-byte ciphertext from Table 23.
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
             part2,
@@ -323,7 +323,7 @@ mod tests {
         assert_eq!(mac_key, hex_array("5529860B2FC5FB6154B7F28361D30BF9"));
     }
 
-    /// Real NTAG 424 DNA hardware — `AuthenticateEV2First` with Key 0
+    /// Real NTAG 424 DNA hardware - `AuthenticateEV2First` with Key 0
     /// (all-zero factory default). Verifies the Part 2 APDU bytes and
     /// TI extraction against an actual on-wire transcript.
     #[test]
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(auth_result.pcd_cap2, [0; 6]);
     }
 
-    /// Real NTAG 424 DNA hardware — `AuthenticateEV2NonFirst` with Key 0
+    /// Real NTAG 424 DNA hardware - `AuthenticateEV2NonFirst` with Key 0
     /// (all-zero factory default). Verifies the Part 2 APDU bytes,
     /// RndA' verification, and derived session keys against an actual
     /// on-wire transcript.

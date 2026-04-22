@@ -7,11 +7,11 @@
 /// are `E103h` (CC), `E104h` (NDEF), `E105h` (Proprietary).
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum File {
-    /// Capability Container file — SFID `01h`, File ID `E103h`, 32 bytes.
+    /// Capability Container file - SFID `01h`, File ID `E103h`, 32 bytes.
     CapabilityContainer,
-    /// NDEF file — SFID `02h`, File ID `E104h`, default 256 bytes.
+    /// NDEF file - SFID `02h`, File ID `E104h`, default 256 bytes.
     Ndef,
-    /// Proprietary file — SFID `03h`, File ID `E105h`, default 128 bytes.
+    /// Proprietary file - SFID `03h`, File ID `E105h`, default 128 bytes.
     Proprietary,
 }
 

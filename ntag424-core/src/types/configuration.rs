@@ -3,7 +3,7 @@
 
 use super::file_settings::Access;
 
-/// Builder for the `SetConfiguration` data payload.
+/// Builder for the [`Session::set_configuration`](`crate::Session::set_configuration`) argument.
 ///
 /// Each option (PICC, secure messaging, capability, Tag Tamper,
 /// failed-authentication counter, HW) is independent and only emitted on the
@@ -58,7 +58,7 @@ impl Configuration {
 
     /// Enable LRP (Leakage Resilient Primitive) mode (PDCap2.1 bit 1).
     ///
-    /// This change is **permanent** — once enabled, LRP cannot be disabled
+    /// This change is **permanent** - once enabled, LRP cannot be disabled
     /// (NT4H2421Gx §8, "After this switch, it is not possible to revert back
     /// to AES mode").
     ///

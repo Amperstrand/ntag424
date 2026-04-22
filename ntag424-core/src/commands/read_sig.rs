@@ -40,13 +40,13 @@ pub(crate) async fn read_sig<T: Transport>(
 /// next 16-byte AES-CBC boundary at 64 bytes.
 const READ_SIG_CT_LEN: usize = 64;
 
-/// `Read_Sig` inside an authenticated session — `CommMode.FULL` (§9.1.4).
+/// `Read_Sig` inside an authenticated session - `CommMode.FULL` (§9.1.4).
 ///
 /// Wire: `90 3C 00 00 09 00 <MACt(8)> 00`, response
 /// `<AES-CBC(sig || 80 00..00)(64 B)> <MACt(8)>` with SW `91 00` or
 /// `91 90`. Although Table 21 in older revisions of the spec places
 /// `Read_Sig` in MAC mode, real PICCs return a 64-byte encrypted
-/// payload — i.e. Full mode — so the signature arrives ciphered with
+/// payload - i.e. Full mode - so the signature arrives ciphered with
 /// the response IV derived from `(TI, CmdCtr+1)`. The PICC also
 /// answers with `91 90` (the AN12196 §7 Table 30 "by example" status)
 /// rather than `91 00` in both Plain and MAC frames, so both are
@@ -108,7 +108,7 @@ mod tests {
     /// Authenticated `Read_Sig` round-trip. Uses the AN12196 §5.6 key 0
     /// session material and a plausible 56-byte signature; both the
     /// request command-MAC and the encrypted response payload + MAC are
-    /// derived here from the very same `AesSuite` implementation — the
+    /// derived here from the very same `AesSuite` implementation - the
     /// spec gives no worked authenticated `Read_Sig` example. Pinning
     /// `CommMode.FULL` framing (encrypted sig with ISO 9797-1 Method 2
     /// padding, then MAC over the ciphertext).
@@ -117,7 +117,7 @@ mod tests {
         let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
         let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
         let ti = [0x9D, 0x00, 0xC4, 0xDF];
-        // The signature bytes are opaque to this test — any 56 distinct
+        // The signature bytes are opaque to this test - any 56 distinct
         // bytes work; ECDSA verification is exercised elsewhere.
         let sig: Vec<u8> = (0..56u8).collect();
         let suite = AesSuite::from_keys(enc_key, mac_key);
@@ -222,7 +222,7 @@ mod tests {
 
     /// Replay a hardware-captured `ReadSig` in plain mode (AES tag).
     ///
-    /// No session state required — CommMode.Plain returns the 56-byte ECC
+    /// No session state required - CommMode.Plain returns the 56-byte ECC
     /// signature directly. SW2 = 0x90 is an NTAG-specific status code for
     /// this command. UID = 04A9707A0B1090.
     #[test]

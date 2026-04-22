@@ -3,10 +3,10 @@
 //! The chip supports two Secure Messaging modes that share protocol framing
 //! but differ in their cryptographic primitive (NT4H2421Gx §9):
 //!
-//! - **AES Secure Messaging** (§9.1) — AES-128 CMAC for integrity, AES-128
+//! - **AES Secure Messaging** (§9.1) - AES-128 CMAC for integrity, AES-128
 //!   CBC for confidentiality. The CBC IV is rebuilt from `(TI, CmdCtr)` on
 //!   every message.
-//! - **LRP Secure Messaging** (§9.2) — Leakage Resilient Primitive (NXP
+//! - **LRP Secure Messaging** (§9.2) - Leakage Resilient Primitive (NXP
 //!   AN12304) in place of AES. `CMAC_LRP` for integrity, `LRICB` for
 //!   confidentiality with a stateful 32-bit `EncCtr` that persists across
 //!   messages.
@@ -48,16 +48,16 @@ impl Direction {
 ///
 /// Implemented by [`AesSuite`] (§9.1) and [`LrpSuite`] (§9.2). A suite owns
 /// the session keys `SesAuthMACKey` / `SesAuthENCKey` plus any mode-specific
-/// state — most notably the 32-bit LRP `EncCtr` that persists across
+/// state - most notably the 32-bit LRP `EncCtr` that persists across
 /// messages (§9.2.4). AES has no such counter: its CBC IV is rebuilt from
 /// scratch on every call.
 ///
 /// Protocol state that is **not** owned by the suite and must be supplied
 /// per call:
 ///
-/// - `ti: [u8; 4]` — Transaction Identifier (§9.1.1), set once by the
+/// - `ti: [u8; 4]` - Transaction Identifier (§9.1.1), set once by the
 ///   handshake and constant for the rest of the session.
-/// - `cmd_ctr: u16` — Command Counter (§9.1.2), incremented by the caller
+/// - `cmd_ctr: u16` - Command Counter (§9.1.2), incremented by the caller
 ///   between command and response.
 ///
 /// Both of these belong to the secure-messaging framing layer rather than
@@ -92,7 +92,7 @@ pub trait SessionSuite: Sized {
     /// Encrypt `buf` in place with the session ENC key.
     ///
     /// `buf.len()` must be a positive multiple of 16. Both modes use
-    /// ISO/IEC 9797-1 Method 2 padding — applying it is the caller's
+    /// ISO/IEC 9797-1 Method 2 padding - applying it is the caller's
     /// responsibility, since the padding rule is identical across suites.
     ///
     /// The AES suite rebuilds the CBC IV from `(dir, ti, cmd_ctr)` on
@@ -271,7 +271,7 @@ pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
 pub struct LrpSuite {
     mac_key: Lrp,
     enc_key: Lrp,
-    /// `EncCtr` per §9.2.4 — 32-bit unsigned integer, MSB-first on the
+    /// `EncCtr` per §9.2.4 - 32-bit unsigned integer, MSB-first on the
     /// wire. Reset to zero by [`Self::derive`] and advanced in place by
     /// [`Self::encrypt`] / [`Self::decrypt`].
     enc_ctr: u32,

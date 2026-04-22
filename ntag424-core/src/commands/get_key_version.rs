@@ -11,7 +11,7 @@ use crate::{
 /// and response is computed as per §9.1.9; `CmdCtr` advances on
 /// success. The returned byte is the current version of the targeted
 /// key (`00h` for disabled keys and for the OriginalityKey, full range
-/// otherwise — Table 67).
+/// otherwise - Table 67).
 pub(crate) async fn get_key_version<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -41,7 +41,7 @@ mod tests {
     /// published `GetKeyVersion` transcript, so the test reuses the
     /// §6.3 Table 28 session material (the same keys exercised by
     /// `GetCardUID`) and derives the expected command/response `MACt`
-    /// from `AesSuite::mac` — pinning the CommMode.MAC framing contract
+    /// from `AesSuite::mac` - pinning the CommMode.MAC framing contract
     /// (`MAC(Cmd || CmdCtr || TI || KeyNo)` on the command,
     /// `MAC(RC || CmdCtr+1 || TI || KeyVer)` on the response).
     #[test]

@@ -40,7 +40,7 @@ impl Exchange {
 
 /// FIFO [`Transport`] mock. Each [`Transport::transmit`] call pops the
 /// next queued [`Exchange`], asserts the APDU matches, and returns the
-/// canned response. A mismatch or an empty queue panics — both are
+/// canned response. A mismatch or an empty queue panics - both are
 /// programming errors in a test.
 pub(crate) struct TestTransport {
     exchanges: VecDeque<Exchange>,
@@ -102,7 +102,7 @@ impl Transport for TestTransport {
 /// Poll `fut` to completion on the current thread.
 ///
 /// The session layer's `async fn` bodies only `.await` the mock's futures,
-/// which resolve synchronously — so a single `poll` is always enough and
+/// which resolve synchronously - so a single `poll` is always enough and
 /// a `Pending` return would indicate a bug.
 pub(crate) fn block_on<F: Future>(fut: F) -> F::Output {
     let mut fut = pin!(fut);

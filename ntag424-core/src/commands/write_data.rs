@@ -1,16 +1,16 @@
-//! `WriteData` command — NT4H2421Gx §10.8.2.
+//! `WriteData` command - NT4H2421Gx §10.8.2.
 //!
 //! The command writes bytes to a StandardData file. Its CommMode is
 //! defined per file (§8.2.3.5, Table 13), so three framings are
 //! exposed here:
 //!
-//! - [`write_data_plain`] — no secure messaging. Used either without
+//! - [`write_data_plain`] - no secure messaging. Used either without
 //!   an authenticated session at all, or, per §8.2.3.3, inside an
 //!   authenticated session when the only satisfied access condition is
 //!   the free-access one (`Eh`).
-//! - [`write_data_mac`] — `CommMode.MAC` (§9.1.9): command gets an
+//! - [`write_data_mac`] - `CommMode.MAC` (§9.1.9): command gets an
 //!   8-byte `MACt` trailer, response is `MACt(8)` only (no data).
-//! - [`write_data_full`] — `CommMode.FULL` (§9.1.10): command data is
+//! - [`write_data_full`] - `CommMode.FULL` (§9.1.10): command data is
 //!   encrypted with ISO/IEC 9797-1 Method 2 padding, MAC'd, and the
 //!   response is `MACt(8)` only (no data).
 //!
@@ -123,7 +123,7 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     let body = channel
         .send_mac(transport, 0x8D, 0x00, 0x00, &header, data)
         .await?;
-    // WriteData response carries no encrypted data — only the MACt
+    // WriteData response carries no encrypted data - only the MACt
     // which send_mac already verified and stripped.
     if !body.is_empty() {
         return Err(SessionError::UnexpectedLength { got: body.len() });
@@ -134,7 +134,7 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
 /// `WriteData` in `CommMode.FULL` (§9.1.10).
 ///
 /// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) E(Data||pad) MACt(8) 00`.
-/// Response: `MACt(8)`, `91 00` — no encrypted data in the response
+/// Response: `MACt(8)`, `91 00` - no encrypted data in the response
 /// (§10.8.2 Table 82: "No response data").
 ///
 /// Encryption is applied to `CmdData` only (§9.1.10 Figure 9): the
@@ -197,7 +197,7 @@ pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    // Response is MACt(8) only — no encrypted RespData (§10.8.2 Table 82).
+    // Response is MACt(8) only - no encrypted RespData (§10.8.2 Table 82).
     channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! `ChangeKey` command — NT4H2421Gx §10.6.1, AN12196 §5.16.
+//! `ChangeKey` command - NT4H2421Gx §10.6.1, AN12196 §5.16.
 
 use crate::{
     Transport,
@@ -15,7 +15,7 @@ use crate::{
 ///
 /// NXP convention (consistent with the AN12196 §5.16.1 vector): the
 /// register is initialised to `0xFFFF_FFFF` but the final one's-complement
-/// is **not** applied — the raw residue is written into the stream
+/// is **not** applied - the raw residue is written into the stream
 /// little-endian (verified against Table 25 step 7: key
 /// `F3847D62…` → `789DFADC`).
 fn crc32(data: &[u8]) -> [u8; 4] {
@@ -72,7 +72,7 @@ pub(crate) async fn change_key<T: Transport, S: SessionSuite>(
 ///
 /// Authentication with key 0 is required before calling this. Plaintext
 /// layout (32 bytes after padding): `NewKey || KeyVer || 0x80 || 0x00*14`.
-/// The PICC responds with `91 00` only — there is no `MACt`. `CmdCtr` is
+/// The PICC responds with `91 00` only - there is no `MACt`. `CmdCtr` is
 /// advanced on success but the session keys are no longer valid for any
 /// further command and the caller must re-authenticate.
 pub(crate) async fn change_master_key<T: Transport, S: SessionSuite>(
@@ -115,7 +115,7 @@ async fn transmit<T: Transport, S: SessionSuite>(
     apdu[5] = key_no_byte;
     apdu[6..38].copy_from_slice(&plaintext);
     apdu[38..46].copy_from_slice(&mac);
-    // apdu[46] = 0x00 (Le) — already zero.
+    // apdu[46] = 0x00 (Le) - already zero.
 
     let resp = transport.transmit(&apdu).await?;
     let code = ResponseCode::desfire(resp.sw1, resp.sw2);
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn crc32_matches_an12196_case1_vector() {
         let new_key = hex_array::<16>("F3847D627727ED3BC9C4CC050489B966");
-        // Step 7: CRC32(NewKey) = 789DFADC — these are the literal stream bytes.
+        // Step 7: CRC32(NewKey) = 789DFADC - these are the literal stream bytes.
         assert_eq!(crc32(&new_key), hex_array("789DFADC"));
     }
 }

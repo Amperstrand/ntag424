@@ -5,7 +5,7 @@ use crate::{
 
 /// Response payload (MAC stripped): SDMReadCtr (3 B) + Reserved (2 B).
 const RESP_LEN: usize = 5;
-/// One AES block — Full-mode response when SDMCtrRet = Key(x) (§10.7.3).
+/// One AES block - Full-mode response when SDMCtrRet = Key(x) (§10.7.3).
 const FULL_CT_LEN: usize = 16;
 
 /// `GetFileCounters` (INS `F6h`, NT4H2421Gx §10.7.3).

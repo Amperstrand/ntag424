@@ -1,4 +1,4 @@
-//! `SetConfiguration` command — NT4H2421Gx §10.5.1, AN12196 §6, AN12321 §5.
+//! `SetConfiguration` command - NT4H2421Gx §10.5.1, AN12196 §6, AN12321 §5.
 
 use crate::{
     Transport,
@@ -14,7 +14,7 @@ const CMD: u8 = 0x5C;
 ///
 /// Authentication with the application master key (`Key0`) is required
 /// before calling this. Each option set on `configuration` is sent as its
-/// own APDU — `SetConfiguration` is single-option per command — in the
+/// own APDU - `SetConfiguration` is single-option per command - in the
 /// canonical order from Table 50: PICC, Secure Messaging, Capability,
 /// Tag Tamper, Failed-Auth-Counter, HW. `CmdCtr` advances by one per option on
 /// success.
@@ -63,7 +63,7 @@ async fn set_configuration_one<T: Transport, S: SessionSuite>(
     apdu[5] = option_id;
     apdu[6..22].copy_from_slice(&plaintext);
     apdu[22..30].copy_from_slice(&mac);
-    // apdu[30] = 0x00 (Le) — already zero.
+    // apdu[30] = 0x00 (Le) - already zero.
 
     let resp = transport.transmit(&apdu).await?;
     let code = ResponseCode::desfire(resp.sw1, resp.sw2);
@@ -72,7 +72,7 @@ async fn set_configuration_one<T: Transport, S: SessionSuite>(
     }
 
     // NT4H2421Gx §10.5.1 Table 51 and hardware both show the PICC returning
-    // just `9100` with no data bytes — no response MACt is appended.
+    // just `9100` with no data bytes - no response MACt is appended.
     // AN12196 §6.2 Table 27 (Option 00h) shows an 8-byte MACt so we still
     // verify it when present; on real hardware Option 05h (and likely others)
     // returns an empty body (AN12321 §5 Table 3, confirmed on hardware).
@@ -118,7 +118,7 @@ mod tests {
         suite.mac(&input)
     }
 
-    /// AN12196 §6.2 Table 27 — `SetConfiguration` Option `00h` (PICC) enabling
+    /// AN12196 §6.2 Table 27 - `SetConfiguration` Option `00h` (PICC) enabling
     /// Random UID. Full round-trip including the response `MACt` from step 20.
     #[test]
     fn set_configuration_random_uid_an12196_vector() {
@@ -127,10 +127,10 @@ mod tests {
         let enc_key = hex_array("7951A705F47F3C29B596454DC1490383");
         let ti = hex_array("D779B1D0");
 
-        // Step 16 — full C-APDU.
+        // Step 16 - full C-APDU.
         let expected_apdu =
             hex_bytes("905C000019008EA0138A7AF6FC8E99DF2A3A305602C43A7A3C9228C3134A00");
-        // Step 17 — R-APDU body (8-byte MACt from step 21) + 9100.
+        // Step 17 - R-APDU body (8-byte MACt from step 21) + 9100.
         let resp_body = hex_bytes("86044208CAD1676A");
 
         let mut transport =
@@ -148,8 +148,8 @@ mod tests {
         assert_eq!(transport.remaining(), 0);
     }
 
-    /// AN12321 §5 Table 3 — `SetConfiguration` Option `05h` (Capability) enabling
-    /// LRP. The published table shows `9100` with no data bytes — confirmed on
+    /// AN12321 §5 Table 3 - `SetConfiguration` Option `05h` (Capability) enabling
+    /// LRP. The published table shows `9100` with no data bytes - confirmed on
     /// hardware. The C-APDU bytes are pinned against step 27.
     #[test]
     fn set_configuration_enable_lrp_an12321_vector() {
@@ -158,7 +158,7 @@ mod tests {
         let enc_key = hex_array("66A8CB93269DC9BC2885B7A91B9C697B");
         let ti = hex_array("ED56F6E6");
 
-        // Step 27 — full C-APDU.
+        // Step 27 - full C-APDU.
         let expected_apdu =
             hex_bytes("905C0000190541B2BA963075730426D0858D2AA6C4982F579E77FAB49F8300");
         // R-APDU: 9100 with no data bytes (AN12321 §5 Table 3, confirmed on hardware).
@@ -173,7 +173,7 @@ mod tests {
         })
         .expect("SetConfiguration enable-LRP must succeed");
 
-        // Step 28 — CmdCtr advanced to 1.
+        // Step 28 - CmdCtr advanced to 1.
         assert_eq!(state.counter(), 1);
         assert_eq!(transport.remaining(), 0);
     }
@@ -211,11 +211,11 @@ mod tests {
         let enc_key = hex_array("7951A705F47F3C29B596454DC1490383");
         let ti = hex_array("D779B1D0");
 
-        // First APDU: PICC (RandomID), CmdCtr = 0 — bit-identical to AN12196.
+        // First APDU: PICC (RandomID), CmdCtr = 0 - bit-identical to AN12196.
         let apdu_picc = hex_bytes("905C000019008EA0138A7AF6FC8E99DF2A3A305602C43A7A3C9228C3134A00");
         let resp_picc = hex_bytes("86044208CAD1676A");
 
-        // Second APDU: Capability (LRP), CmdCtr = 1 — derive everything from
+        // Second APDU: Capability (LRP), CmdCtr = 1 - derive everything from
         // the same session keys so the test pins the iteration contract,
         // not arbitrary ciphertext bytes.
         let (apdu_cap, resp_cap) = synthesise_set_config_apdu(

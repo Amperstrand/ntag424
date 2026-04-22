@@ -168,7 +168,7 @@ impl Lrp {
     }
 
     /// In-place `LRICBEnc` without padding (AN12304 §3.3). `buf.len()` must
-    /// be a positive multiple of 16 — any ISO/IEC 9797‑1 Method 2 padding
+    /// be a positive multiple of 16 - any ISO/IEC 9797‑1 Method 2 padding
     /// must be applied by the caller. `counter` is advanced in place by one
     /// per processed block, matching the NTAG 424 DNA `EncCtr` rule.
     ///

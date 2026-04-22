@@ -40,7 +40,7 @@ mod tests {
     use crate::testing::{Exchange, TestTransport, block_on, hex_array, hex_bytes};
     use alloc::vec::Vec;
 
-    /// AN12196 §6.3 Table 28 — full `GetCardUID` round-trip.
+    /// AN12196 §6.3 Table 28 - full `GetCardUID` round-trip.
     ///
     /// All values are taken verbatim from the application note (step numbers
     /// refer to Table 28). The test pins the full CommMode.FULL framing:

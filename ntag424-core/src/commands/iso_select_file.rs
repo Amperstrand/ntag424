@@ -14,7 +14,7 @@ const MAX_DF_NAME_LEN: usize = 16;
 /// Uses `ISOSelectFile` (NT4H2421Gx §10.9.1, `CLA=00 INS=A4 P1=04
 /// P2=00`).
 ///
-/// Panics if `df_name` is empty or longer than 16 bytes — the only
+/// Panics if `df_name` is empty or longer than 16 bytes - the only
 /// in-tree callers pass fixed, known-good constants.
 pub(crate) async fn iso_select_df_by_name<T: Transport>(
     transport: &mut T,
@@ -55,7 +55,7 @@ pub(crate) async fn iso_select_ef_by_fid<T: Transport>(
     file_id: u16,
 ) -> Result<(), SessionError<T::Error>> {
     let fid = file_id.to_be_bytes();
-    // 00 A4 00 0C 02 <FID_HI> <FID_LO>  — no Le (P2=0Ch suppresses response)
+    // 00 A4 00 0C 02 <FID_HI> <FID_LO>  - no Le (P2=0Ch suppresses response)
     let apdu = [0x00, 0xA4, 0x00, 0x0C, 0x02, fid[0], fid[1]];
     let r = transport.transmit(&apdu).await?;
     let code = ResponseCode::iso(r.sw1, r.sw2);

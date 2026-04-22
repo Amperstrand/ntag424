@@ -1,4 +1,4 @@
-//! `ISOUpdateBinary` command — NT4H2421Gx §10.9.3.
+//! `ISOUpdateBinary` command - NT4H2421Gx §10.9.3.
 //!
 //! ISO/IEC 7816-4 `UPDATE BINARY` (`CLA=00 INS=D6`). The command is
 //! always `CommMode.Plain`: §10.9.3 explicitly states "the command is
@@ -25,19 +25,19 @@ const ISO_UPDATE_BINARY_MAX: usize = 255;
 
 /// Write file bytes with `ISOUpdateBinary`.
 ///
-/// `CLA=00 INS=D6`, NT4H2421Gx §10.9.3. `CommMode.Plain` only — no
+/// `CLA=00 INS=D6`, NT4H2421Gx §10.9.3. `CommMode.Plain` only - no
 /// secure-messaging variant exists.
 ///
 /// Addressing follows ISO/IEC 7816-4 §5.1.2.1, identical to
 /// `ISOReadBinary` (§10.9.2 Table 87, field `P1`):
 ///
-/// - `short_file_id = None` — write to the currently-selected EF.
+/// - `short_file_id = None` - write to the currently-selected EF.
 ///   `P1-P2` (15 bits) encode `offset`, so `offset ≤ 0x7FFF`.
-/// - `short_file_id = Some(0x01..=0x1E)` — select and target the EF
+/// - `short_file_id = Some(0x01..=0x1E)` - select and target the EF
 ///   referenced by the short ISO FileID. `P1[7]=1`, `P1[4..0]=SFID`,
 ///   and `P2` carries an 8-bit `offset` (`0..=0xFF`).
 ///
-/// The PICC response carries no data — only `SW1 SW2` (`9000h` on
+/// The PICC response carries no data - only `SW1 SW2` (`9000h` on
 /// success).
 ///
 /// Panics if `data` is empty or exceeds 255 bytes, if

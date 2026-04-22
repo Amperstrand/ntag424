@@ -39,9 +39,11 @@
 //!
 //! The stored AES keys are all constant zero out of the factory and should _all_ be replaced before deployment.
 //!
-//! ## _Secure Unique NFC_ (SUN)
+//! ## _Secure Unique NFC_ (SUN) using _Secure Dynamic Messaging_ (SDM)
 //!
 //! The NDEF file can define placeholders that are dynamically filled by the tag when read.
+//! This is called _Secure Dynamic Messaging_ (SDM) and is configured through the [file settings](`crate::Session::change_file_settings`)
+//! of the NDEF file.
 //! Typically the NDEF encodes a URL with placeholders for the tag's unique identifier,
 //! and counter, usually encrypted and signed using one of the application keys,
 //! as well as a [MAC](https://en.wikipedia.org/wiki/Message_authentication_code).
@@ -62,17 +64,19 @@
 //! - Generate and store strong random keys for all five application keys. You may use [key diversification](`key_diversification`)
 //!   to derive keys from a single master key if needed. Access to those keys should be carefully
 //!   controlled.
-//! - Review the [tag configuration](`crate::types::Configuration`) and decide on whether
-//!   to [enable LRP mode](`crate::Session::enable_lrp`)[^2]. *Attention*: enabling LRP mode is a
-//!   permanent change.
+//! - Review the [tag configuration](`crate::types::Configuration`).
 //! - If SUN identifiers are needed, prepare the NDEF file:
-//!   - Write the NDEF file with the desired template, e.g. a URL with placeholders.
+//!   - Write the NDEF file with the desired template, e.g. a URL with placeholders. Maybe
+//!     the [`sdm_url_config!`] macro can be used.
 //!   - Enable SDM via the [file settings](`crate::Session::change_file_settings`) for the NDEF file,
 //!     also configure the file permissions and cryptographic settings in this step.
 //! - Prepare the proprietary file if needed, write an initial content, and configure the file's
 //!   permissions.
 //!
+//!
 //! ## Example
+//!
+//! TODO: add full provisioning example here, with the macro call for NDEF, and file change call
 //!
 //! ```
 //! use ntag424_core::{Session, types::KeyNumber};
@@ -177,7 +181,7 @@
 //!
 //! Recommendations if binary size is a concern:
 //!
-//! 1. **Skip originality verification.** The (`Session::verify_originality`)[`crate::Session::verify_originality`]
+//! 1. **Skip originality verification.** The [`Session::verify_originality`](`crate::Session::verify_originality`)
 //!    function pulls in `p224` + `crypto-bigint` + `sha2` (~150 KB pre-link).
 //!    If you do not need to verify originality,
 //!    simply do not call this function and the linker has a chance to remove the related code.
@@ -211,9 +215,6 @@
 //! _Not tags were harmed during development of this crate._
 //!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
-//! [^2]: LRP mode is a AES based cipher that is more resistent against side-channel attacks, but is
-//! not supported by all NFC readers. Unauthenticated reads are _not_ affected by this.
-//! This crate supports both AES and LRP mode.
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -259,12 +260,15 @@ pub mod sdm {
 }
 
 #[cfg(feature = "sdm")]
-/// Build SDM URL configuration for provisioning.
+/// Create SDM configuration from a URL template string.
 ///
-/// Returns `(&'static [u8], &'static Sdm)`.
+/// The NDEF is computed at compile time.
+/// Invalid templates fail during compilation.
 ///
-/// Invalid templates fail during compilation. It is intended for compile-time
+/// Its intended usage is for
 /// provisioning data that will be written to a tag at runtime.
+///
+/// See [`sdm_url_config`](`crate::sdm::sdm_url_config`) function for details.
 ///
 /// Two forms are supported:
 ///

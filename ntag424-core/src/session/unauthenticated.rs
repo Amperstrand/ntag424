@@ -49,7 +49,7 @@ impl Session<Unauthenticated> {
     ///
     /// The command is using plain mode.
     /// Read access on the targeted file must
-    /// be set to (free access)[`crate::types::file_settings::AccessCondition::Free`] for the call to succeed.
+    /// be set to [free access](`crate::types::file_settings::Access::Free`) for the call to succeed.
     ///
     /// For files with other access conditions, authentication may be required and
     /// the caller should use [`Session::read_file_with_mode`].
@@ -80,7 +80,7 @@ impl Session<Unauthenticated> {
     ///
     /// The command is using plain mode.
     /// Write access on the targeted file
-    /// must be set to (free access)[`crate::types::file_settings::AccessCondition::Free`] for the call to succeed.
+    /// must be set to [free access](`crate::types::file_settings::Access::Free`) for the call to succeed.
     ///
     /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
     pub async fn write_file_unauthenticated<T: Transport>(
@@ -111,7 +111,7 @@ impl Session<Unauthenticated> {
     /// Read software, hardware and production version information.
     ///
     /// Uses plain mode communication. For authenticated sessions
-    /// there is also a (MAC mode variant available)[`Session::<Authenticated<_>>::get_version`].
+    /// there is also a [MAC mode variant available](`Session::<Authenticated<_>>::get_version`).
     pub async fn get_version<T: Transport>(
         &self,
         transport: &mut T,

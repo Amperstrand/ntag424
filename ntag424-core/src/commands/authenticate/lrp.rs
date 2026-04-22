@@ -69,7 +69,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
 
-    // Response: PICCResponse [16 bytes] only — no PICCData block unlike First
+    // Response: PICCResponse [16 bytes] only - no PICCData block unlike First
     // (Table 47, p. 54; §9.2.6: "TI is not reset and not exchanged").
     let picc_response: [u8; 16] =
         r2.data
@@ -184,7 +184,7 @@ fn build_part2_apdu(rnd_a: &[u8; 16], pcd_response: &[u8; 16]) -> [u8; 38] {
     apdu[4] = 0x20;
     apdu[5..21].copy_from_slice(rnd_a);
     apdu[21..37].copy_from_slice(pcd_response);
-    // apdu[37] = 0x00 (Le) — already zero
+    // apdu[37] = 0x00 (Le) - already zero
     apdu
 }
 
@@ -254,7 +254,7 @@ mod tests {
     }
     impl core::error::Error for NeverError {}
 
-    /// AN12321 §4, Table 2 — `AuthenticateLRPFirst` with key 0x03 (all-zero
+    /// AN12321 §4, Table 2 - `AuthenticateLRPFirst` with key 0x03 (all-zero
     /// default value). Verifies the Part 2 APDU bytes (RndA || PCDResponse),
     /// the PICCResponse MAC check, TI extraction, and `EncCtr = 1` post-auth.
     ///
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(auth_result.suite.enc_ctr(), 1);
     }
 
-    /// Real NTAG 424 DNA hardware — `AuthenticateLRPFirst` with Key 0
+    /// Real NTAG 424 DNA hardware - `AuthenticateLRPFirst` with Key 0
     /// (all-zero factory default). Verifies the Part 2 APDU bytes
     /// (RndA || PCDResponse), the PICCResponse MAC check, TI extraction,
     /// and `EncCtr = 1` post-auth against an actual on-wire transcript.
