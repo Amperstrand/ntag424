@@ -173,6 +173,27 @@
 //! # }
 //! ```
 //!
+//! # Binary size
+//!
+//! Recommendations if binary size is a concern:
+//!
+//! 1. **Skip originality verification.** The (`Session::verify_originality`)[`crate::Session::verify_originality`]
+//!    function pulls in `p224` + `crypto-bigint` + `sha2` (~150 KB pre-link).
+//!    If you do not need to verify originality,
+//!    simply do not call this function and the linker has a chance to remove the related code.
+//!
+//! 2. **Enable LTO.** Add to your `.cargo/config.toml` or `Cargo.toml`:
+//!    ```toml
+//!    [profile.release]
+//!    lto = true
+//!    opt-level = "s"   # or "z" for smallest
+//!    codegen-units = 1
+//!    ```
+//!    These settings are what make dead-code elimination effective across crate boundaries.
+//!
+//! 3. **Disable the `alloc` feature** if you have no heap. The feature only gates `Vec`-returning
+//!    wrappers; all core protocol logic and the `*_into` in-place variants remain available.
+//!
 //! # Sources
 //!
 //! The following sources were used to implement this crate:
