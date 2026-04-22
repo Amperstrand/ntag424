@@ -1,12 +1,14 @@
-//! File settings payloads for the `ChangeFileSettings` and `GetFileSettings`
-//! commands.
+//! File settings for [`Session::get_file_settings`](`crate::Session::get_file_settings`)
+//! and [`Session::change_file_settings`](`crate::Session::change_file_settings`).
 //!
-//! See NT4H2421Gx §10.7.1, §10.7.2; access-rights nibble layout per
-//! §8.2.3.3, Tables 6 and 7; CommMode encoding per Table 22.
+//! [`FileSettingsView`] is the decoded result returned by
+//! [`Session::get_file_settings`](`crate::Session::get_file_settings`).
+//! [`FileSettingsPatch`] is the update input for
+//! [`Session::change_file_settings`](`crate::Session::change_file_settings`).
+//! [`Sdm`] holds Secure Dynamic Messaging configuration; construct it via [`Sdm::try_new`].
 //!
-//! [`FileSettingsView`] is the decode result from `GetFileSettings`.
-//! [`FileSettingsPatch`] is the encode input for `ChangeFileSettings`.
-//! [`Sdm`] holds SDM configuration; construct it via [`Sdm::try_new`].
+//! Wire format references: NT4H2421Gx §10.7.1, §10.7.2; access-rights nibble layout
+//! per §8.2.3.3, Tables 6 and 7; CommMode encoding per Table 22.
 
 use core::fmt;
 
@@ -14,10 +16,12 @@ use thiserror::Error;
 
 use crate::types::KeyNumber;
 
-/// File type identifier (NT4H2421Gx §10.7.2, Table 73).
+/// File type identifier.
+///
+/// NT4H2421Gx §10.7.2, Table 73.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
-    /// `00h` - only file type currently defined for NTAG 424 DNA.
+    /// `00h` — only file type currently defined for NTAG 424 DNA.
     StandardData,
 }
 
@@ -30,7 +34,9 @@ impl FileType {
     }
 }
 
-/// Communication mode for a file (NT4H2421Gx §8.2.3, Table 22).
+/// Communication mode for a file (how data is protected on the wire).
+///
+/// NT4H2421Gx §8.2.3, Table 22.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommMode {
     /// `0Xb` - message in plaintext.
@@ -88,48 +94,48 @@ impl fmt::Display for NibbleSlot {
 /// Describes which pair of SDM placeholder regions overlapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlapKind {
-    /// UID and SDMReadCtr plain-mirror placeholders overlap.
+    /// UID and read counter plain-mirror placeholders overlap.
     UidAndRCtr,
     /// UID placeholder overlaps the tag tamper status placeholder.
     UidAndTamper,
-    /// SDMReadCtr placeholder overlaps the tag tamper status placeholder.
+    /// Read counter placeholder overlaps the tag tamper status placeholder.
     RCtrAndTamper,
-    /// UID placeholder overlaps the SDMMAC placeholder.
+    /// UID placeholder overlaps the authentication MAC placeholder.
     UidAndMac,
-    /// SDMReadCtr placeholder overlaps the SDMMAC placeholder.
+    /// Read counter placeholder overlaps the authentication MAC placeholder.
     RCtrAndMac,
-    /// Tag tamper status placeholder overlaps the SDMMAC placeholder.
+    /// Tag tamper status placeholder overlaps the authentication MAC placeholder.
     TamperAndMac,
-    /// SDMENCFileData range overlaps the UID placeholder.
+    /// Encrypted file data range overlaps the UID placeholder.
     EncAndUid,
-    /// SDMENCFileData range overlaps the SDMReadCtr placeholder.
+    /// Encrypted file data range overlaps the read counter placeholder.
     EncAndRCtr,
-    /// Tag tamper status falls in the ciphertext half of SDMENCFileData.
+    /// Tag tamper status falls in the ciphertext half of the encrypted file data range.
     TamperInCiphertextHalf,
 }
 
 impl fmt::Display for OverlapKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::UidAndRCtr => "UID placeholder overlaps SDMReadCtr placeholder",
+            Self::UidAndRCtr => "UID placeholder overlaps read counter placeholder",
             Self::UidAndTamper => "UID placeholder overlaps tag tamper status",
-            Self::RCtrAndTamper => "SDMReadCtr placeholder overlaps tag tamper status",
-            Self::UidAndMac => "UID placeholder overlaps SDMMAC",
-            Self::RCtrAndMac => "SDMReadCtr placeholder overlaps SDMMAC",
-            Self::TamperAndMac => "tag tamper status overlaps SDMMAC",
-            Self::EncAndUid => "SDMENCFileData range overlaps UID placeholder",
-            Self::EncAndRCtr => "SDMENCFileData range overlaps SDMReadCtr placeholder",
+            Self::RCtrAndTamper => "read counter placeholder overlaps tag tamper status",
+            Self::UidAndMac => "UID placeholder overlaps authentication MAC",
+            Self::RCtrAndMac => "read counter placeholder overlaps authentication MAC",
+            Self::TamperAndMac => "tag tamper status overlaps authentication MAC",
+            Self::EncAndUid => "encrypted file data range overlaps UID placeholder",
+            Self::EncAndRCtr => "encrypted file data range overlaps read counter placeholder",
             Self::TamperInCiphertextHalf => {
-                "tag tamper status in ciphertext half of SDMENCFileData"
+                "tag tamper status in ciphertext half of encrypted file data"
             }
         })
     }
 }
 
-/// Identifies the SDM/file-option byte that contained reserved bits.
+/// Identifies which option byte in the file settings contained reserved bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReservedByte {
-    /// `FileOption` byte in `GetFileSettings` / `ChangeFileSettings`.
+    /// `FileOption` byte in file settings.
     FileOption,
     /// `SDMOptions` byte.
     SdmOptions,
@@ -147,7 +153,9 @@ impl fmt::Display for ReservedByte {
     }
 }
 
-/// Access condition nibble (NT4H2421Gx §8.2.3.3, Table 7).
+/// Access condition for a file permission slot.
+///
+/// NT4H2421Gx §8.2.3.3, Table 7.
 ///
 /// Used for file-level access rights (Read, Write, ReadWrite, Change).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,10 +199,10 @@ impl Access {
     }
 }
 
-/// Access right for `SDMCtrRet` (controls who may call
-/// [`get_file_counters()`](`crate::Session::get_file_counters`)).
+/// Access right controlling who may retrieve the SDM read counter via
+/// [`Session::get_file_counters`](`crate::Session::get_file_counters`).
 ///
-/// Same nibble encoding as [`Access`] but represents the SDMCtrRet field.
+/// Uses the same nibble encoding as [`Access`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtrRetAccess {
     Key(KeyNumber),
@@ -230,9 +238,11 @@ impl CtrRetAccess {
     }
 }
 
-/// Set of four access conditions (NT4H2421Gx §8.2.3.3, Table 7).
+/// Set of four access conditions for a file.
 ///
-/// Encoded on the wire as 2 bytes little-endian: `u16` value
+/// Encodes `Read`, `Write`, `ReadWrite`, and `Change` permissions.
+///
+/// NT4H2421Gx §8.2.3.3, Table 7. Wire format: 2 bytes little-endian,
 /// `(Read << 12) | (Write << 8) | (ReadWrite << 4) | Change`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessRights {
@@ -262,11 +272,10 @@ impl AccessRights {
     }
 }
 
-/// Key used for `SDMFileRead` (session key derivation, MAC, optional ENC).
+/// Key used for SDM file-read operations (MAC generation and optional file data encryption).
 ///
-/// Only `Key(KeyNumber)` is valid - `Free` and `NoAccess` are not permitted
-/// for `SDMFileRead`. The absence of a file-read key is represented by
-/// `file_read: None` on [`Sdm`].
+/// Only a specific key number is valid; `Free` and `NoAccess` are not permitted here.
+/// The absence of a file-read key is represented by `file_read: None` on [`Sdm`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileReadKey(KeyNumber);
 
@@ -280,7 +289,7 @@ impl FileReadKey {
     }
 }
 
-/// 24-bit byte offset into the NDEF file.
+/// A 24-bit byte offset into a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offset(u32);
 
@@ -299,16 +308,17 @@ impl Offset {
     }
 }
 
-/// ASCII placeholder length for `SDMENCFileData`.
+/// Placeholder length for the encrypted file data region.
 ///
-/// Must be a positive multiple of 32 (NT4H2421Gx Table 69, `SDMENCLength`).
+/// Must be a positive multiple of 32. The tag encrypts the first half of this
+/// range; the second half is the ciphertext written into the file.
 ///
-/// The tag encrypts the first half of this range as plaintext bytes.
+/// NT4H2421Gx Table 69, `SDMENCLength`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncLength(u32);
 
 impl EncLength {
-    /// Create an `EncLength`. Returns `Err` if `v == 0`, `v % 32 != 0`, or `v > 0x00FF_FFFF`.
+    /// Create an [`EncLength`]. Returns `Err` if `v == 0`, `v % 32 != 0`, or `v > 0x00FF_FFFF`.
     pub const fn new(v: u32) -> Result<Self, FileSettingsError> {
         if v == 0 || !v.is_multiple_of(32) || v > 0x00FF_FFFF {
             Err(FileSettingsError::EncLengthInvalid(v))
@@ -322,29 +332,31 @@ impl EncLength {
     }
 }
 
-/// Features associated with `SDMReadCtr` mirroring.
+/// Features associated with read counter mirroring.
 ///
-/// Embedded in the `RCtr`-bearing variants of [`PlainMirror`] and
-/// [`EncryptedContent`]; not present when only the UID is mirrored.
+/// Embedded in variants of [`PlainMirror`] and [`EncryptedContent`] that
+/// include the read counter; not present when only the UID is mirrored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadCtrFeatures {
-    /// `SDMReadCtrLimit` - how many unauthenticated reads are allowed.
+    /// Read counter limit.
     ///
-    /// `None` means unlimited (sentinel `0x00FF_FFFF` on the wire).
+    /// `None` means unlimited. When `Some(n)`, unauthenticated SDM reads are
+    /// permitted only while the counter is below `n`.
     pub limit: Option<u32>,
-    /// Who may call [`get_file_counters`](`crate::Session::get_file_counters`) (`SDMCtrRet`).
+    /// Who may retrieve the read counter via
+    /// [`Session::get_file_counters`](`crate::Session::get_file_counters`).
     pub ret_access: CtrRetAccess,
 }
 
-/// `SDMReadCtr` mirror: file offset and associated features.
+/// File offset and features for read counter mirroring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReadCtrMirror {
-    /// Start of the 6-byte ASCII `SDMReadCtr` placeholder.
+    /// Start of the 6-byte ASCII read counter placeholder.
     pub offset: Offset,
     pub features: ReadCtrFeatures,
 }
 
-/// Plain (ASCII hex) mirroring of PICC metadata into the file.
+/// Plain ASCII hex mirroring of tag identity data into the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlainMirror {
     /// Only the 7-byte UID (14 ASCII chars) is mirrored.
@@ -374,7 +386,7 @@ impl PlainMirror {
     }
 }
 
-/// Content of the encrypted `PICCData` blob.
+/// Content of the encrypted tag identity data blob (PICCData).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncryptedContent {
     /// Only the UID is inside the encrypted blob.
@@ -402,18 +414,18 @@ impl EncryptedContent {
     }
 }
 
-/// How `PICCData` (UID and/or `SDMReadCtr`) is mirrored into the file.
+/// How the tag identity data (UID and/or read counter) is mirrored into the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PiccData {
-    /// No PICC metadata mirrored.
+    /// No tag identity data mirrored.
     None,
-    /// UID and/or `SDMReadCtr` mirrored as plain ASCII hex.
+    /// UID and/or read counter mirrored as plain ASCII hex.
     Plain(PlainMirror),
-    /// UID and/or `SDMReadCtr` mirrored inside an encrypted `PICCData` blob.
+    /// UID and/or read counter mirrored inside an encrypted tag identity data blob.
     Encrypted {
-        /// AppKey used for `SDMMetaRead` (PICCData decryption).
+        /// AppKey used for decryption of the identity data blob (`SDMMetaRead`).
         key: KeyNumber,
-        /// Start of the encrypted PICCData placeholder.
+        /// Start of the encrypted identity data placeholder.
         offset: Offset,
         content: EncryptedContent,
     },
@@ -442,7 +454,7 @@ impl PiccData {
         )
     }
 
-    /// `SDMReadCtrLimit` value, if any RCtr-bearing mirror is configured.
+    /// Read counter limit, if any counter-bearing mirror is configured.
     pub const fn read_ctr_limit(&self) -> Option<u32> {
         match self {
             Self::Plain(PlainMirror::RCtr { read_ctr } | PlainMirror::Both { read_ctr, .. }) => {
@@ -456,7 +468,7 @@ impl PiccData {
         }
     }
 
-    /// `SDMCtrRet` access right, defaulting to `NoAccess` when no RCtr is mirrored.
+    /// `SDMCtrRet` access right, defaulting to `NoAccess` when no read counter is mirrored.
     const fn ctr_ret(&self) -> CtrRetAccess {
         match self {
             Self::Plain(PlainMirror::RCtr { read_ctr } | PlainMirror::Both { read_ctr, .. }) => {
@@ -471,18 +483,18 @@ impl PiccData {
     }
 }
 
-/// MAC input/output window for `SDMMAC`.
+/// MAC input window for the SDM authentication code.
 ///
 /// `input.get() ≤ mac.get()` is checked by [`Sdm::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacWindow {
-    /// First byte covered by `SDMMAC`.
+    /// First byte of file data covered by the authentication MAC.
     pub input: Offset,
-    /// Start of the 16-byte ASCII `SDMMAC` placeholder.
+    /// Start of the 16-byte ASCII authentication MAC placeholder.
     pub mac: Offset,
 }
 
-/// `SDMENCFileData` placeholder range.
+/// Encrypted file data placeholder range.
 ///
 /// This range must lie within the MAC window (checked by [`Sdm::try_new`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -493,12 +505,12 @@ pub struct EncFileData {
     pub length: EncLength,
 }
 
-/// `SDMFileRead` configuration: MAC key, window, and optional ENC file data.
+/// SDM file-read configuration: MAC key, window, and optional encrypted file data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileRead {
-    /// `SDMMAC` only - no `SDMENCFileData`.
+    /// Authentication MAC only — no encrypted file data.
     MacOnly { key: FileReadKey, window: MacWindow },
-    /// `SDMMAC` plus `SDMENCFileData`.
+    /// Authentication MAC plus encrypted file data.
     ///
     /// Requires [`PiccData::Encrypted`] with [`EncryptedContent::Both`],
     /// or [`PiccData::Plain`] with [`PlainMirror::Both`].
@@ -541,25 +553,26 @@ const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
     !(a + a_len <= b || b + b_len <= a)
 }
 
-/// Secure Dynamic Messaging configuration (NT4H2421Gx §9.3, §10.7.1 Table 69).
-///
-/// Construct via [`Sdm::try_new`].
+/// Secure Dynamic Messaging (SDM) configuration for a file.
 ///
 /// SDM lets the tag deliver authenticated, replay-protected dynamic content
-/// to readers that have **not** authenticated - typically an NDEF URL with a
-/// fresh UID, monotonically increasing `SDMReadCtr`, optional encrypted file
-/// data (`SDMENCFileData`), and a truncated CMAC (`SDMMAC`).
+/// to readers that have **not** authenticated — typically an NDEF URL containing
+/// a fresh UID, a monotonically increasing read counter, optional encrypted file
+/// data, and a truncated authentication MAC.
 ///
-/// You may use [`SecureDynamicMessageVerifier`](`crate::sdm::SecureDynamicMessageVerifier`)
-/// to verify and parse the SDM content given a configuration and keys,
-/// and [`sdm_url_config!`](`crate::sdm_url_config!`) as a convenience method
-/// to create the NDEF and configuration using a template.
+/// Construct via [`Sdm::try_new`]. Use
+/// [`SecureDynamicMessageVerifier`](`crate::sdm::SecureDynamicMessageVerifier`)
+/// to verify and parse the SDM content on the server side, or
+/// [`sdm_url_config!`](`crate::sdm_url_config!`) as a convenience to build
+/// the NDEF URL and configuration together from a template.
 ///
-/// Mirror placeholders in the NDEF URL are ASCII hex strings; their widths are:
-/// UID = 14, SDMReadCtr = 6, TT status = 2, SDMMAC = 16 chars.
-/// PICCData (encrypted) width is mode-dependent (32 AES / 48 LRP) and is
-/// therefore **not** overlap-checked here - callers must ensure the PICCData
-/// placeholder does not overlap with others.
+/// Mirror placeholders in the NDEF file are ASCII hex strings; their byte widths are:
+/// UID = 14, read counter = 6, tag tamper status = 2, authentication MAC = 16.
+/// The encrypted identity data blob width depends on the crypto suite (32 bytes for AES,
+/// 48 for LRP) and is **not** overlap-checked here — callers must ensure it does not
+/// overlap with other placeholders.
+///
+/// NT4H2421Gx §9.3, §10.7.1 Table 69.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sdm {
     picc_data: PiccData,
@@ -568,7 +581,7 @@ pub struct Sdm {
 }
 
 impl Sdm {
-    /// Returns the `PICCData` mirror configuration.
+    /// Returns the tag identity data (PICCData) mirror configuration.
     pub const fn picc_data(self) -> PiccData {
         self.picc_data
     }
@@ -587,14 +600,15 @@ impl Sdm {
     ///
     /// Checks:
     /// - `window.input ≤ window.mac`
-    /// - (`MacAndEnc`): ENC range lies within the MAC window
-    /// - (`MacAndEnc`): `picc_data` includes both UID and RCtr
-    /// - pairwise non-overlap between plain UID, plain RCtr, TT status,
-    ///   SDMMAC, and SDMENCFileData placeholders (NT4H2421Gx Table 71).
-    ///   Overlap with the encrypted PICCData blob is **not** checked here
-    ///   because its width depends on the crypto suite (AES vs LRP).
-    /// - (`MacAndEnc`): `tamper_status`, if inside the ENC range,
-    ///   must be in the plaintext half
+    /// - (`MacAndEnc`): encrypted file data range lies within the MAC window
+    /// - (`MacAndEnc`): `picc_data` includes both UID and read counter
+    /// - pairwise non-overlap between plain UID, plain read counter, tag tamper
+    ///   status, authentication MAC, and encrypted file data placeholders
+    ///   (NT4H2421Gx Table 71). Overlap with the encrypted identity data blob
+    ///   is **not** checked here because its size depends on the crypto suite
+    ///   (32 bytes for AES, 48 for LRP).
+    /// - (`MacAndEnc`): `tamper_status`, if inside the encrypted file data range,
+    ///   must fall entirely within the plaintext half
     pub const fn try_new(
         picc_data: PiccData,
         file_read: Option<FileRead>,
@@ -713,8 +727,10 @@ impl Sdm {
     }
 }
 
-/// Decoded result of a `GetFileSettings` response (NT4H2421Gx §10.7.2,
-/// Table 73).
+/// File settings as returned by
+/// [`Session::get_file_settings`](`crate::Session::get_file_settings`).
+///
+/// NT4H2421Gx §10.7.2, Table 73.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsView {
     pub file_type: FileType,
@@ -726,8 +742,10 @@ pub struct FileSettingsView {
 }
 
 impl FileSettingsView {
-    /// Decode a `GetFileSettings` response payload (data after secure-messaging
-    /// frame is stripped and before the `SW1SW2` status word).
+    /// Decode a raw `GetFileSettings` response payload.
+    ///
+    /// The payload is the data after the secure-messaging frame has been
+    /// stripped and before the `SW1SW2` status word.
     pub fn decode(buf: &[u8]) -> Result<Self, FileSettingsError> {
         let mut r = Cursor::new(buf);
         let file_type = FileType::from_byte(r.u8()?)?;
@@ -947,7 +965,8 @@ impl FileSettingsView {
         })
     }
 
-    /// Convert to a [`FileSettingsPatch`] suitable for `ChangeFileSettings`.
+    /// Convert to a [`FileSettingsPatch`] suitable for
+    /// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
     pub fn into_patch(self) -> FileSettingsPatch {
         FileSettingsPatch {
             comm_mode: self.comm_mode,
@@ -957,9 +976,12 @@ impl FileSettingsView {
     }
 }
 
-/// Input for `ChangeFileSettings` (NT4H2421Gx §10.7.1, Table 69).
+/// File settings update payload for
+/// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
 ///
-/// `FileType` and `FileSize` are omitted - they cannot be changed.
+/// `FileType` and file size are omitted — they cannot be changed.
+///
+/// NT4H2421Gx §10.7.1, Table 69.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsPatch {
     pub comm_mode: CommMode,
@@ -967,14 +989,14 @@ pub struct FileSettingsPatch {
     pub sdm: Option<Sdm>,
 }
 
-/// Maximum encoded `ChangeFileSettings` payload length.
+/// Maximum encoded file settings patch length in bytes.
 ///
 /// `FileOption (1) + AccessRights (2) + SDMOptions (1) + SDMAccessRights (2)
 /// + 9 × 3-byte offset fields`.
 pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 9 * 3;
 
 impl FileSettingsPatch {
-    /// Encode the data payload of `ChangeFileSettings` into `buf`.
+    /// Encode into the data payload of `ChangeFileSettings`.
     ///
     /// The leading `FileNo` byte is **not** written.
     /// Returns the number of bytes written (at most [`MAX_CHANGE_FILE_SETTINGS_LEN`]).
@@ -1073,15 +1095,15 @@ pub enum FileSettingsError {
     InvalidAccessNibble { slot: NibbleSlot, value: u8 },
     #[error("offset value exceeds 24-bit range: {0}")]
     OffsetOutOfRange(u32),
-    #[error("SDMENCLength must be a positive multiple of 32, got {0}")]
+    #[error("encrypted file data length must be a positive multiple of 32, got {0}")]
     EncLengthInvalid(u32),
-    #[error("SDMMACInputOffset must not exceed SDMMACOffset")]
+    #[error("MAC input offset must not exceed MAC placeholder offset")]
     MacInputAfterMac,
-    #[error("SDMENCFileData range must lie within the MAC window")]
+    #[error("encrypted file data range must lie within the MAC window")]
     EncOutsideMacWindow,
     #[error("reserved bit(s) set in {byte}: mask {mask:#04x}")]
     ReservedBitSet { byte: ReservedByte, mask: u8 },
-    #[error("SDMENCFileData requires both UID and SDMReadCtr mirroring")]
+    #[error("encrypted file data requires both UID and read counter mirroring")]
     EncRequiresBothMirrors,
     #[error("SDM mirror regions overlap: {0}")]
     MirrorsOverlap(OverlapKind),

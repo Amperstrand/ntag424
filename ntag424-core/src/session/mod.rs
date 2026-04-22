@@ -42,21 +42,21 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     OriginalityVerificationFailed(OriginalityError),
     /// Authentication validation failed.
     ///
-    /// The PICC's response did not match what the PCD computed. Typical
+    /// The tag's response did not match what the host computed. Typical
     /// causes: wrong key or tampered response, but can be command specific.
     ///
-    /// - AES (§9.1.5): the decrypted `RndA'` did not match the `RndA`
-    ///   the PCD sent.
-    /// - LRP (§9.2.5, §10.4.3): the `AuthMode` byte in the Part 1
-    ///   response, the `PICCResponse` MAC, or the echoed `PCDCap2` in
-    ///   the decrypted Part 2 `PICCData` did not validate.
+    /// - AES (NT4H2421Gx §9.1.5): the decrypted round-trip nonce did not
+    ///   match the nonce the host sent.
+    /// - LRP (NT4H2421Gx §9.2.5, §10.4.3): the auth-mode byte, the tag's
+    ///   response MAC, or the echoed host capabilities in the decrypted
+    ///   Part 2 payload did not validate.
     #[error("authentication mismatch")]
     AuthenticationMismatch,
-    /// A response `MACt` did not verify.
+    /// A response MAC did not verify.
     ///
-    /// The trailing 8-byte `MACt` did not match the value the PCD
-    /// computed over `RC || (CmdCtr+1) || TI || RespData` (§9.1.9).
-    /// Wrong session keys, tampered response, or out-of-sync `CmdCtr`
+    /// The trailing 8-byte response MAC did not match the value the host
+    /// computed over the response data and session state (NT4H2421Gx §9.1.9).
+    /// Wrong session keys, tampered response, or out-of-sync command counter
     /// can all cause this.
     #[error("response MAC mismatch")]
     ResponseMacMismatch,

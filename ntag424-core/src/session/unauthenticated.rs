@@ -20,18 +20,17 @@ impl Default for Session<Unauthenticated> {
 }
 
 impl Session<Unauthenticated> {
-    /// Select the NDEF application via `ISOSelectFile` by DF name.
+    /// Select the NDEF application by DF name.
     ///
-    /// After power-on the PICC starts at the MF (master file) level where
-    /// ISO file commands and `AuthenticateEV2First` are not reachable.
+    /// After power-on the tag starts at the MF (master file) level where
+    /// ISO file commands and authentication are not reachable.
     /// Call this once per transport session before any `read_unauthenticated`
-    /// or authentication call (§8.2.1).
+    /// or authentication call (NT4H2421Gx §8.2.1).
     ///
     /// Only exposed on an unauthenticated session: re-selecting the
-    /// application on the PICC terminates an active `AuthenticatedEV2` /
-    /// `AuthenticatedLRP` state (NT4H2421Gx §8.2.1), so doing so silently
-    /// through a `Session<Authenticated<_>>` would desynchronize the
-    /// tracked session keys and `CmdCtr`.
+    /// application terminates any active authenticated state, so doing so
+    /// silently through a `Session<Authenticated<_>>` would desynchronize
+    /// the tracked session keys and command counter.
     pub(crate) async fn select_ndef_application<T: Transport>(
         &mut self,
         transport: &mut T,

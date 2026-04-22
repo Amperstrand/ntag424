@@ -3,22 +3,19 @@ use crate::{
     Transport, commands::SecureChannel, crypto::suite::SessionSuite, session::SessionError,
 };
 
-/// Response payload (MAC stripped): SDMReadCtr (3 B) + Reserved (2 B).
+/// Response payload (MAC stripped): read counter (3 B) + Reserved (2 B).
 const RESP_LEN: usize = 5;
-/// One AES block - Full-mode response when SDMCtrRet = Key(x) (§10.7.3).
+/// One AES block — full-mode response when counter retrieval access = Key(x) (NT4H2421Gx §10.7.3).
 const FULL_CT_LEN: usize = 16;
 
 /// `GetFileCounters` (INS `F6h`, NT4H2421Gx §10.7.3).
 ///
-/// Wire: `90 F6 00 00 09 <FileNo> <MACt(8)> 00`.
+/// CommMode of the response depends on the counter retrieval access right:
+/// - `Free` → MAC-protected response: read counter (3 B) || Reserved (2 B) || MAC (8 B).
+/// - `Key(x)` → encrypted response: E(read counter (3 B) || Reserved (2 B) || padding) || MAC (8 B).
 ///
-/// CommMode of the response depends on `SDMCtrRet`:
-/// - `Free` → `CommMode.MAC`: response is `SDMReadCtr(3) || Reserved(2) || MACt(8)`.
-/// - `Key(x)` → `CommMode.Full`: response is `E(SDMReadCtr(3)||Reserved(2)||padding) || MACt(8)`.
-///
-/// Returns the current 24-bit `SDMReadCtr` as a `u32` (3 bytes LSB-first
+/// Returns the current 24-bit read counter as a `u32` (3 bytes LSB-first
 /// on the wire, zero-extended). The 2-byte `Reserved` field is discarded.
-/// `CmdCtr` advances on success.
 pub(crate) async fn get_file_counters<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,

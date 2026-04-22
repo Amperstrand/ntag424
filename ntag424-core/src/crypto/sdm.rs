@@ -5,17 +5,18 @@
 //!
 //! # Usage
 //!
-//! 1. Obtain the [`Sdm`] from `GetFileSettings` (or construct one via
+//! 1. Obtain the [`Sdm`] from [`Session::get_file_settings`] (or construct one via
 //!    [`Sdm::try_new`] matching the tag's configuration).
 //! 2. Create a [`SecureDynamicMessageVerifier`] via [`try_new`] with the
 //!    settings and [`CryptoMode`].
 //! 3. Call [`verify`] with the raw NDEF file bytes and the application key
-//!    to verify the SDMMAC and recover the dynamic data.
+//!    to verify the authentication MAC and recover the dynamic data.
 //!
 //! [`Sdm`]: crate::types::file_settings::Sdm
 //! [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
 //! [`try_new`]: SecureDynamicMessageVerifier::try_new
 //! [`verify`]: SecureDynamicMessageVerifier::verify
+//! [`Session::get_file_settings`]: crate::Session::get_file_settings
 
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
@@ -52,7 +53,7 @@ pub enum CryptoMode {
 /// Errors from SDM verification.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SdmError {
-    /// The computed SDMMAC does not match the value in the NDEF file.
+    /// The computed authentication MAC does not match the value in the NDEF file.
     #[error("MAC verification failed")]
     MacMismatch,
     /// The NDEF file data is too short for the configured SDM offsets.
@@ -61,8 +62,9 @@ pub enum SdmError {
     /// A non-hexadecimal byte was found at a placeholder position.
     #[error("invalid hex character at byte offset {offset}")]
     InvalidHex { offset: usize },
-    /// The `PICCDataTag` byte is malformed (§9.3.4).
-    #[error("invalid PICCData tag byte: {0:#04x}")]
+    /// The tag identity data tag byte is malformed; the tag may be counterfeit
+    /// or the NDEF file corrupted (NT4H2421Gx §9.3.4).
+    #[error("invalid tag identity data tag byte: {0:#04x}")]
     InvalidPiccDataTag(u8),
     /// A required SDM offset or flag is missing from the [`Sdm`] settings.
     ///
@@ -81,17 +83,17 @@ pub enum SdmError {
 pub struct SdmVerification {
     /// Tag UID (7 bytes), if UID mirroring was enabled.
     pub uid: Option<[u8; 7]>,
-    /// `SDMReadCtr` value, if counter mirroring was enabled.
+    /// Read counter value, if counter mirroring was enabled.
     pub read_ctr: Option<u32>,
     /// Tag Tamper status (`TTPermStatus || TTCurrStatus`), if mirrored.
     pub tamper_status: Option<TagTamperStatusReadout>,
-    /// Decrypted `SDMENCFileData`, if encrypted file data mirroring was
-    /// enabled. Only present when the `alloc` feature is active.
+    /// Decrypted file data from the encrypted mirror window, if enabled.
+    /// Only present when the `alloc` feature is active.
     #[cfg(feature = "alloc")]
     pub enc_file_data: Option<alloc::vec::Vec<u8>>,
 }
 
-/// How PICC metadata (UID, SDMReadCtr) is recovered from the NDEF file.
+/// How tag identity data (UID, read counter) is recovered from the NDEF file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 enum PiccSource {
@@ -109,8 +111,8 @@ enum PiccSource {
 
 /// Server-side verifier for NTAG 424 DNA Secure Dynamic Messaging.
 ///
-/// Constructed from [`Sdm`] (obtained from `GetFileSettings` or built with
-/// [`Sdm::try_new`]) and the active [`CryptoMode`].
+/// Constructed from [`Sdm`] (obtained from [`Session::get_file_settings`] or
+/// built with [`Sdm::try_new`]) and the active [`CryptoMode`].
 ///
 /// The constructor validates that the settings are internally consistent
 /// and sufficient for verification. Only the information needed for
@@ -118,6 +120,7 @@ enum PiccSource {
 ///
 /// [`Sdm`]: crate::types::file_settings::Sdm
 /// [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
+/// [`Session::get_file_settings`]: crate::Session::get_file_settings
 ///
 /// # Example
 ///

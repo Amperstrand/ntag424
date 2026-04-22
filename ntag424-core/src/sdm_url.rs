@@ -255,7 +255,7 @@ struct ParsedTemplate<const N: usize> {
 /// - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`. If
 ///   omitted, the MAC window starts at the first unescaped `/`, `?`, or `#` in
 ///   the abbreviated URI body, or at the end of the body if none exists.
-/// - `[...]` reserves an `SDMENCFileData` window. The bracket contents are used
+/// - `[...]` reserves an encrypted file data window. The bracket contents are used
 ///   only to define the resulting ASCII length, and are rendered as `'0'`
 ///   bytes in the initial NDEF file. `{uid}`, `{ctr}`, `{picc...}`, and
 ///   `{mac}` are rejected inside this range; `{tt}` is allowed.

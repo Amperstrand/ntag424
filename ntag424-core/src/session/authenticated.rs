@@ -138,10 +138,10 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok(Session::new())
     }
 
-    /// Read the permanent PICC UID.
+    /// Read the permanent tag UID.
     ///
-    /// The command returns the permanent UID even when
-    /// the tag is configured for Random ID at activation (§10.5.3).
+    /// Returns the permanent UID even when the tag is configured for Random ID
+    /// at activation (NT4H2421Gx §10.5.3).
     pub async fn get_uid<T: Transport>(
         mut self,
         transport: &mut T,
@@ -153,9 +153,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 
     /// Read an application key version.
     ///
-    /// The PICC returns `0` for disabled keys and for
-    /// `OriginalityKey` (not implemented),
-    /// and the full byte range otherwise.
+    /// Returns `0` for disabled keys and for the originality key (not
+    /// implemented), and the full byte range otherwise.
     pub async fn get_key_version<T: Transport>(
         mut self,
         transport: &mut T,
@@ -193,8 +192,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 
     /// Read the TagTamper permanent and current status bytes.
     ///
-    /// Uses `GetTTStatus` (INS `F7`) in `CommMode.FULL`. On TT-capable silicon,
-    /// `Invalid` indicates the feature exists but has not been enabled yet.
+    /// On TagTamper-capable silicon, `Invalid` indicates the feature exists
+    /// but has not been enabled yet (NT4H2421Gx §10.5.5).
     pub async fn get_tt_status<T: Transport>(
         mut self,
         transport: &mut T,
@@ -204,15 +203,15 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok((status, self))
     }
 
-    /// Apply tag configuration changes
+    /// Apply tag configuration changes.
     ///
     /// Authentication with the application master key must be
     /// established before calling this. Each option set on `configuration`
     /// is sent as its own APDU (the command is single-option per call) in
-    /// the canonical Table 50 order. A configuration with no options is a no-op.
+    /// the canonical order. A configuration with no options is a no-op.
     ///
-    /// Enabling LRP is intentionally not reachable through this method -
-    /// the PICC tears down the secure channel as part of the switch, so
+    /// Enabling LRP is intentionally not reachable through this method —
+    /// the tag tears down the secure channel as part of the switch, so
     /// mixing it with other options would leave the session in an invalid
     /// state. Use [`Session::enable_lrp`] instead, which consumes the
     /// authenticated AES session and returns a fresh unauthenticated one.
@@ -244,10 +243,11 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok(self)
     }
 
-    /// Verify tag originality by its UID, using `Read_Sig` in
-    /// `CommMode.MAC` (§9.1.9). Verifies the response `MACt` and
-    /// advances `CmdCtr` before running the ECDSA check against the
-    /// NXP master public key (AN12196 §7.2).
+    /// Verify the tag's NXP originality signature against the UID.
+    ///
+    /// Reads the ECDSA signature stored on the tag and verifies it against
+    /// the NXP master public key (AN12196 §7.2), confirming the tag was
+    /// manufactured by NXP.
     pub async fn verify_originality<T: Transport>(
         mut self,
         transport: &mut T,
@@ -287,13 +287,13 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// The required communication mode can be determined by the file's configuration,
     /// with one exception: when the
     /// only access condition granting the current session access to the
-    /// targeted right (`Read` / `ReadWrite` / `SDMFileRead`) is free
+    /// targeted right (`Read` / `ReadWrite` / SDM file-read) is free
     /// access, plain communication mode must be used even though the
     /// session is authenticated. You may use [`Self::read_file_plain`]
     /// in this case.
     ///
     /// `length = 0` means "entire file from `offset`", capped at the
-    /// 256-byte short-`Le` response limit (§10.8.1 Table 78). When
+    /// 256-byte short-Le response limit (NT4H2421Gx §10.8.1). When
     /// `length != 0`, `buf.len()` must be at least `length`.
     pub async fn read_file_with_mode<T: Transport>(
         mut self,
@@ -342,7 +342,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         Ok(())
     }
 
-    /// Write file bytes with an explicit CommMode.
+    /// Write file bytes with an explicit communication mode.
     ///
     /// Writes `data` to `file` starting at `offset`, using the
     /// caller-supplied `mode` as the command's effective communication mode.
@@ -383,8 +383,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 
     /// Return the session transaction identifier.
     ///
-    /// This value is assigned by the PICC on the first authentication
-    /// of the transaction (§9.1.1).
+    /// This value is assigned by the tag on the first authentication
+    /// of the transaction (NT4H2421Gx §9.1.1).
     #[doc(hidden)] // not needed by typical users, but exposed for advanced use cases and testing
     pub fn ti(&self) -> &[u8; 4] {
         &self.state.auth_result.ti
@@ -395,7 +395,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         &self.state.auth_result.pd_cap2
     }
 
-    /// Return the PICC's capabilities as observed during authentication.
+    /// Return the tag's capabilities as observed during authentication.
     ///
     /// The last two bytes can be set with
     /// [`Configuration::with_pdcap2_5`](`crate::types::Configuration::with_pdcap2_5`) and
@@ -406,8 +406,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 
     /// Current value of the shared Command Counter.
     ///
-    /// Reset to zero on `AuthenticateEV2First`, advanced in lockstep with the
-    /// PICC as commands succeed.
+    /// Reset to zero on authentication and advanced in lockstep with
+    /// the tag as commands succeed.
     #[doc(hidden)] // not needed by typical users, but exposed for advanced use cases and testing
     pub fn cmd_counter(&self) -> u16 {
         self.state.cmd_counter
@@ -415,7 +415,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
 }
 
 impl Session<Authenticated<AesSuite>> {
-    /// Enable LRP mode on the PICC.
+    /// Enable LRP mode on the tag.
     ///
     /// <div class="warning">The switch is permanent (NT4H2421Gx §8).</div>
     ///
