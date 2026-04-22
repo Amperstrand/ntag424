@@ -74,107 +74,98 @@
 //!   permissions.
 //!
 //!
-//! ## Example
+//! ## Provisioning example
 //!
-//! TODO: add full provisioning example here, with the macro call for NDEF, and file change call
+//! The following shows a complete provisioning flow for a fresh NTAG 424 DNA tag:
+//! writing an SDM-enabled NDEF template, enabling SDM through file settings, and
+//! replacing all five application keys with per-tag diversified keys derived from a
+//! backend master key. It requires the `sdm`, `key_diversification`, and `alloc`
+//! features.
 //!
-//! ```
-//! use ntag424_core::{Session, types::KeyNumber};
+//! ```no_run
+//! # #[cfg(all(feature = "sdm", feature = "key_diversification", feature = "alloc"))]
+//! # mod example {
+//! use ntag424_core::{
+//!     Session, SessionError, Transport,
+//!     sdm::CryptoMode,
+//!     types::{
+//!         File, KeyNumber, NonMasterKeyNumber,
+//!         file_settings::{Access, AccessRights, CommMode, FileSettingsPatch},
+//!     },
+//!     key_diversification::diversify_ntag424,
+//! };
 //!
-//! # use ntag424_core::{Response, Transport};
-//! # use std::collections::VecDeque;
-//! # use std::convert::Infallible;
-//! # use std::future::Future;
-//! # use std::pin::pin;
-//! # use std::task::{Context, Poll, Waker};
-//! #
-//! # struct TestTransport {
-//! #     responses: VecDeque<Response<Vec<u8>>>,
-//! # }
-//! #
-//! # impl TestTransport {
-//! #     fn new(responses: impl IntoIterator<Item = Response<Vec<u8>>>) -> Self {
-//! #         Self {
-//! #             responses: responses.into_iter().collect(),
-//! #         }
-//! #     }
-//! #
-//! #     fn remaining(&self) -> usize {
-//! #         self.responses.len()
-//! #     }
-//! # }
-//! #
-//! # impl Transport for TestTransport {
-//! #     type Error = Infallible;
-//! #     type Data = Vec<u8>;
-//! #
-//! #     async fn transmit(&mut self, _: &[u8]) -> Result<Response<Vec<u8>>, Self::Error> {
-//! #         Ok(self
-//! #             .responses
-//! #             .pop_front()
-//! #             .expect("TestTransport: no more responses queued"))
-//! #     }
-//! #
-//! #     async fn get_uid(&mut self) -> Result<Self::Data, Self::Error> { todo!() }
-//! # }
-//! # fn hex_nib(c: u8) -> u8 {
-//! #     match c {
-//! #         b'0'..=b'9' => c - b'0',
-//! #         b'A'..=b'F' => c - b'A' + 10,
-//! #         b'a'..=b'f' => c - b'a' + 10,
-//! #         _ => panic!("invalid hex char"),
-//! #     }
-//! # }
-//! # fn hex(s: &str) -> Vec<u8> {
-//! #     assert!(s.len().is_multiple_of(2));
-//! #     let b = s.as_bytes();
-//! #     (0..b.len() / 2)
-//! #         .map(|i| (hex_nib(b[2 * i]) << 4) | hex_nib(b[2 * i + 1]))
-//! #         .collect()
-//! # }
-//! # fn block_on<F: Future>(fut: F) -> F::Output {
-//! #     let mut fut = pin!(fut);
-//! #     let mut cx = Context::from_waker(Waker::noop());
-//! #     match fut.as_mut().poll(&mut cx) {
-//! #         Poll::Ready(out) => out,
-//! #         Poll::Pending => panic!("doctest future yielded unexpectedly"),
-//! #     }
-//! # }
-//! # fn main() { block_on(run()).unwrap() }
-//! # async fn run() -> Result<(), ntag424_core::SessionError<Infallible>> {
+//! # async fn provision<T: Transport>(
+//! #     transport: &mut T,
+//! #     master_key: &[u8; 16],
+//! #     uid: &[u8; 7],
+//! #     sys_id: &[u8],
+//! #     rnd_a: [u8; 16],
+//! # ) -> Result<(), SessionError<T::Error>> {
+//! // Build the NDEF bytes and matching SDM settings from a URL template.
+//! let (ndef, sdm_settings) = ntag424_core::sdm_url_config!(
+//!     "https://example.com/?p={picc}&m={mac}",
+//!     CryptoMode::Aes,
+//! );
+//!
 //! // let mut transport = ...; // Obtain a Transport implementation for your NFC reader.
-//! # let mut transport = TestTransport::new([
-//! #     // ISOSelectFile(NDEF app) auto-issued by authenticate_aes.
-//! #     Response { data: Vec::new(), sw1: 0x90, sw2: 0x00 },
-//! #     Response {
-//! #         data: hex("A04C124213C186F22399D33AC2A30215"),
-//! #         sw1: 0x91,
-//! #         sw2: 0xAF,
-//! #     },
-//! #     Response {
-//! #         data: hex("3FA64DB5446D1F34CD6EA311167F5E4985B89690C04A05F17FA7AB2F08120663"),
-//! #         sw1: 0x91,
-//! #         sw2: 0x00,
-//! #     },
-//! # ]);
 //!
-//! // In real code, fill this from a cryptographically secure RNG.
-//! let rnd_a = [
-//!     0x13, 0xC5, 0xDB, 0x8A, 0x59, 0x30, 0x43, 0x9F,
-//!     0xC3, 0xDE, 0xF9, 0xA4, 0xC6, 0x75, 0x36, 0x0F,
-//! ];
-//! // Initial key is all-zero for NTAG 424 DNA out of the factory,
-//! // update all keys on real deployments.
-//! let key = [0u8; 16];
-//!
-//! let session = Session::default()
-//!     .authenticate_aes(&mut transport, KeyNumber::Key0, &key, rnd_a)
+//! // Write the NDEF template (factory default allows unauthenticated writes).
+//! let mut session = Session::default();
+//! session
+//!     .write_file_unauthenticated(transport, File::Ndef, 0, ndef)
 //!     .await?;
-//! # assert_eq!(session.cmd_counter(), 0);
-//! # assert_eq!(session.ti(), &[0x9D, 0x00, 0xC4, 0xDF]);
-//! # assert_eq!(transport.remaining(), 0);
+//!
+//! // Authenticate with the factory default master key (all zeros).
+//! // let rnd_a: [u8; 16] = ...; // In real code, fill this from a cryptographically secure RNG.
+//! let session = session
+//!     .authenticate_aes(transport, KeyNumber::Key0, &[0u8; 16], rnd_a)
+//!     .await?;
+//!
+//! // Lock down the NDEF file and enable SDM.
+//! let session = session
+//!     .change_file_settings(
+//!         transport,
+//!         File::Ndef,
+//!         &FileSettingsPatch {
+//!             comm_mode: CommMode::Plain,
+//!             access_rights: AccessRights {
+//!                 read: Access::Free,
+//!                 write: Access::Key(KeyNumber::Key0),
+//!                 read_write: Access::Key(KeyNumber::Key0),
+//!                 change: Access::Key(KeyNumber::Key0),
+//!             },
+//!             sdm: Some(*sdm_settings),
+//!         },
+//!     )
+//!     .await?;
+//!
+//! // Derive a unique key for each application key slot from the master key and UID.
+//! let key0 = diversify_ntag424(master_key, uid, KeyNumber::Key0, sys_id);
+//! let key1 = diversify_ntag424(master_key, uid, KeyNumber::Key1, sys_id);
+//! let key2 = diversify_ntag424(master_key, uid, KeyNumber::Key2, sys_id);
+//! let key3 = diversify_ntag424(master_key, uid, KeyNumber::Key3, sys_id);
+//! let key4 = diversify_ntag424(master_key, uid, KeyNumber::Key4, sys_id);
+//!
+//! // Replace non-master keys first (old key = factory default all zeros).
+//! let session = session
+//!     .change_key(transport, NonMasterKeyNumber::Key1, &key1, 1, &[0u8; 16])
+//!     .await?;
+//! let session = session
+//!     .change_key(transport, NonMasterKeyNumber::Key2, &key2, 1, &[0u8; 16])
+//!     .await?;
+//! let session = session
+//!     .change_key(transport, NonMasterKeyNumber::Key3, &key3, 1, &[0u8; 16])
+//!     .await?;
+//! let session = session
+//!     .change_key(transport, NonMasterKeyNumber::Key4, &key4, 1, &[0u8; 16])
+//!     .await?;
+//!
+//! // Replace the master key last — this invalidates the current session.
+//! session.change_master_key(transport, &key0, 1).await?;
 //! # Ok(())
 //! # }
+//! # } // end cfg mod
 //! ```
 //!
 //! # Binary size
@@ -236,7 +227,65 @@ mod sdm_url;
 pub mod key_diversification {
     //! AES-128 key diversification per AN10922 §2.2.
     //!
-    //! See [`diversify_aes128`] for details.
+    //! See [`diversify_aes128`] for the low-level primitive, or
+    //! [`diversify_ntag424`] for the helper that binds a key slot number and
+    //! optional system identifier into the diversification input.
+    //!
+    //! ## Deriving and updating all keys on a tag
+    //!
+    //! The snippet below shows how to derive all five application keys from a
+    //! single backend `master_key` and then install them on a tag. It requires
+    //! the `key_diversification` and `alloc` features.
+    //!
+    //! ```no_run
+    //! # #[cfg(feature = "alloc")]
+    //! # mod example {
+    //! use ntag424_core::{
+    //!     Session, SessionError, Transport,
+    //!     types::{KeyNumber, NonMasterKeyNumber},
+    //!     key_diversification::diversify_ntag424,
+    //! };
+    //!
+    //! # async fn update_all_keys<T: Transport>(
+    //! #     transport: &mut T,
+    //! #     master_key: &[u8; 16],
+    //! #     uid: &[u8; 7],
+    //! #     sys_id: &[u8],
+    //! #     old_keys: &[[u8; 16]; 5],
+    //! #     rnd_a: [u8; 16],
+    //! # ) -> Result<(), SessionError<T::Error>> {
+    //! let new_keys: [[u8; 16]; 5] = [
+    //!     diversify_ntag424(master_key, uid, KeyNumber::Key0, sys_id),
+    //!     diversify_ntag424(master_key, uid, KeyNumber::Key1, sys_id),
+    //!     diversify_ntag424(master_key, uid, KeyNumber::Key2, sys_id),
+    //!     diversify_ntag424(master_key, uid, KeyNumber::Key3, sys_id),
+    //!     diversify_ntag424(master_key, uid, KeyNumber::Key4, sys_id),
+    //! ];
+    //!
+    //! // Authenticate with the current master key (Key 0).
+    //! let session = Session::default()
+    //!     .authenticate_aes(transport, KeyNumber::Key0, &old_keys[0], rnd_a)
+    //!     .await?;
+    //!
+    //! // Replace non-master keys first.
+    //! let session = session
+    //!     .change_key(transport, NonMasterKeyNumber::Key1, &new_keys[1], 1, &old_keys[1])
+    //!     .await?;
+    //! let session = session
+    //!     .change_key(transport, NonMasterKeyNumber::Key2, &new_keys[2], 1, &old_keys[2])
+    //!     .await?;
+    //! let session = session
+    //!     .change_key(transport, NonMasterKeyNumber::Key3, &new_keys[3], 1, &old_keys[3])
+    //!     .await?;
+    //! let session = session
+    //!     .change_key(transport, NonMasterKeyNumber::Key4, &new_keys[4], 1, &old_keys[4])
+    //!     .await?;
+    //! // Master key last — this terminates the current session.
+    //! session.change_master_key(transport, &new_keys[0], 1).await?;
+    //! # Ok(())
+    //! # }
+    //! # } // end cfg mod
+    //! ```
     pub use crate::crypto::key_diversification::*;
 }
 

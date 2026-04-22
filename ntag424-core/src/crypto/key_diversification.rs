@@ -41,8 +41,6 @@
 //!      0x7C, 0xA8, 0x02, 0x47, 0x3F, 0xDA, 0x91, 0x75],
 //! );
 //! ```
-// TODO: add a complete example which generates all keys and updates them!
-
 use crate::types::KeyNumber;
 
 use aes::{
