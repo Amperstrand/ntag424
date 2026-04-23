@@ -325,12 +325,6 @@ level, so users don't wrap the call in `std::panic::catch_unwind`.
 
 ## 7. Module size
 
-- `src/types/file_settings.rs` is **1845 lines** and carries three
-  independent concerns: access rights, SDM configuration, wire codec.
-  Splitting into `file_settings/{access.rs, sdm.rs, codec.rs, error.rs}`
-  makes it much easier for a reader to locate the thing they need. The
-  module currently exposes 24 `pub` types plus one `pub const`, which makes
-  its rustdoc front page dense.
 - `src/crypto/sdm.rs` (~1400 lines) similarly mixes verifier public API,
   NDEF parsing, and PICCData decryption. The public surface is small
   (basically `SecureDynamicMessageVerifier`, `CryptoMode`, `SdmError`,
