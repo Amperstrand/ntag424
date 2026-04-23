@@ -45,7 +45,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
     // Response: AuthMode (1, 01h = LRP) || RndB (16), plain (Table 44, p. 53).
     let data1 = r1.data.as_ref();
     if data1.len() != 17 {
-        return Err(SessionError::UnexpectedLength { got: data1.len() });
+        return Err(SessionError::UnexpectedLength { got: data1.len(), expected: 17 });
     }
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);
@@ -77,6 +77,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r2.data.as_ref().len(),
+                expected: 16,
             })?;
 
     // Verify: MAC_LRP(SesAuthMACKey; RndB || RndA) == PICCResponse.
@@ -134,7 +135,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     // Response: AuthMode (1, 01h = LRP) || RndB (16), plain (Table 38).
     let data1 = r1.data.as_ref();
     if data1.len() != 17 {
-        return Err(SessionError::UnexpectedLength { got: data1.len() });
+        return Err(SessionError::UnexpectedLength { got: data1.len(), expected: 17 });
     }
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);
@@ -166,6 +167,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r2.data.as_ref().len(),
+                expected: 32,
             })?;
     let picc_data: [u8; 16] = data2[..16].try_into().unwrap();
     let picc_response: [u8; 16] = data2[16..].try_into().unwrap();

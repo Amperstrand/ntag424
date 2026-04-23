@@ -32,11 +32,11 @@ pub(crate) async fn get_file_counters<T: Transport, S: SessionSuite>(
             ct.copy_from_slice(&resp);
             channel.decrypt_response(&mut ct);
             if strip_m2_padding(&ct) != Some(RESP_LEN) {
-                return Err(SessionError::UnexpectedLength { got: FULL_CT_LEN });
+                return Err(SessionError::UnexpectedLength { got: FULL_CT_LEN, expected: RESP_LEN });
             }
             ct[..RESP_LEN].try_into().unwrap()
         }
-        n => return Err(SessionError::UnexpectedLength { got: n }),
+        n => return Err(SessionError::UnexpectedLength { got: n, expected: RESP_LEN }),
     };
 
     Ok(u32::from_le_bytes([data[0], data[1], data[2], 0]))

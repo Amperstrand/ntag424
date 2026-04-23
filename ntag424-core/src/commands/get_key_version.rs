@@ -21,7 +21,7 @@ pub(crate) async fn get_key_version<T: Transport, S: SessionSuite>(
         .send_mac(transport, 0x64, 0x00, 0x00, &[key_no.as_byte()], &[])
         .await?;
     if plain.len() != 1 {
-        return Err(SessionError::UnexpectedLength { got: plain.len() });
+        return Err(SessionError::UnexpectedLength { got: plain.len(), expected: 1 });
     }
     Ok(plain[0])
 }

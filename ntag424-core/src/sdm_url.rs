@@ -69,6 +69,10 @@ pub struct SdmUrlOptions {
 }
 
 impl SdmUrlOptions {
+    /// Returns the default SDM URL options.
+    ///
+    /// Defaults: `picc_key = Key2`, `mac_key = Key2`,
+    /// `ctr_ret = NoAccess`, `max_file_size = 256`.
     pub const fn new() -> Self {
         Self {
             picc_key: KeyNumber::Key2,

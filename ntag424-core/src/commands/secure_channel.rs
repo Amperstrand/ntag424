@@ -138,6 +138,7 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         if ciphertext.len() != CT {
             return Err(SessionError::UnexpectedLength {
                 got: ciphertext.len(),
+                expected: CT,
             });
         }
         let mut buf = [0u8; CT];
@@ -169,7 +170,7 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         body: &'b [u8],
     ) -> Result<&'b [u8], SessionError<E>> {
         if body.len() < MAC_LEN {
-            return Err(SessionError::UnexpectedLength { got: body.len() });
+            return Err(SessionError::UnexpectedLength { got: body.len(), expected: MAC_LEN });
         }
         let (data, received) = body.split_at(body.len() - MAC_LEN);
         let next_ctr = self.cmd_ctr().wrapping_add(1);
@@ -230,7 +231,7 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         let plain = self.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
         let mut out = MacResponse::new();
         out.try_extend_from_slice(plain)
-            .map_err(|_| SessionError::UnexpectedLength { got: plain.len() })?;
+            .map_err(|_| SessionError::UnexpectedLength { got: plain.len(), expected: MAX_RESPONSE_DATA })?;
         Ok(out)
     }
 }

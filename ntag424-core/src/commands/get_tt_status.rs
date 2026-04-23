@@ -199,7 +199,7 @@ mod tests {
         });
 
         match result {
-            Err(SessionError::UnexpectedLength { got: 15 }) => (),
+            Err(SessionError::UnexpectedLength { got: 15, .. }) => (),
             other => panic!("expected UnexpectedLength {{ got: 15 }}, got {other:?}"),
         }
         assert_eq!(state.counter(), 1);

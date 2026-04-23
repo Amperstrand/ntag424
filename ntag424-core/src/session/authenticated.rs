@@ -420,12 +420,19 @@ impl Session<Authenticated<AesSuite>> {
     /// <div class="warning">The switch is permanent (NT4H2421Gx §8).</div>
     ///
     /// Consumes the authenticated AES session: enabling LRP tears down the
-    /// secure channel on the PICC. The
-    /// next authentication must be [`Session::authenticate_lrp`].
+    /// secure channel on the PICC. The next authentication must be
+    /// [`Session::authenticate_lrp`].
     ///
-    /// LRP mode is a AES based cipher that is more resistent against side-channel attacks, but is
-    /// not supported by all NFC readers. Unauthenticated reads are _not_ affected by this.
-    /// This crate supports both AES and LRP mode.
+    /// LRP is an AES-based cipher that is more resistant against side-channel
+    /// attacks but is not supported by all NFC readers. Unauthenticated reads
+    /// are _not_ affected by this switch.
+    ///
+    /// The type system prevents calling this method twice: after enabling LRP
+    /// you can only authenticate with [`Session::authenticate_lrp`], which
+    /// returns a `Session<Authenticated<LrpSuite>>` that has no `enable_lrp`
+    /// method. At the PICC level, sending `SetConfiguration` with LRP already
+    /// active is a no-op (NT4H2421Gx §8), so error-recovery code that
+    /// unconditionally issues the command is safe.
     pub async fn enable_lrp<T: Transport>(
         mut self,
         transport: &mut T,

@@ -161,7 +161,7 @@ pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
     }
     let data = channel.verify_response_mac_and_advance(resp.sw2, resp.data.as_ref())?;
     if data.len() > want {
-        return Err(SessionError::UnexpectedLength { got: data.len() });
+        return Err(SessionError::UnexpectedLength { got: data.len(), expected: want });
     }
     buf[..data.len()].copy_from_slice(data);
     Ok(data.len())
@@ -214,6 +214,7 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
     if ciphertext.is_empty() || !ciphertext.len().is_multiple_of(BLOCK) {
         return Err(SessionError::UnexpectedLength {
             got: ciphertext.len(),
+            expected: ciphertext.len().max(1).next_multiple_of(BLOCK),
         });
     }
 
@@ -236,15 +237,15 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
     // surface it as `UnexpectedLength` and leave the (now-advanced)
     // counter alone; it matches the PICC's state.
     let Some(pad_start) = strip_m2_padding(&scratch[..ct_len]) else {
-        return Err(SessionError::UnexpectedLength { got: ct_len });
+        return Err(SessionError::UnexpectedLength { got: ct_len, expected: ct_len });
     };
 
     // If the caller pinned `length`, the plaintext must match it exactly.
     if length != 0 && pad_start != length as usize {
-        return Err(SessionError::UnexpectedLength { got: pad_start });
+        return Err(SessionError::UnexpectedLength { got: pad_start, expected: length as usize });
     }
     if pad_start > buf.len() {
-        return Err(SessionError::UnexpectedLength { got: pad_start });
+        return Err(SessionError::UnexpectedLength { got: pad_start, expected: buf.len() });
     }
 
     buf[..pad_start].copy_from_slice(&scratch[..pad_start]);
@@ -561,7 +562,7 @@ mod tests {
             read_data_full(&mut transport, &mut ch, 0x03, 0, 16, &mut buf).await
         });
         match result {
-            Err(SessionError::UnexpectedLength { got: 16 }) => (),
+            Err(SessionError::UnexpectedLength { got: 16, .. }) => (),
             other => panic!("expected UnexpectedLength, got {other:?}"),
         }
         assert_eq!(state.counter(), 1, "counter must track PICC state");

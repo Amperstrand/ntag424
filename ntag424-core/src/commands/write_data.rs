@@ -126,7 +126,7 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     // WriteData response carries no encrypted data - only the MACt
     // which send_mac already verified and stripped.
     if !body.is_empty() {
-        return Err(SessionError::UnexpectedLength { got: body.len() });
+        return Err(SessionError::UnexpectedLength { got: body.len(), expected: 0 });
     }
     Ok(())
 }

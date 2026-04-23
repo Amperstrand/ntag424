@@ -34,8 +34,8 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     Transport(#[from] E),
     #[error("error response: {0:?}")]
     ErrorResponse(ResponseStatus),
-    #[error("unexpected response length: {got}")]
-    UnexpectedLength { got: usize },
+    #[error("unexpected response length: got {got}, expected {expected}")]
+    UnexpectedLength { got: usize, expected: usize },
     #[error(transparent)]
     FileSettings(FileSettingsError),
     #[error("originality verification failed: {0:?}")]
@@ -109,7 +109,7 @@ impl<S> Session<S> {
                 uid.copy_from_slice(data);
                 Ok(Uid::Random(uid))
             }
-            got => Err(SessionError::UnexpectedLength { got }),
+            got => Err(SessionError::UnexpectedLength { got, expected: 7 }),
         }
     }
 }

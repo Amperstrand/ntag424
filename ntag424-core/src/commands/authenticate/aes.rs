@@ -34,6 +34,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r1.data.as_ref().len(),
+                expected: 16,
             })?;
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
@@ -54,6 +55,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r2.data.as_ref().len(),
+                expected: 16,
             })?;
 
     finish_auth_non_first(key, &rnd_a, &rnd_b, &resp_enc)
@@ -89,6 +91,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r1.data.as_ref().len(),
+                expected: 16,
             })?;
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
@@ -107,6 +110,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
             .try_into()
             .map_err(|_| SessionError::UnexpectedLength {
                 got: r2.data.as_ref().len(),
+                expected: 32,
             })?;
 
     finish_auth(key, &rnd_a, &rnd_b, &resp_enc)

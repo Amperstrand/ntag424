@@ -73,7 +73,7 @@ pub(crate) async fn iso_read_binary<T: Transport>(
     }
     let data = resp.data.as_ref();
     if data.len() > want {
-        return Err(SessionError::UnexpectedLength { got: data.len() });
+        return Err(SessionError::UnexpectedLength { got: data.len(), expected: want });
     }
     buf[..data.len()].copy_from_slice(data);
     Ok(data.len())
@@ -202,7 +202,7 @@ mod tests {
 
         let mut buf = [0u8; 4];
         match block_on(iso_read_binary(&mut transport, None, 0, &mut buf)) {
-            Err(SessionError::UnexpectedLength { got: 5 }) => (),
+            Err(SessionError::UnexpectedLength { got: 5, .. }) => (),
             other => panic!("expected UnexpectedLength {{ got: 5 }}, got {other:?}"),
         }
     }
