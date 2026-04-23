@@ -325,22 +325,20 @@ level, so users don't wrap the call in `std::panic::catch_unwind`.
 
 ## 7. Small things
 
-- `SdmUrlOptions::new()` and `Default::default()` (`sdm_url.rs:71‑85`) are
-  redundant. Keep one as the canonical spelling and have the other delegate.
-  Either way, the doc on `new()` should list the defaults (both keys =
-  `Key2`, `max_file_size` = 256) — currently a user has to read the source.
-- `Session::ti()` and `Session::pd_cap2()` are `#[doc(hidden)]`
-  (`session/authenticated.rs:388‑395`) but `Session::pcd_cap2()` is public
-  (`:403`). Either all three are internal debug hooks or all three are API.
-  Most likely `pcd_cap2` wants the same treatment as the other two.
-- `Session<Authenticated>::get_version` doc says "Uses MAC mode
-  communication" but not _why_ a user would care. Mention the practical
-  consequence: authenticated + MAC‑mode advances `CmdCtr` and keeps the
-  channel alive; the unauthenticated variant does not.
-- `enable_lrp` (`authenticated.rs:429`) has an inline warning about
-  permanence but doesn't tell the user how to check whether LRP is already
-  enabled before calling it. Point at the concrete bit in `get_version` /
-  `get_file_settings` / cap bits that carries the answer.
+- `SdmUrlOptions::new()` (`sdm_url.rs:71‑85`) has no docstring. `Default`
+  correctly delegates to `const fn new()`, which is the right Rust idiom — no
+  change needed there. Add a doc comment to `new()` listing the defaults (both
+  keys = `Key2`, `ctr_ret` = `NoAccess`, `max_file_size` = 256) so users don't
+  have to read the source.
+- `enable_lrp` (`authenticated.rs:429`) has an inline warning about permanence
+  but the note about verifying the current mode before calling is superfluous:
+  the method only exists on `Session<Authenticated<AesSuite>>`, so a successful
+  AES authentication is already proof that LRP is not enabled, and once LRP is
+  enabled the only path leads to `Session<Authenticated<LrpSuite>>` which has no
+  `enable_lrp`. The type system makes "calling it twice" impossible. The one
+  improvement worth making is explicitly noting in the docstring that, at the
+  PICC level, sending `SetConfiguration` with LRP already active is a no‑op —
+  useful context for anyone reasoning about error-recovery paths.
 - `SessionError::UnexpectedLength { got: usize }` lacks an `expected`. Add
   one or drop the field count to zero.
 
