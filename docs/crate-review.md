@@ -14,7 +14,7 @@ real rustdoc warnings are reported today (see §4.4).
 
 ## 1. Top‑level story works, with some gaps
 
-`src/lib.rs` does a good job explaining *what* the chip is and *why* SDM
+`src/lib.rs` does a good job explaining _what_ the chip is and _why_ SDM
 exists, and the "Provisioning example" is a strong on‑ramp. A few things a
 beginner still has to reverse‑engineer:
 
@@ -60,6 +60,7 @@ beginner still has to reverse‑engineer:
   Either re‑export the common ones at the root, or move `Session`/`SessionError`
   into a module for symmetry. The provisioning example in `lib.rs:129‑137`
   already has this ugliness baked in.
+
 - **Macro vs function name collision.** `sdm_url_config!` is exported at the
   crate root (`lib.rs:383`) while the function version is
   `ntag424_core::sdm::sdm_url_config` (`src/sdm_url.rs:285`). Same name,
@@ -88,25 +89,25 @@ and applied consistently.
 
 Audit of the current shape (`src/session/authenticated.rs`):
 
-| Method                                   | `self` | Returns               | Crosses secure channel? |
-|------------------------------------------|:------:|-----------------------|:------------------------:|
-| `get_version`                            | owned  | `(Version, Self)`     | yes (MAC) |
-| `get_uid`                                | owned  | `([u8; 7], Self)`     | yes |
-| `get_file_counters`                      | owned  | `(u32, Self)`         | yes |
-| `get_file_settings`                      | owned  | `(FileSettingsView, Self)` | yes |
-| `get_tt_status`                          | owned  | `(TagTamperStatusReadout, Self)` | yes |
-| `change_key`                             | owned  | `Self`                | yes |
-| `change_master_key`                      | owned  | `Session<Unauthenticated>` | yes (always de‑auths) |
-| `change_file_settings`                   | owned  | `Self`                | yes |
-| `set_configuration`                      | owned  | `Self`                | yes |
-| `verify_originality`                     | owned  | `Self`                | yes |
-| `enable_lrp`                             | owned  | `Session<Unauthenticated>` | yes (always de‑auths) |
-| `read_file_with_mode`                    | owned  | `(usize, Self)`       | only in `Mac`/`Full` |
-| `write_with_mode`                        | owned  | `Self`                | only in `Mac`/`Full` |
-| **`read_file_plain`**                    | `&mut` | `usize`               | no |
-| **`write_file_plain`**                   | `&mut` | `()`                  | no |
+| Method                 | `self` | Returns                          | Crosses secure channel? |
+| ---------------------- | :----: | -------------------------------- | :---------------------: |
+| `get_version`          | owned  | `(Version, Self)`                |        yes (MAC)        |
+| `get_uid`              | owned  | `([u8; 7], Self)`                |           yes           |
+| `get_file_counters`    | owned  | `(u32, Self)`                    |           yes           |
+| `get_file_settings`    | owned  | `(FileSettingsView, Self)`       |           yes           |
+| `get_tt_status`        | owned  | `(TagTamperStatusReadout, Self)` |           yes           |
+| `change_key`           | owned  | `Self`                           |           yes           |
+| `change_master_key`    | owned  | `Session<Unauthenticated>`       |  yes (always de‑auths)  |
+| `change_file_settings` | owned  | `Self`                           |           yes           |
+| `set_configuration`    | owned  | `Self`                           |           yes           |
+| `verify_originality`   | owned  | `Self`                           |           yes           |
+| `enable_lrp`           | owned  | `Session<Unauthenticated>`       |  yes (always de‑auths)  |
+| `read_file_with_mode`  | owned  | `(usize, Self)`                  |  only in `Mac`/`Full`   |
+| `write_with_mode`      | owned  | `Self`                           |  only in `Mac`/`Full`   |
+| **`read_file_plain`**  | `&mut` | `usize`                          |           no            |
+| **`write_file_plain`** | `&mut` | `()`                             |           no            |
 
-`read_file_plain` and `write_file_plain` using `&mut self` is *consistent* with
+`read_file_plain` and `write_file_plain` using `&mut self` is _consistent_ with
 the rationale above: they dispatch `ReadData` / `WriteData` in plain
 communication mode (`authenticated.rs:269‑343`) and never touch the MAC
 counter through `SecureChannel`, so an error on the wire cannot desynchronise
@@ -116,10 +117,10 @@ plain read is safely retryable on the same session.
 This is good, but two things should change:
 
 1. **Document the invariant.** In the `Session<Authenticated>` docstring,
-   state explicitly: *"Methods that cross the secure channel take `self` by
+   state explicitly: _"Methods that cross the secure channel take `self` by
    value: any error desynchronises the channel with the PICC, so the session
    is consumed and the caller must re‑authenticate. Methods that only issue
-   plain‑mode commands take `&mut self` and are safe to retry."* Then the
+   plain‑mode commands take `&mut self` and are safe to retry."_ Then the
    `&mut self` outliers stop looking like bugs.
 
 2. **Fix the asymmetries that remain:**
@@ -136,9 +137,9 @@ This is good, but two things should change:
      docstrings don't mention the by‑value‑consume rationale. Spell it out
      once per method group.
    - `read_file_with_mode` with `mode = CommMode::Plain` goes down the
-     *plain* code path (`:307‑312`) yet still consumes `self` — the
+     _plain_ code path (`:307‑312`) yet still consumes `self` — the
      invariant above ("by‑value = channel can desync") is technically
-     violated for `Plain`. That's defensible (the method's *type* has to
+     violated for `Plain`. That's defensible (the method's _type_ has to
      be one or the other, and the MAC/Full paths dominate), but it's worth
      a sentence: "`read_file_with_mode` consumes `self` even in `Plain`
      mode for uniformity; use `read_file_plain` when you need a retryable
@@ -147,42 +148,37 @@ This is good, but two things should change:
 ## 4. Documentation gaps & errors
 
 ### 4.1 TODOs in shipped public documentation
+
 - `src/types/configuration.rs:39` and `:52` — `with_random_uid_enabled` and
   `with_chained_writing_disabled` both carry `// TODO: extend docs, briefly
-  explain the consequences`. Both toggle **permanent** chip behaviour; the
+explain the consequences`. Both toggle **permanent** chip behaviour; the
   docs must be complete before a user enables them.
 - `src/types/version.rs:85‑86` — "TODO: clarify padding for random ID which
   are shorter".
 - `src/types/version.rs:93` — "TODO: BE or LE int or what?" for
-  `batch_number()`. The function returns `&[u8; 4]` with *no* docstring, so a
+  `batch_number()`. The function returns `&[u8; 4]` with _no_ docstring, so a
   user has no idea what to do with those bytes.
 
-### 4.2 Typos
-- `src/types/response_status.rs:14` — "Curent" → "Current".
-- `src/types/response_status.rs:25` — "byeond" → "beyond".
-- `src/sdm_url.rs:233` — "must be appliedwith" → "must be applied with".
-- `src/lib.rs:247` — "_Not tags were harmed_" should read
-  "_No tags were harmed_".
+### 4.2 Missing per‑item docs on public fields / variants
 
-### 4.3 Missing per‑item docs on public fields / variants
 Hands‑on users lean heavily on rustdoc for struct fields. The following
 public fields are undocumented:
 
 - `src/transport.rs:19‑23` — `Response { data, sw1, sw2 }`.
 - `src/sdm_url.rs:64‑69` — `SdmUrlOptions { picc_key, mac_key, ctr_ret,
-  max_file_size }`. No note on what happens when the two keys differ, or on
+max_file_size }`. No note on what happens when the two keys differ, or on
   why `max_file_size` defaults to 256.
 - `src/sdm_url.rs:91‑94` — `SdmUrlConfig { ndef_bytes, sdm_settings }`.
 - `src/types/file_settings.rs:248‑253` — `AccessRights { read, write,
-  read_write, change }`. Tell the user which `Access` applies when (e.g.
+read_write, change }`. Tell the user which `Access` applies when (e.g.
   `read` vs `read_write`, which the datasheet overlaps).
 - `src/types/file_settings.rs:352‑357` — `ReadCtrMirror.features` has no
   docstring (the inner `ReadCtrFeatures` fields are documented).
 - `src/types/file_settings.rs:425‑431` — `PiccData::Encrypted { key, offset,
-  content }` — `content` lacks a doc.
+content }` — `content` lacks a doc.
 - `src/types/file_settings.rs:490‑506` — `MacWindow`, `EncFileData` fields
   are terse: "First byte of file data covered by the authentication MAC"
-  doesn't tell a beginner whether the byte *at* `input` is the first
+  doesn't tell a beginner whether the byte _at_ `input` is the first
   covered byte or the last preceding one. Add a small example.
 - `src/types/file_settings.rs:735‑742` — `FileSettingsView`, the main
   decoded type, has **zero** field docstrings.
@@ -208,12 +204,13 @@ public fields are undocumented:
   `NormalProcessing`, `Unknown(u16)`). Note also that `WrongLeField` and
   `WrongLeFieldExpected(u8)` coexist; the distinction isn't explained.
 
-### 4.4 Real rustdoc warnings
+### 4.3 Real rustdoc warnings
+
 Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
 
 - `src/crypto/key_diversification.rs:1` — "documentation test in private
   item". The module is `pub` only under `#[cfg(feature =
-  "key_diversification")]` via `lib.rs:268‑331`, but the doctest lives in
+"key_diversification")]` via `lib.rs:268‑331`, but the doctest lives in
   the inner module itself. Move the example up to the
   `pub mod key_diversification { … }` re‑export in `lib.rs`, or hoist it
   into the re‑exported items' own rustdoc.
@@ -225,11 +222,12 @@ Note: an earlier exploration claimed "6 broken intra‑doc links". That was
 **not reproducible**. The three warnings above are the full set on today's
 tree.
 
-### 4.5 `docs.rs` feature tags
+### 4.4 `docs.rs` feature tags
+
 - `lib.rs:264‑266` — `pub mod sdm` carries
   `#[cfg_attr(docsrs, doc(cfg(feature = "sdm")))]`. Good.
 - `lib.rs:267` — `pub mod key_diversification` is `#[cfg(feature =
-  "key_diversification")]` but **missing** the `doc(cfg(...))` attribute.
+"key_diversification")]` but **missing** the `doc(cfg(...))` attribute.
   Users browsing docs.rs won't see a feature badge.
 - The `alloc`‑gated items in `src/sdm_url.rs` (`:27`, `:89`, `:228`) and
   `src/crypto/sdm.rs` (`:21`, `:92`, `:160`) are similarly missing
@@ -278,9 +276,9 @@ tree.
   - rename the entry point (`Sdm::try_new_without_picc_size_check`) and
     expose a `try_new_with_mode(..., CryptoMode)` that performs the full
     check.
-  The current design pushes the responsibility onto the user, which is
-  exactly what the `sdm_url_config!` macro is meant to hide — it should be
-  hidden in the manual path too.
+    The current design pushes the responsibility onto the user, which is
+    exactly what the `sdm_url_config!` macro is meant to hide — it should be
+    hidden in the manual path too.
 - **`Configuration::with_failed_auth_counter(true, 1000, 10)`**
   (`types/configuration.rs:123`) takes positional `(bool, u16, u16)`.
   Trivially easy to swap `limit` and `decrement`. Split into
@@ -310,7 +308,7 @@ Most unwraps are either in tests or provably safe (`ArrayVec::push` on
 pre‑sized buffers). Two worth tightening:
 
 - **`Version::uid()` / `Version::batch_number()`** (`types/version.rs:87‑89,
-  92‑96`) use `.expect("slice with incorrect length")` to convert a
+92‑96`) use `.expect("slice with incorrect length")` to convert a
   statically known `&[u8]` of length 7/4 into `&[u8; 7]` / `&[u8; 4]`. The
   idiom should be `first_chunk::<7>()` / a direct array reference cast;
   at minimum the message is misleading for what is a compile‑time invariant.
@@ -350,7 +348,7 @@ level, so users don't wrap the call in `std::panic::catch_unwind`.
   (`:403`). Either all three are internal debug hooks or all three are API.
   Most likely `pcd_cap2` wants the same treatment as the other two.
 - `Session<Authenticated>::get_version` doc says "Uses MAC mode
-  communication" but not *why* a user would care. Mention the practical
+  communication" but not _why_ a user would care. Mention the practical
   consequence: authenticated + MAC‑mode advances `CmdCtr` and keeps the
   channel alive; the unauthenticated variant does not.
 - `enable_lrp` (`authenticated.rs:429`) has an inline warning about
@@ -368,7 +366,7 @@ The crate is on a good trajectory — strong typestate, careful validation,
 excellent spec citations. Before a 1.0 I would prioritise, in order:
 
 1. Document the **self‑consume rationale** on `Session<Authenticated<_>>`
-   and then *consistently* apply it (`read_file_with_mode` naming, plain
+   and then _consistently_ apply it (`read_file_with_mode` naming, plain
    vs MAC distinction written down — §3).
 2. Close the **documentation gaps** on public fields, variants, and TODOs
    (§4.1–§4.3).

@@ -11,7 +11,7 @@ pub enum ResponseStatus {
     NoSuchKey,
     /// Length of command string invalid.
     LengthError,
-    /// Curent configuration / status does not allow the requested command.
+    /// Current configuration / status does not allow the requested command.
     PermissionDenied,
     /// Value of the parameter(s) invalid.
     ParameterError,
@@ -22,7 +22,7 @@ pub enum ResponseStatus {
     AuthenticationError,
     /// Additional frame expected to be sent.
     AdditionalFrame,
-    /// Attempt to read/write data from/to byeond the file's/record's limits.
+    /// Attempt to read/write data from/to beyond the file's/record's limits.
     /// Attempt to exceed the limits of a value file.
     BoundaryError,
     /// Previous command was not fully completed. Not all frames were requested or provided by the PCD.

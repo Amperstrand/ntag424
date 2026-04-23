@@ -230,7 +230,7 @@ struct ParsedTemplate<const N: usize> {
 ///
 /// Converts a URL string with placeholder tokens into the NDEF file content
 /// and [`SdmUrlConfig`] object. The NDEF file content must be written to the tag,
-/// and settings must be appliedwith [`change_file_settings`](`crate::Session::change_file_settings`).
+/// and settings must be applied with [`change_file_settings`](`crate::Session::change_file_settings`).
 ///
 /// # Placeholders
 ///

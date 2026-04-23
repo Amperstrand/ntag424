@@ -24,7 +24,7 @@
 //!
 //! Furthermore, the tag stores a set of five application defined AES-128 keys[^1],
 //! numbered 0 to 4, with the key 0 being
-//! the _Application Master Key_. The master key is needed to change any of the keys or to configure the tag.
+//! the _Application Master Key_. The master key is needed to change any of the keys and to configure the tag.
 //!
 //! For each file one can configure read and write permissions, either using
 //! a key or allowing free, unauthenticated access.
@@ -56,6 +56,55 @@
 //! allowing many NFC readers to read the SUN identifier without special support for the tag's cryptographic features.
 //! However, the NDEF file can also be configured to require authentication through one of the AES keys for reading.
 //!
+//! ### Example: what a reader sees
+//!
+//! The snippet below builds an NDEF file from a URL template and shows the
+//! bytes written to the tag. Requires the `sdm` and `alloc` features.
+//!
+//! ```
+//! # #[cfg(all(feature = "sdm", feature = "alloc"))]
+//! # fn main() {
+//! use ntag424_core::sdm::CryptoMode;
+//!
+//! let (ndef, _sdm) = ntag424_core::sdm_url_config!(
+//!     "https://example.com/?p={picc}&m={mac}",
+//!     CryptoMode::Aes,
+//! );
+//!
+//! // The first 7 bytes are the NDEF Type 4 wrapper (2-byte NLEN + short record
+//! // header for a URI payload with the "https://" prefix code 0x04). The URI
+//! // body follows, with `{picc}` filled with 32 ASCII zeros (placeholder for
+//! // 16 bytes of encrypted PICCData, ASCII-doubled) and `{mac}` with 16 ASCII
+//! // zeros (placeholder for the 8-byte truncated CMAC).
+//! assert_eq!(&ndef[..7], &[0x00, 0x47, 0xD1, 0x01, 0x43, 0x55, 0x04]);
+//! assert_eq!(
+//!     &ndef[7..],
+//!     b"example.com/?p=00000000000000000000000000000000&m=0000000000000000",
+//! );
+//! # }
+//! # #[cfg(not(all(feature = "sdm", feature = "alloc")))] fn main() {}
+//! ```
+//!
+//! When a standard NFC reader performs an unauthenticated read, the tag
+//! returns the same bytes but with the placeholders replaced by freshly
+//! computed values, e.g.:
+//!
+//! ```text
+//! https://example.com/?p=EF963FF7828658A599F3041510671E88&m=94EED9EE65337086
+//! ```
+//!
+//! The `p=` value is `AES-CBC-ENC(App.Key0, 0^16, PICCDataTag || UID ||
+//! SDMReadCtr || RandomPadding)` (16 bytes, mirrored as 32 ASCII hex chars),
+//! and `m=` is the truncated CMAC under the session MAC key derived from
+//! `(UID, SDMReadCtr)`. By default the [`sdm_url_config!`] macro makes the
+//! MAC window start at the first `/`, `?`, or `#` in the URI body and end
+//! just before the `{mac}` placeholder — for this template that is the 39
+//! bytes `/?p=<32-hex-PICCData>&m=`; use `[[` in the template to move the
+//! start elsewhere (see [`MacWindow`](`crate::types::file_settings::MacWindow`)).
+//! A server decrypts `p=`, re-derives the session key, and verifies the
+//! CMAC; see [`sdm::SecureDynamicMessageVerifier`].
+//!
+//!
 //! ### SDM configuration
 //!
 //! SDM is configured via the [`Sdm`](`crate::types::file_settings::Sdm`) struct. It has three main parts:
@@ -67,7 +116,7 @@
 //!   but not authenticated on their own.
 //! - [`Encrypted`](`crate::types::file_settings::PiccData::Encrypted`) — UID and/or read counter
 //!   are packed into an encrypted identity blob (PICCData) at one offset, decryptable with one of the
-//!   stored key. Provides confidentiality for the identity data itself.
+//!   stored keys. Provides confidentiality for the identity data itself.
 //! - [`None`](`crate::types::file_settings::PiccData::None`) — no identity data mirrored.
 //!
 //! **Authentication MAC ([`FileRead`](`crate::types::file_settings::FileRead`))** — a truncated
@@ -244,7 +293,7 @@
 //! using either test vectors or collected responses from real hardware tags. Unit tests use the
 //! same sources.
 //!
-//! _Not tags were harmed during development of this crate._
+//! _No tags were harmed during development of this crate._
 //!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
 #![no_std]
