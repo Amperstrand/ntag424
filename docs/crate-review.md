@@ -323,15 +323,7 @@ is defensible — `MAX_SYSTEM_ID_LEN` / 31‑byte limits are programmer‑contro
 constants, not runtime data. Just document that rationale at the function
 level, so users don't wrap the call in `std::panic::catch_unwind`.
 
-## 7. Module size
-
-- `src/crypto/sdm.rs` (~1400 lines) similarly mixes verifier public API,
-  NDEF parsing, and PICCData decryption. The public surface is small
-  (basically `SecureDynamicMessageVerifier`, `CryptoMode`, `SdmError`,
-  `SdmVerification`), so splitting the internals out would make the file
-  much friendlier for contributors.
-
-## 8. Small things
+## 7. Small things
 
 - `SdmUrlOptions::new()` and `Default::default()` (`sdm_url.rs:71‑85`) are
   redundant. Keep one as the canonical spelling and have the other delegate.

@@ -401,14 +401,14 @@ impl Sdm {
         check!(enc_range, rctr_range, OverlapKind::EncAndRCtr);
 
         // If tamper status is inside the encrypted file data range, it must be in the plain half.
-        if let (Some((tt, tt_len)), Some((enc_start, enc_len))) = (tt_range, enc_range) {
-            if ranges_overlap(tt, tt_len, enc_start, enc_len) {
-                let plain_half_end = enc_start + enc_len / 2;
-                if tt + tt_len > plain_half_end {
-                    return Err(FileSettingsError::MirrorsOverlap(
-                        OverlapKind::TamperInCiphertextHalf,
-                    ));
-                }
+        if let (Some((tt, tt_len)), Some((enc_start, enc_len))) = (tt_range, enc_range)
+            && ranges_overlap(tt, tt_len, enc_start, enc_len)
+        {
+            let plain_half_end = enc_start + enc_len / 2;
+            if tt + tt_len > plain_half_end {
+                return Err(FileSettingsError::MirrorsOverlap(
+                    OverlapKind::TamperInCiphertextHalf,
+                ));
             }
         }
 
