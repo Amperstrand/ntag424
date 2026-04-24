@@ -22,7 +22,10 @@ pub trait Transport {
 
 /// A response to an APDU command, containing the data and the status words.
 pub struct Response<D: AsRef<[u8]>> {
+    /// The data returned by the tag, if any.
     pub data: D,
+    /// Status word 1 (SW1) as returned by the tag.
     pub sw1: u8,
+    /// Status word 2 (SW2) as returned by the tag.
     pub sw2: u8,
 }

@@ -72,6 +72,7 @@ pub struct ReadCtrFeatures {
 pub struct ReadCtrMirror {
     /// Start of the 6-byte ASCII read counter placeholder.
     pub offset: Offset,
+    /// Read counter features (limit and retrieval access right).
     pub features: ReadCtrFeatures,
 }
 
@@ -146,6 +147,7 @@ pub enum PiccData {
         key: KeyNumber,
         /// Start of the encrypted identity data placeholder.
         offset: Offset,
+        /// Which identity data is inside the encrypted blob, and read counter features if applicable.
         content: EncryptedContent,
     },
 }
@@ -207,9 +209,13 @@ impl PiccData {
 /// `input.get() ≤ mac.get()` is checked by [`Sdm::try_new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MacWindow {
-    /// First byte of file data covered by the authentication MAC.
+    /// Index of first byte of file data covered by the authentication MAC.
+    ///
+    /// By default this is the start of the file (offset 0).
     pub input: Offset,
     /// Start of the 16-byte ASCII authentication MAC placeholder.
+    ///
+    /// The MAC covers the file data in the range `[input, mac)`.
     pub mac: Offset,
 }
 

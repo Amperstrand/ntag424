@@ -145,12 +145,23 @@ impl CtrRetAccess {
 ///
 /// Encodes `Read`, `Write`, `ReadWrite`, and `Change` permissions.
 ///
+/// Access is granted if at least one of the specified conditions
+/// is satisfied. For example, if `read` is `Key(Key0)` and
+/// `read_write` is `Free`, then read access is granted if either
+/// Key0 authentication is successful or no authentication is performed at all.
+///
 /// NT4H2421Gx §8.2.3.3, Table 7. Wire format: 2 bytes little-endian,
 /// `(Read << 12) | (Write << 8) | (ReadWrite << 4) | Change`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessRights {
+    /// Read access right.
     pub read: Access,
+    /// Write access right.
     pub write: Access,
+    /// Read and write access right.
+    ///
+    /// Equivalent to assigning the same access right to both `read` and `write`.
+    /// There is no command that requires both read and write access at the same time.
     pub read_write: Access,
     pub change: Access,
 }

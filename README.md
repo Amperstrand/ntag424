@@ -11,7 +11,7 @@ targets both embedded readers and host-side provisioning and verification.
 - **Full application protocol**: Authentication (AES and LRP), file read/write,
   file settings, key changes, configuration, originality verification.
 - **Secure Dynamic Messaging (SDM)** server-side verification, plus a
-  `sdm_url_config!` for convenient config generation at compile time.
+  `sdm_url_config!` macro for convenient config generation at compile time.
 - **Key diversification** for deriving per-tag keys from a backend
   master key.
 - **Transport-agnostic**: Bring your own NFC reader by implementing the

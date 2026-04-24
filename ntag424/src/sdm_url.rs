@@ -67,9 +67,17 @@ pub enum SdmUrlError {
 /// Options controlling key assignment and limits for SDM URL plan builders.
 #[derive(Debug, Clone, Copy)]
 pub struct SdmUrlOptions {
+    /// Key used for `{picc...}`, if used.
     pub picc_key: KeyNumber,
+    /// Key used for MAC generation.
     pub mac_key: KeyNumber,
+    /// Access rights for the SDM read counter.
     pub ctr_ret: CtrRetAccess,
+    /// Maximum allowed NDEF file size.
+    ///
+    /// This is used to reject templates that would
+    /// result in file sizes that cannot be written to the tag.
+    /// The default is 256, which is the maximum size of the NDEF file.
     pub max_file_size: u16,
 }
 
@@ -98,7 +106,9 @@ impl Default for SdmUrlOptions {
 #[cfg(feature = "alloc")]
 #[derive(Debug)]
 pub struct SdmUrlConfig {
+    /// NDEF file content to be written to the tag.
     pub ndef_bytes: Vec<u8>,
+    /// Settings to be applied with [`change_file_settings`](`crate::Session::change_file_settings`).
     pub sdm_settings: Sdm,
 }
 

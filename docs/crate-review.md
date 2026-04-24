@@ -97,27 +97,6 @@ explain the consequences`. Both toggle **permanent** chip behaviour; the
 Hands‑on users lean heavily on rustdoc for struct fields. The following
 public fields are undocumented:
 
-- `src/transport.rs:19‑23` — `Response { data, sw1, sw2 }`.
-- `src/sdm_url.rs:64‑69` — `SdmUrlOptions { picc_key, mac_key, ctr_ret,
-max_file_size }`. No note on what happens when the two keys differ, or on
-  why `max_file_size` defaults to 256.
-- `src/sdm_url.rs:91‑94` — `SdmUrlConfig { ndef_bytes, sdm_settings }`.
-- `src/types/file_settings.rs:248‑253` — `AccessRights { read, write,
-read_write, change }`. Tell the user which `Access` applies when (e.g.
-  `read` vs `read_write`, which the datasheet overlaps).
-- `src/types/file_settings.rs:352‑357` — `ReadCtrMirror.features` has no
-  docstring (the inner `ReadCtrFeatures` fields are documented).
-- `src/types/file_settings.rs:425‑431` — `PiccData::Encrypted { key, offset,
-content }` — `content` lacks a doc.
-- `src/types/file_settings.rs:490‑506` — `MacWindow`, `EncFileData` fields
-  are terse: "First byte of file data covered by the authentication MAC"
-  doesn't tell a beginner whether the byte _at_ `input` is the first
-  covered byte or the last preceding one. Add a small example.
-- `src/types/file_settings.rs:735‑742` — `FileSettingsView`, the main
-  decoded type, has **zero** field docstrings.
-- `src/types/file_settings.rs:986‑990` — `FileSettingsPatch` fields are
-  also undocumented. A newcomer building one has to reverse‑engineer from
-  the field types.
 - `src/types/uid.rs:10‑11` — `Uid::Fixed([u8; 7])`, `Uid::Random([u8; 4])`.
   The outer doc (`:1‑7`) says the random variant's leading byte is `0x08`
   per ISO/IEC 14443‑3 but doesn't tell the reader whether that `0x08` is

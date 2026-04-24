@@ -18,11 +18,19 @@ use super::sdm::{
 /// NT4H2421Gx §10.7.2, Table 73.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsView {
+    /// File type identifier.
     pub file_type: FileType,
     /// 24-bit file size.
     pub file_size: u32,
+    /// Communication mode (how data is protected on the wire).
+    ///
+    /// The mode passed to [`read_file_with_mode`](crate::Session::read_file_with_mode)
+    /// and [`write_file_with_mode`](crate::Session::write_file_with_mode)
+    /// must match this.
     pub comm_mode: CommMode,
+    /// Access rights for the file.
     pub access_rights: AccessRights,
+    /// Optional Secure Dynamic Messaging (SDM) settings, if SDM is enabled for the file.
     pub sdm: Option<Sdm>,
 }
 
@@ -269,8 +277,15 @@ impl FileSettingsView {
 /// NT4H2421Gx §10.7.1, Table 69.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsPatch {
+    /// Communication mode for the file (how data is protected on the wire).
+    ///
+    /// The mode passed to [`read_file_with_mode`](crate::Session::read_file_with_mode)
+    /// and [`write_file_with_mode`](crate::Session::write_file_with_mode)
+    /// must match this.
     pub comm_mode: CommMode,
+    /// Access rights for the file.
     pub access_rights: AccessRights,
+    /// Optional Secure Dynamic Messaging (SDM) settings, if SDM should be enabled for the file.
     pub sdm: Option<Sdm>,
 }
 
