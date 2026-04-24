@@ -4,6 +4,14 @@
 // SPDX-License-Identifier: MIT
 
 //! Capability Container (CC) file parsing and serialisation.
+//!
+//! The CC file (File No. `01h`, File ID `E103h`) is a static metadata file
+//! that describes the tag's NFC Forum Type 4 Tag capabilities. In normal use
+//! you only need this module when you want to inspect or verify the CC
+//! contents: read the raw bytes with
+//! [`Session::read_file_unauthenticated`](crate::Session::read_file_unauthenticated)
+//! (passing [`File::CapabilityContainer`](crate::types::File::CapabilityContainer)),
+//! then decode them with [`CapabilityContainer::from_bytes`].
 use arrayvec::ArrayVec;
 use thiserror::Error;
 

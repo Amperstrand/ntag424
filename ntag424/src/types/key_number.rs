@@ -42,6 +42,13 @@ impl KeyNumber {
 /// command (e.g. `ChangeKey` Case 1 vs Case 2, AN12196 §5.16); making the
 /// distinction at the type level prevents accidental misuse and lets the
 /// master-key path expose a different signature.
+///
+/// **Practical rule:** pass `NonMasterKeyNumber` to [`Session::change_key`];
+/// the compiler rejects `Key0` there at compile time.  To rotate the master
+/// key itself, call [`Session::change_master_key`] instead.
+///
+/// [`Session::change_key`]: crate::Session::change_key
+/// [`Session::change_master_key`]: crate::Session::change_master_key
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum NonMasterKeyNumber {
     Key1,

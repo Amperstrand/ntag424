@@ -286,7 +286,9 @@
 //!
 //! # Sources
 //!
-//! The following sources were used to implement this crate:
+//! The following sources were used to implement this crate. Section numbers
+//! cited throughout the docstrings (e.g. "§5.16", "§8.2.3.2") are anchors
+//! into these PDFs, so you can jump straight to the relevant passage.
 //!
 //! - [NTAG 424 DNA datasheet](https://www.nxp.com/docs/en/data-sheet/NT4H2421Gx.pdf)
 //! - [AN12196](https://www.nxp.com/docs/en/application-note/AN12196.pdf)

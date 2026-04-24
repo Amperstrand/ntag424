@@ -26,23 +26,6 @@ beginner still has to reverse‑engineer:
   likewise consume `self` and hand it back on success — see §3 below") would
   prevent a lot of head‑scratching the first time `session.authenticate_aes(…)`
   returns something of a different type.
-- **`NonMasterKeyNumber` vs `KeyNumber`.** The split is elegant, but the doc
-  in `types/key_number.rs:34‑40` explains it in spec terms ("`ChangeKey`
-  Case 1 vs Case 2"). For a hands‑on user, add the practical consequence:
-  "Use `NonMasterKeyNumber` for `change_key` (refuses `Key0` at compile time);
-  use `change_master_key` for `Key0`."
-- **CC file is absent from the narrative.** `lib.rs:17‑20` names the CC file
-  but the rest of the docs don't tell the reader when they'd ever want to
-  touch it. `types::cc` (`src/types/cc.rs`) is a fully public module with
-  `CapabilityContainer` / `FileCtrl` / `CcError`, yet no `Session` method
-  returns or accepts it. Either show the intended pattern (read the file
-  bytes via `read_file_unauthenticated(File::CapabilityContainer, …)`, then
-  parse with `CapabilityContainer::from_bytes`) or state the module's job in
-  one sentence at its top.
-- **Sources for hands‑on reading.** `lib.rs:236‑241` lists raw PDFs. Note
-  explicitly that the AN/Datasheet section numbers cited throughout the
-  docstrings are anchors into these PDFs — that link is useful only if the
-  reader knows it's a link.
 
 ## 2. Re‑exports and naming
 
