@@ -182,11 +182,9 @@
 //! # mod example {
 //! use ntag424_core::{
 //!     Session, SessionError, Transport,
+//!     File, KeyNumber, NonMasterKeyNumber,
+//!     Access, AccessRights, CommMode, FileSettingsPatch,
 //!     sdm::CryptoMode,
-//!     types::{
-//!         File, KeyNumber, NonMasterKeyNumber,
-//!         file_settings::{Access, AccessRights, CommMode, FileSettingsPatch},
-//!     },
 //!     key_diversification::diversify_ntag424,
 //! };
 //!
@@ -453,3 +451,8 @@ macro_rules! sdm_url_config {
 pub use transport::{Response, Transport};
 
 pub use session::{Session, SessionError};
+
+pub use types::{
+    Access, AccessRights, CommMode, Configuration, File, FileSettingsPatch, FileSettingsView,
+    KeyNumber, NonMasterKeyNumber, TagTamperStatus, TagTamperStatusReadout, Uid, Version,
+};

@@ -29,21 +29,6 @@ beginner still has to reverse‑engineer:
 
 ## 2. Re‑exports and naming
 
-- **Root re‑export inconsistency.** `lib.rs:397‑399` puts `Session`,
-  `SessionError`, `Transport`, `Response` at the crate root, but **every
-  other everyday type** (`File`, `KeyNumber`, `NonMasterKeyNumber`,
-  `Configuration`, `Version`, `Uid`, `CommMode`, `Access`, `AccessRights`,
-  `FileSettingsPatch`, `FileSettingsView`, `TagTamperStatusReadout`, …)
-  lives under `types::`. A hands‑on user ends up writing:
-
-  ```rust
-  use ntag424_core::{Session, SessionError, Transport, types::{File, KeyNumber, ...}};
-  ```
-
-  Either re‑export the common ones at the root, or move `Session`/`SessionError`
-  into a module for symmetry. The provisioning example in `lib.rs:129‑137`
-  already has this ugliness baked in.
-
 - **Macro vs function name collision.** `sdm_url_config!` is exported at the
   crate root (`lib.rs:383`) while the function version is
   `ntag424_core::sdm::sdm_url_config` (`src/sdm_url.rs:285`). Same name,
@@ -54,10 +39,6 @@ beginner still has to reverse‑engineer:
   `sdm::Verifier` (keep the longer name as a type alias for discoverability).
   Paired with `sdm::CryptoMode`, `sdm::Verifier::try_new(sdm, CryptoMode::Aes)`
   reads naturally.
-- **`OverlapKind`, `ReservedByte`** are re‑exported from `types`
-  (`types/mod.rs:16‑18`) but are only ever produced by `FileSettingsError`.
-  Move them down to `types::file_settings::*` so the top‑level `types` surface
-  stays calm.
 
 ## 3. Method shape on `Session<Authenticated<_>>`
 
