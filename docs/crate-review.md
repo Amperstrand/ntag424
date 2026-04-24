@@ -107,14 +107,6 @@ public fields are undocumented:
   `Version` is undocumented. Users have no idea what `hw_protocol_type()`
   returns or what to compare it against. At minimum link to
   "NT4H2421Gx §10.5.2, Table 58" next to each.
-- `src/types/response_status.rs:34‑49` — ~11 variants have no doc
-  (`WrongLength`, `SecurityStatusNotSatisfied`,
-  `ConditionsOfUseNotSatisfied`, `IncorrectParametersInTheCommandDataField`,
-  `FileOrApplicationNotFound`, `IncorrectParametersP1P2`,
-  `LcInconsistentWithParametersP1P2`, `WrongLeField`,
-  `InstructionCodeNotSupportedOrInvalid`, `ClassNotSupported`,
-  `NormalProcessing`, `Unknown(u16)`). Note also that `WrongLeField` and
-  `WrongLeFieldExpected(u8)` coexist; the distinction isn't explained.
 
 ### 4.3 Real rustdoc warnings
 
