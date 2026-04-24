@@ -1,4 +1,4 @@
-# Review: `ntag424-core` API & documentation
+# Review: `ntag424` API & documentation
 
 Target audience: a generalist Rust developer who has never read NT4H2421Gx. The
 goal is a high-quality, stable API. The crate is well thought out, well cited

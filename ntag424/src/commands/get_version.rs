@@ -51,7 +51,10 @@ pub(crate) async fn get_version_mac<T: Transport, S: SessionSuite>(
     let (part1, part2, last) = drive_chain(transport, &head).await?;
     let last = last.as_ref();
     if last.len() != 14 + 8 {
-        return Err(SessionError::UnexpectedLength { got: last.len(), expected: 22 });
+        return Err(SessionError::UnexpectedLength {
+            got: last.len(),
+            expected: 22,
+        });
     }
     // RespData_all (part1 || part2 || part3_data) followed by MACt.
     let mut body = [0u8; 7 + 7 + 14 + 8];
@@ -117,9 +120,15 @@ async fn request_intermediate_part<T: Transport>(
 
 fn extract_part3<E: Error + core::fmt::Debug>(data: &[u8]) -> Result<[u8; 14], SessionError<E>> {
     data.get(..14)
-        .ok_or(SessionError::UnexpectedLength { got: data.len(), expected: 14 })?
+        .ok_or(SessionError::UnexpectedLength {
+            got: data.len(),
+            expected: 14,
+        })?
         .try_into()
-        .map_err(|_| SessionError::UnexpectedLength { got: data.len(), expected: 14 })
+        .map_err(|_| SessionError::UnexpectedLength {
+            got: data.len(),
+            expected: 14,
+        })
 }
 
 #[cfg(test)]

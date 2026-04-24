@@ -81,7 +81,7 @@ states:
 ### Current codebase mapping
 
 In this repository, the reader-side hook for this decision is exposed by
-`ntag424-core/src/types/version.rs`.
+`ntag424/src/types/version.rs`.
 
 The relevant accessors are:
 
@@ -150,7 +150,7 @@ That is **not** a published on-wire APDU vector; the final C-APDU depends on the
 ### Current codebase mapping
 
 In this repository, this `SetConfiguration` support belongs in
-`ntag424-core/src/types/configuration.rs`.
+`ntag424/src/types/configuration.rs`.
 
 The current implementation surface is the `Configuration` builder and its
 `build()` wire-order emitter. Right now it models options `00h`, `04h`, `05h`,
@@ -252,7 +252,7 @@ Both status bytes are either plain together or encrypted together; there is no m
 ### Current codebase mapping
 
 In this repository, the `ChangeFileSettings` / `GetFileSettings` side belongs in
-`ntag424-core/src/types/file_settings.rs`.
+`ntag424/src/types/file_settings.rs`.
 
 The relevant existing types are:
 
@@ -347,8 +347,8 @@ For implementation purposes, the command tables are the more reliable descriptio
 ### Current codebase mapping
 
 `GetTTStatus` itself is **not** represented in either
-`ntag424-core/src/types/configuration.rs` or
-`ntag424-core/src/types/file_settings.rs`.
+`ntag424/src/types/configuration.rs` or
+`ntag424/src/types/file_settings.rs`.
 
 Those two files only cover:
 

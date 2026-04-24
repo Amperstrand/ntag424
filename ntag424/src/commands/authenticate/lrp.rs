@@ -50,7 +50,10 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
     // Response: AuthMode (1, 01h = LRP) || RndB (16), plain (Table 44, p. 53).
     let data1 = r1.data.as_ref();
     if data1.len() != 17 {
-        return Err(SessionError::UnexpectedLength { got: data1.len(), expected: 17 });
+        return Err(SessionError::UnexpectedLength {
+            got: data1.len(),
+            expected: 17,
+        });
     }
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);
@@ -140,7 +143,10 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     // Response: AuthMode (1, 01h = LRP) || RndB (16), plain (Table 38).
     let data1 = r1.data.as_ref();
     if data1.len() != 17 {
-        return Err(SessionError::UnexpectedLength { got: data1.len(), expected: 17 });
+        return Err(SessionError::UnexpectedLength {
+            got: data1.len(),
+            expected: 17,
+        });
     }
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);

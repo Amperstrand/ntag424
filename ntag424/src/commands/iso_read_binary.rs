@@ -78,7 +78,10 @@ pub(crate) async fn iso_read_binary<T: Transport>(
     }
     let data = resp.data.as_ref();
     if data.len() > want {
-        return Err(SessionError::UnexpectedLength { got: data.len(), expected: want });
+        return Err(SessionError::UnexpectedLength {
+            got: data.len(),
+            expected: want,
+        });
     }
     buf[..data.len()].copy_from_slice(data);
     Ok(data.len())

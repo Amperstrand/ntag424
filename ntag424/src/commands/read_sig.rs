@@ -35,8 +35,10 @@ pub(crate) async fn read_sig<T: Transport>(
         return Err(SessionError::ErrorResponse(code.status()));
     }
     let data = resp.data.as_ref();
-    data.try_into()
-        .map_err(|_| SessionError::UnexpectedLength { got: data.len(), expected: SIGNATURE_LEN })
+    data.try_into().map_err(|_| SessionError::UnexpectedLength {
+        got: data.len(),
+        expected: SIGNATURE_LEN,
+    })
 }
 
 /// Ciphertext length for an authenticated `Read_Sig` response.

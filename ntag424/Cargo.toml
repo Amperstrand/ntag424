@@ -1,5 +1,5 @@
 [package]
-name = "ntag424-core"
+name = "ntag424"
 version = "0.1.0"
 keywords = ["nfc", "ntag424"]
 categories = ["embedded", "cryptography", "no-std"]

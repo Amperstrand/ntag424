@@ -135,7 +135,10 @@ async fn transmit<T: Transport, S: SessionSuite>(
     } else {
         // Case 2: PICC returns 91 00 with no MACt (§5.16.2 Table 26 step 18).
         if !body.is_empty() {
-            return Err(SessionError::UnexpectedLength { got: body.len(), expected: 0 });
+            return Err(SessionError::UnexpectedLength {
+                got: body.len(),
+                expected: 0,
+            });
         }
         channel.advance_counter();
     }

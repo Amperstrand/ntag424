@@ -2,7 +2,7 @@
 
 This document proposes a redesign of the types backing the
 `ChangeFileSettings` / `GetFileSettings` payloads in
-`ntag424-core/src/types/file_settings.rs`. The goal is to push as much of
+`ntag424/src/types/file_settings.rs`. The goal is to push as much of
 the wire format's validity rules into the Rust type system as is
 reasonably possible, so that "make illegal states unrepresentable"
 replaces the current mix of optional fields + a `validate_sdm_settings`

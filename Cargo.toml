@@ -1,5 +1,5 @@
 [workspace]
-members = ["ntag424-core"]
+members = ["ntag424"]
 resolver = "3"
 
 [workspace.dependencies]

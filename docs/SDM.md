@@ -3,7 +3,7 @@
 This note summarizes the crypto routines needed for Secure Dynamic Messaging
 (SDM) from `NT4H2421Gx` rev. 3.0, section `9.3` (pages 34-43).
 
-It is intended as an implementation guide for `ntag424-core`, not as a full
+It is intended as an implementation guide for `ntag424`, not as a full
 feature-spec walkthrough.
 
 ## Scope
