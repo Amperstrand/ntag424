@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 /// One TagTamper status byte as returned by `GetTTStatus`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TagTamperStatus {

@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! This module implements Leakage Resilient Primitive (LRP)
 //! as described in AN12304.
 //!

@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 /// A response status word returned by the tag after processing a command.
 pub enum ResponseStatus {

@@ -3,3 +3,6 @@ ensure-no-std:
 
 doc:
   RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --workspace --no-deps
+
+license:
+  uvx reuse annotate -c 'Jannik Schürg' -l Apache-2.0 -l MIT --merge-copyrights ntag424-core/**/*.rs

@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 /// UID observed pre-authentication.
 ///
 /// Randomized tags return a 4-byte single-size UID (leading byte

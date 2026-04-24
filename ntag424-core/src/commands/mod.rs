@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 mod authenticate;
 mod change_file_settings;
 mod change_key;

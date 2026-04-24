@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Public SDM verifier types and `SecureDynamicMessageVerifier` implementation.
 
 use core::ops::Range;

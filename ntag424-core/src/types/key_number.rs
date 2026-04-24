@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 /// Supported application key numbers for NTAG 424 DNA.
 ///
 /// NTAG 424 DNA exposes five application keys, `0h` to `4h`; key `0` is the

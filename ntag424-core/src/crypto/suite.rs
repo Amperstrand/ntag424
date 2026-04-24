@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Secure Messaging cipher suites for NT4H2421Gx (NTAG 424 DNA).
 //!
 //! The chip supports two Secure Messaging modes that share protocol framing

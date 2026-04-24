@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Configuration payloads for the `SetConfiguration` command (NT4H2421Gx
 //! §10.5.1, Tables 49 and 50).
 

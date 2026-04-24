@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! NXP Originality Signature verification (AN12196 §7.2).
 //!
 //! ECDSA over `secp224r1` (NIST P-224) against the raw 7-byte UID. No hash

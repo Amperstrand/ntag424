@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! A transport-agnostic crate for communicating with NTAG 424 DNA NFC tags.
 //!
 //! # High level hardware overview

@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 use crate::Transport;
 use crate::commands::authenticate::AuthResult;
 use crate::crypto::suite::{Direction, LrpSuite, SessionSuite};

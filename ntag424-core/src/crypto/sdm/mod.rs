@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Secure Dynamic Messaging (SDM) server-side verification.
 //!
 //! Implements the read-side (server / verifier) crypto for NTAG 424 DNA

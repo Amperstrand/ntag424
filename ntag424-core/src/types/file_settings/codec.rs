@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 use crate::types::KeyNumber;
 
 use super::access::{AccessRights, CommMode, CtrRetAccess, FileReadKey, FileType};

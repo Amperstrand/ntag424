@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Capability Container (CC) file parsing and serialisation.
 use arrayvec::ArrayVec;
 use thiserror::Error;

@@ -1,3 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+// SPDX-FileCopyrightText: 2026 Jannik Sch�rg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Authenticated-session framing for NTAG 424 DNA Secure Messaging
 //! (NT4H2421Gx §9.1).
 //!

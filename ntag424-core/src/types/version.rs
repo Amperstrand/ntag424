@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 /// Software, hardware, and production information about the tag.
 ///
 /// See [Session](`crate::Session::get_version`) for how to obtain this information from the tag.

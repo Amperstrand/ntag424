@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! Shared test plumbing: a mock [`Transport`] and a minimal `block_on`
 //! driver that sidesteps pulling in a full async runtime as a dev
 //! dependency.

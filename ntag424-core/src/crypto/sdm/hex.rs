@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! ASCII-hex decoding helpers for NDEF SDM placeholder fields.
 
 use super::verifier::SdmError;

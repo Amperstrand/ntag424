@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! SDM session key derivation and MAC verification (NT4H2421Gx §9.3.9).
 
 #[cfg(feature = "alloc")]

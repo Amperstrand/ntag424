@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 /// ISO/IEC 7816-4 elementary files on NTAG 424 DNA.
 ///
 /// These files are accessible via `ISOReadBinary` / `ISOUpdateBinary`.

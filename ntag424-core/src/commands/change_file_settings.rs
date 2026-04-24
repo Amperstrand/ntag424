@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! `ChangeFileSettings` command - NT4H2421Gx §10.7.1, AN12196 §5.9.
 
 use crate::{

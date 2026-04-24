@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! `WriteData` command - NT4H2421Gx §10.8.2.
 //!
 //! The command writes bytes to a StandardData file. Its CommMode is

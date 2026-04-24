@@ -1,3 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Jannik Schürg
+//
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 //! `ISOUpdateBinary` command - NT4H2421Gx §10.9.3.
 //!
 //! ISO/IEC 7816-4 `UPDATE BINARY` (`CLA=00 INS=D6`). The command is
