@@ -12,22 +12,22 @@
 //!
 //! 1. Obtain the [`Sdm`] from [`Session::get_file_settings`] (or construct one via
 //!    [`Sdm::try_new`] matching the tag's configuration).
-//! 2. Create a [`SecureDynamicMessageVerifier`] via [`try_new`] with the
+//! 2. Create a [`Verifier`] via [`try_new`] with the
 //!    settings and [`CryptoMode`].
 //! 3. Call [`verify`] with the raw NDEF file bytes and the application key
 //!    to verify the authentication MAC and recover the dynamic data.
 //!
 //! [`Sdm`]: crate::types::file_settings::Sdm
 //! [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
-//! [`try_new`]: SecureDynamicMessageVerifier::try_new
-//! [`verify`]: SecureDynamicMessageVerifier::verify
+//! [`try_new`]: Verifier::try_new
+//! [`verify`]: Verifier::verify
 //! [`Session::get_file_settings`]: crate::Session::get_file_settings
 //!
 //! # Module layout
 //!
 //! | Sub-module | Contents |
 //! |---|---|
-//! | [`verifier`] | Public API: `CryptoMode`, `SdmError`, `SdmVerification`, `SecureDynamicMessageVerifier` |
+//! | [`verifier`] | Public API: `CryptoMode`, `SdmError`, `SdmVerification`, `Verifier` |
 //! | [`picc`] | PICCData decryption (`decrypt_picc_data_aes/lrp`, §9.3.4) |
 //! | [`keys`] | Session key derivation and MAC verification (`derive_sdm_keys_aes/lrp`, §9.3.9) |
 //! | [`hex`] | NDEF ASCII-hex decoding helpers |
@@ -37,7 +37,7 @@ pub mod keys;
 pub mod picc;
 pub mod verifier;
 
-pub use verifier::{CryptoMode, SdmError, SdmVerification, SecureDynamicMessageVerifier};
+pub use verifier::{CryptoMode, SdmError, SdmVerification, Verifier};
 
 #[cfg(test)]
 mod tests {
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn verify_encrypted_picc_empty_mac() {
         let (settings, ndef) = table4_fixture();
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
         assert_eq!(result.read_ctr, Some(61));
@@ -207,7 +207,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         let tt = result.tamper_status.expect("tag tamper");
         assert_eq!(tt.permanent(), TagTamperStatus::Close);
@@ -220,14 +220,14 @@ mod tests {
         // Tamper with the MAC (last hex char).
         let len = ndef.len();
         ndef[len - 1] = b'0';
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         assert_eq!(v.verify(&ndef, &[0u8; 16]), Err(SdmError::MacMismatch));
     }
 
     #[test]
     fn verify_rejects_short_ndef() {
         let (settings, ndef) = table4_fixture();
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         assert!(matches!(
             v.verify(&ndef[..40], &[0u8; 16]),
             Err(SdmError::NdefTooShort { .. }),
@@ -238,7 +238,7 @@ mod tests {
     fn verify_rejects_invalid_hex() {
         let (settings, mut ndef) = table4_fixture();
         ndef[10] = b'Z'; // corrupt first PICCData hex char
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         assert!(matches!(
             v.verify(&ndef, &[0u8; 16]),
             Err(SdmError::InvalidHex { offset: 10 }),
@@ -264,7 +264,7 @@ mod tests {
 
         let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 7, 7, 56);
 
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         assert_eq!(result.uid, Some(hex_array("042E1D222A6380")));
         assert_eq!(result.read_ctr, Some(106)); // 0x6a
@@ -297,7 +297,7 @@ mod tests {
             Some(63..95),
         );
 
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         assert_eq!(result.uid, Some(hex_array("042E1D222A6380")));
         assert_eq!(result.read_ctr, Some(123)); // 0x7b
@@ -337,7 +337,7 @@ mod tests {
 
         let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key2, 7, 7, 56);
 
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify_with_meta_key(&ndef, &file_key, &meta_key).unwrap();
         assert_eq!(result.uid, Some(uid));
         assert_eq!(result.read_ctr, Some(106));
@@ -347,7 +347,7 @@ mod tests {
     fn try_new_rejects_no_file_read() {
         let settings = Sdm::try_new(PiccData::None, None, None).unwrap();
         assert!(matches!(
-            SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes),
+            Verifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(_)),
         ));
     }
@@ -516,7 +516,7 @@ mod tests {
             &mac_hex_str,
         );
 
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(uid));
         assert_eq!(result.read_ctr, Some(1));
@@ -576,7 +576,7 @@ mod tests {
         .unwrap();
 
         let ndef = build_ndef(b"HELLOWORLD", Some(picc_hex), Some(&enc_hex), b"", &mac_hex);
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         let tt = result.tamper_status.expect("tag tamper");
         assert_eq!(tt.permanent(), TagTamperStatus::Close);
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn verify_mac_rejects_wrong_key() {
         let (settings, ndef) = table4_fixture();
-        let v = SecureDynamicMessageVerifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
         let wrong_key = [0xFF; 16];
         assert!(matches!(
             v.verify(&ndef, &wrong_key),

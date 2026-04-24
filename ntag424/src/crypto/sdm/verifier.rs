@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! Public SDM verifier types and `SecureDynamicMessageVerifier` implementation.
+//! Public SDM verifier types and `Verifier` implementation.
 
 use core::ops::Range;
 
@@ -107,15 +107,15 @@ enum PiccSource {
 /// # Example
 ///
 /// ```ignore
-/// use ntag424::sdm::{CryptoMode, SecureDynamicMessageVerifier};
+/// use ntag424::sdm::{CryptoMode, Verifier};
 ///
-/// let verifier = SecureDynamicMessageVerifier::try_new(sdm_settings, CryptoMode::Aes)?;
+/// let verifier = Verifier::try_new(sdm_settings, CryptoMode::Aes)?;
 /// let result = verifier.verify(&ndef_file_bytes, &key)?;
 /// println!("UID: {:?}, counter: {:?}", result.uid, result.read_ctr);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SecureDynamicMessageVerifier {
+pub struct Verifier {
     mode: CryptoMode,
     picc_source: PiccSource,
     /// Key number for `SDMMetaRead` (PICCData decryption), if encrypted.
@@ -139,7 +139,7 @@ pub struct SecureDynamicMessageVerifier {
 /// `SDMENCFileData` payload can never exceed that size.
 const MAX_SDM_ENC_FILE_DATA_BYTES: usize = 256;
 
-impl SecureDynamicMessageVerifier {
+impl Verifier {
     /// Create a new verifier, validating that the SDM settings are
     /// consistent and sufficient for verification.
     ///

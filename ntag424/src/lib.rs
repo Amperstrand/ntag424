@@ -107,7 +107,7 @@
 //! bytes `/?p=<32-hex-PICCData>&m=`; use `[[` in the template to move the
 //! start elsewhere (see [`MacWindow`](`crate::types::file_settings::MacWindow`)).
 //! A server decrypts `p=`, re-derives the session key, and verifies the
-//! CMAC; see [`sdm::SecureDynamicMessageVerifier`].
+//! CMAC; see [`sdm::Verifier`].
 //!
 //!
 //! ### SDM configuration
@@ -389,8 +389,8 @@ pub mod key_diversification {
 pub mod sdm {
     //! Secure Dynamic Messaging (SDM) server-side verification (§9.3).
     //!
-    //! Build a [`SecureDynamicMessageVerifier`] from an [`Sdm`] configuration
-    //! and call [`verify`](SecureDynamicMessageVerifier::verify) with the raw
+    //! Build a [`Verifier`] from an [`Sdm`] configuration
+    //! and call [`verify`](Verifier::verify) with the raw
     //! NDEF file bytes and application key.
     //!
     //! With the `alloc` feature enabled, [`sdm_url_config`] is also

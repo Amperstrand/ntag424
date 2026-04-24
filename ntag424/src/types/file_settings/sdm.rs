@@ -280,7 +280,7 @@ const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
 /// data, and a truncated authentication MAC.
 ///
 /// Construct via [`Sdm::try_new`]. Use
-/// [`SecureDynamicMessageVerifier`](`crate::sdm::SecureDynamicMessageVerifier`)
+/// [`Verifier`](`crate::sdm::Verifier`)
 /// to verify and parse the SDM content on the server side, or
 /// [`sdm_url_config!`](`crate::sdm_url_config!`) as a convenience to build
 /// the NDEF URL and configuration together from a template.

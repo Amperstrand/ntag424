@@ -35,10 +35,6 @@ beginner still has to reverse‑engineer:
   different paths, different semantics (compile‑time panic vs `Result`). At
   minimum both docstrings should cross‑link each other prominently; ideally
   rename the macro (e.g. `sdm_url_config_const!`) or the function.
-- **`sdm::SecureDynamicMessageVerifier`** is a mouthful. Consider
-  `sdm::Verifier` (keep the longer name as a type alias for discoverability).
-  Paired with `sdm::CryptoMode`, `sdm::Verifier::try_new(sdm, CryptoMode::Aes)`
-  reads naturally.
 
 ## 3. Method shape on `Session<Authenticated<_>>`
 
