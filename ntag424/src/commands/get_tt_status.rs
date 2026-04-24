@@ -62,7 +62,7 @@ mod tests {
         let mut plain = *picc_data;
         // Decrypt PICCData (EncCtr 0→1); plain = TI(4) || PDCap2(6) || PCDCap2(6).
         suite.decrypt(Direction::Response, &[0u8; 4], 0, &mut plain);
-        let ti: [u8; 4] = plain[..4].try_into().unwrap();
+        let ti: [u8; 4] = plain[..4].try_into().expect("plain[..4] is always 4 bytes");
         (suite, ti)
     }
 

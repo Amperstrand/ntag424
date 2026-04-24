@@ -95,7 +95,9 @@ pub const MAX_SYSTEM_ID_LEN: usize = 16;
 /// # Panics
 ///
 /// Panics if `system_identifier` is longer than [`MAX_SYSTEM_ID_LEN`]
-/// (16 bytes).
+/// (16 bytes). This is a programmer-controlled constant, not runtime data,
+/// so a panic (rather than a `Result`) is the appropriate signal: callers
+/// should not need to handle this at runtime.
 ///
 /// # Example
 ///
@@ -159,6 +161,9 @@ pub fn diversify_ntag424(
 /// # Panics
 ///
 /// Panics if `diversification_input` is empty or longer than 31 bytes.
+/// These limits are defined by AN10922 §2.2 and are programmer-controlled
+/// constants, not runtime data, so a panic (rather than a `Result`) is the
+/// appropriate signal: callers should not need to handle this at runtime.
 pub fn diversify_aes128(master_key: &[u8; 16], diversification_input: &[u8]) -> [u8; 16] {
     assert!(
         !diversification_input.is_empty() && diversification_input.len() <= 31,

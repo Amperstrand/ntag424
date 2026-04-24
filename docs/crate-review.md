@@ -29,13 +29,6 @@ beginner still has to reverse‑engineer:
 
 ## 2. Re‑exports and naming
 
-- **Macro vs function name collision.** `sdm_url_config!` is exported at the
-  crate root (`lib.rs:383`) while the function version is
-  `ntag424::sdm::sdm_url_config` (`src/sdm_url.rs:285`). Same name,
-  different paths, different semantics (compile‑time panic vs `Result`). At
-  minimum both docstrings should cross‑link each other prominently; ideally
-  rename the macro (e.g. `sdm_url_config_const!`) or the function.
-
 ## 3. Method shape on `Session<Authenticated<_>>`
 
 **Rationale (confirmed).** Most authenticated methods take `self` by value
@@ -83,7 +76,7 @@ This is good, but two things should change:
    plain‑mode commands take `&mut self` and are safe to retry."_ Then the
    `&mut self` outliers stop looking like bugs.
 
-2. **Fix the asymmetries that remain:** *(resolved)*
+2. **Fix the asymmetries that remain:** _(resolved)_
 
 ## 4. Documentation gaps & errors
 
@@ -241,27 +234,6 @@ tree.
 - **Version capability helpers** — `has_tag_tamper_support()` is good, but
   there's no analogous `supports_lrp()` / `supports_originality()`. Hands‑on
   users will otherwise copy‑paste hex comparisons.
-
-## 6. Panics / unwraps in library code
-
-Most unwraps are either in tests or provably safe (`ArrayVec::push` on
-pre‑sized buffers). Two worth tightening:
-
-- **`Version::uid()` / `Version::batch_number()`** (`types/version.rs:87‑89,
-92‑96`) use `.expect("slice with incorrect length")` to convert a
-  statically known `&[u8]` of length 7/4 into `&[u8; 7]` / `&[u8; 4]`. The
-  idiom should be `first_chunk::<7>()` / a direct array reference cast;
-  at minimum the message is misleading for what is a compile‑time invariant.
-- **`commands/get_file_counters.rs:29, 37`** and
-  **`commands/get_tt_status.rs:60`** use silent `unwrap()` on `try_into`.
-  Prefer `expect("…length is constant…")` so a future refactor that breaks
-  the invariant surfaces clearly.
-
-`key_diversification::diversify_aes128` / `diversify_ntag424`
-(`crypto/key_diversification.rs:127, 158`) panicking on out‑of‑range inputs
-is defensible — `MAX_SYSTEM_ID_LEN` / 31‑byte limits are programmer‑controlled
-constants, not runtime data. Just document that rationale at the function
-level, so users don't wrap the call in `std::panic::catch_unwind`.
 
 ---
 

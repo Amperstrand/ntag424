@@ -31,7 +31,10 @@ pub(crate) async fn get_file_counters<T: Transport, S: SessionSuite>(
         .await?;
 
     let data: [u8; RESP_LEN] = match resp.len() {
-        RESP_LEN => resp.as_slice().try_into().unwrap(),
+        RESP_LEN => resp
+            .as_slice()
+            .try_into()
+            .expect("resp.len() == RESP_LEN is guaranteed by match arm"),
         FULL_CT_LEN => {
             let mut ct = [0u8; FULL_CT_LEN];
             ct.copy_from_slice(&resp);
@@ -42,7 +45,9 @@ pub(crate) async fn get_file_counters<T: Transport, S: SessionSuite>(
                     expected: RESP_LEN,
                 });
             }
-            ct[..RESP_LEN].try_into().unwrap()
+            ct[..RESP_LEN]
+                .try_into()
+                .expect("ct[..RESP_LEN] is exactly RESP_LEN bytes")
         }
         n => {
             return Err(SessionError::UnexpectedLength {

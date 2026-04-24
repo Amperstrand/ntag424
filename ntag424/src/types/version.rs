@@ -89,16 +89,16 @@ impl Version {
     pub fn uid(&self) -> &[u8; 7] {
         // TODO: clarify padding for random ID which are shorter
         // TODO: reference `get_uid` for real UID on random-ID tags once implemented
-        (&self.part3[0..7])
-            .try_into()
-            .expect("slice with incorrect length")
+        self.part3
+            .first_chunk::<7>()
+            .expect("part3 is at least 7 bytes")
     }
 
     pub fn batch_number(&self) -> &[u8; 4] {
         // TODO: BE or LE int or what?
-        (&self.part3[7..11])
-            .try_into()
-            .expect("slice with incorrect length")
+        self.part3[7..]
+            .first_chunk::<4>()
+            .expect("part3 is at least 11 bytes")
     }
 
     /// Calendar week of production.
