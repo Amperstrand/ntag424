@@ -69,9 +69,9 @@
 //! ```
 //! # #[cfg(all(feature = "sdm", feature = "alloc"))]
 //! # fn main() {
-//! use ntag424_core::sdm::CryptoMode;
+//! use ntag424::sdm::CryptoMode;
 //!
-//! let (ndef, _sdm) = ntag424_core::sdm_url_config!(
+//! let (ndef, _sdm) = ntag424::sdm_url_config!(
 //!     "https://example.com/?p={picc}&m={mac}",
 //!     CryptoMode::Aes,
 //! );
@@ -180,7 +180,7 @@
 //! ```no_run
 //! # #[cfg(all(feature = "sdm", feature = "key_diversification", feature = "alloc"))]
 //! # mod example {
-//! use ntag424_core::{
+//! use ntag424::{
 //!     Session, SessionError, Transport,
 //!     File, KeyNumber, NonMasterKeyNumber,
 //!     Access, AccessRights, CommMode, FileSettingsPatch,
@@ -196,7 +196,7 @@
 //! #     rnd_a: [u8; 16],
 //! # ) -> Result<(), SessionError<T::Error>> {
 //! // Build the NDEF bytes and matching SDM settings from a URL template.
-//! let (ndef, sdm_settings) = ntag424_core::sdm_url_config!(
+//! let (ndef, sdm_settings) = ntag424::sdm_url_config!(
 //!     "https://example.com/?p={picc}&m={mac}",
 //!     CryptoMode::Aes,
 //! );
@@ -335,7 +335,7 @@ pub mod key_diversification {
     //! ```no_run
     //! # #[cfg(feature = "alloc")]
     //! # mod example {
-    //! use ntag424_core::{
+    //! use ntag424::{
     //!     Session, SessionError, Transport,
     //!     types::{KeyNumber, NonMasterKeyNumber},
     //!     key_diversification::diversify_ntag424,
@@ -417,8 +417,8 @@ pub mod sdm {
 /// Two forms are supported:
 ///
 /// ```rust
-/// # use ntag424_core::sdm::CryptoMode;
-/// let (ndef, sdm) = ntag424_core::sdm_url_config!(
+/// # use ntag424::sdm::CryptoMode;
+/// let (ndef, sdm) = ntag424::sdm_url_config!(
 ///     "https://example.com/?[[p={picc}&m={mac}",
 ///     CryptoMode::Aes,
 /// );
@@ -426,8 +426,8 @@ pub mod sdm {
 /// ```
 ///
 /// ```rust
-/// # use ntag424_core::sdm::{CryptoMode, SdmUrlOptions};
-/// let (ndef, sdm) = ntag424_core::sdm_url_config!(
+/// # use ntag424::sdm::{CryptoMode, SdmUrlOptions};
+/// let (ndef, sdm) = ntag424::sdm_url_config!(
 ///     "https://example.com/?u={uid}&m={mac}",
 ///     CryptoMode::Aes,
 ///     SdmUrlOptions::new(),

@@ -31,7 +31,7 @@ beginner still has to reverse‑engineer:
 
 - **Macro vs function name collision.** `sdm_url_config!` is exported at the
   crate root (`lib.rs:383`) while the function version is
-  `ntag424_core::sdm::sdm_url_config` (`src/sdm_url.rs:285`). Same name,
+  `ntag424::sdm::sdm_url_config` (`src/sdm_url.rs:285`). Same name,
   different paths, different semantics (compile‑time panic vs `Result`). At
   minimum both docstrings should cross‑link each other prominently; ideally
   rename the macro (e.g. `sdm_url_config_const!`) or the function.

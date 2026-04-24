@@ -23,7 +23,7 @@
 //! # Example
 //!
 //! ```
-//! use ntag424_core::key_diversification::diversify_aes128;
+//! use ntag424::key_diversification::diversify_aes128;
 //!
 //! // AN10922 §2.2.1 test vector
 //! let master_key = [
@@ -102,8 +102,8 @@ pub const MAX_SYSTEM_ID_LEN: usize = 16;
 /// Derive all five application keys from one master key:
 ///
 /// ```
-/// use ntag424_core::key_diversification::diversify_ntag424;
-/// use ntag424_core::types::KeyNumber;
+/// use ntag424::key_diversification::diversify_ntag424;
+/// use ntag424::types::KeyNumber;
 ///
 /// let master = [0u8; 16];
 /// let uid = [0x04, 0x78, 0x2E, 0x21, 0x80, 0x1D, 0x80];

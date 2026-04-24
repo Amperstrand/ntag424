@@ -107,7 +107,7 @@ enum PiccSource {
 /// # Example
 ///
 /// ```ignore
-/// use ntag424_core::sdm::{CryptoMode, SecureDynamicMessageVerifier};
+/// use ntag424::sdm::{CryptoMode, SecureDynamicMessageVerifier};
 ///
 /// let verifier = SecureDynamicMessageVerifier::try_new(sdm_settings, CryptoMode::Aes)?;
 /// let result = verifier.verify(&ndef_file_bytes, &key)?;
