@@ -116,6 +116,10 @@ impl Session<Unauthenticated> {
     ///
     /// Uses plain mode communication. For authenticated sessions
     /// there is also a [MAC mode variant available](`Session::<Authenticated<_>>::get_version`).
+    ///
+    /// Borrows `self` rather than consuming it — there is no secure channel
+    /// state to desynchronise on an unauthenticated session, so a failed call
+    /// can be retried without re-creating the session.
     pub async fn get_version<T: Transport>(
         &self,
         transport: &mut T,

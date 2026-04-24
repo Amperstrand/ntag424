@@ -85,7 +85,9 @@ impl<S: SessionSuite> Authenticated<S> {
 impl<S: SessionSuite> Session<Authenticated<S>> {
     /// Read software, hardware and production version information.
     ///
-    /// Uses MAC mode communication.
+    /// Uses MAC mode communication. Consumes `self` and returns it on success
+    /// because the MAC exchange advances the secure channel's command counter;
+    /// losing the session on error prevents counter desynchronisation.
     pub async fn get_version<T: Transport>(
         mut self,
         transport: &mut T,
@@ -300,6 +302,13 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// `length = 0` means "entire file from `offset`", capped at the
     /// 256-byte short-Le response limit (NT4H2421Gx §10.8.1). When
     /// `length != 0`, `buf.len()` must be at least `length`.
+    ///
+    /// This method consumes `self` and returns it on success because MAC
+    /// and Full modes advance the secure channel's command counter; losing
+    /// the session on error prevents counter desynchronisation. Plain mode
+    /// also consumes `self` for uniformity of the return type — use
+    /// [`Self::read_file_plain`] when you need a retryable plain read on
+    /// an authenticated session.
     pub async fn read_file_with_mode<T: Transport>(
         mut self,
         transport: &mut T,
@@ -359,7 +368,14 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// plain communication mode must be used even though the session is
     /// authenticated. You may use [`Self::write_file_plain`]
     /// in this case.
-    pub async fn write_with_mode<T: Transport>(
+    ///
+    /// This method consumes `self` and returns it on success because MAC
+    /// and Full modes advance the secure channel's command counter; losing
+    /// the session on error prevents counter desynchronisation. Plain mode
+    /// also consumes `self` for uniformity of the return type — use
+    /// [`Self::write_file_plain`] when you need a retryable plain write on
+    /// an authenticated session.
+    pub async fn write_file_with_mode<T: Transport>(
         mut self,
         transport: &mut T,
         file: File,

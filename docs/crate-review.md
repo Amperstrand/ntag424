@@ -67,7 +67,7 @@ Audit of the current shape (`src/session/authenticated.rs`):
 | `verify_originality`   | owned  | `Self`                           |           yes           |
 | `enable_lrp`           | owned  | `Session<Unauthenticated>`       |  yes (always de‑auths)  |
 | `read_file_with_mode`  | owned  | `(usize, Self)`                  |  only in `Mac`/`Full`   |
-| `write_with_mode`      | owned  | `Self`                           |  only in `Mac`/`Full`   |
+| `write_file_with_mode` | owned  | `Self`                           |  only in `Mac`/`Full`   |
 | **`read_file_plain`**  | `&mut` | `usize`                          |           no            |
 | **`write_file_plain`** | `&mut` | `()`                             |           no            |
 
@@ -87,27 +87,7 @@ This is good, but two things should change:
    plain‑mode commands take `&mut self` and are safe to retry."_ Then the
    `&mut self` outliers stop looking like bugs.
 
-2. **Fix the asymmetries that remain:**
-   - `read_file_with_mode` vs `write_with_mode` — missing `_file_` in the
-     write name. Rename to `write_file_with_mode` for parity.
-   - `Session<Unauthenticated>::get_version` (`session/unauthenticated.rs:114`)
-     takes `&self`; `Session<Authenticated>::get_version`
-     (`authenticated.rs:84`) takes `self`. Since the unauthenticated path
-     has no secure channel to desynchronise, `&self` / `&mut self` is fine
-     there; just note the asymmetry in the unauthenticated docstring ("no
-     authentication state can be lost, so this borrows").
-   - `read_file_with_mode` returns `(usize, Self)`, `write_with_mode` returns
-     `Self`. That's fine (reads have an extra return value), but the
-     docstrings don't mention the by‑value‑consume rationale. Spell it out
-     once per method group.
-   - `read_file_with_mode` with `mode = CommMode::Plain` goes down the
-     _plain_ code path (`:307‑312`) yet still consumes `self` — the
-     invariant above ("by‑value = channel can desync") is technically
-     violated for `Plain`. That's defensible (the method's _type_ has to
-     be one or the other, and the MAC/Full paths dominate), but it's worth
-     a sentence: "`read_file_with_mode` consumes `self` even in `Plain`
-     mode for uniformity; use `read_file_plain` when you need a retryable
-     plain read on an authenticated session."
+2. **Fix the asymmetries that remain:** *(resolved)*
 
 ## 4. Documentation gaps & errors
 
