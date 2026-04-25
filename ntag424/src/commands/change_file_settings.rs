@@ -188,16 +188,16 @@ mod tests {
         )
         .expect("valid SDM settings");
 
-        let settings = FileSettingsPatch {
-            comm_mode: CommMode::Plain,
-            access_rights: AccessRights {
+        let settings = FileSettingsPatch::new(
+            CommMode::Plain,
+            AccessRights {
                 read: Access::Free,
                 write: Access::Key(KeyNumber::Key0),
                 read_write: Access::Key(KeyNumber::Key0),
                 change: Access::Key(KeyNumber::Key0),
             },
-            sdm: Some(sdm),
-        };
+        )
+        .with_sdm(sdm);
 
         let (expected_apdu, resp_body) =
             synthesise_change_fs_apdu(enc_key, mac_key, ti, 0, 0x02, &settings);
@@ -223,16 +223,15 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettingsPatch {
-            comm_mode: CommMode::Plain,
-            access_rights: AccessRights {
+        let settings = FileSettingsPatch::new(
+            CommMode::Plain,
+            AccessRights {
                 read: Access::Free,
                 write: Access::Free,
                 read_write: Access::Free,
                 change: Access::Free,
             },
-            sdm: None,
-        };
+        );
 
         let (expected_apdu, _) =
             synthesise_change_fs_apdu(enc_key, mac_key, ti, 0, 0x02, &settings);
@@ -261,16 +260,15 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettingsPatch {
-            comm_mode: CommMode::Full,
-            access_rights: AccessRights {
+        let settings = FileSettingsPatch::new(
+            CommMode::Full,
+            AccessRights {
                 read: Access::Key(KeyNumber::Key2),
                 write: Access::Key(KeyNumber::Key3),
                 read_write: Access::Key(KeyNumber::Key3),
                 change: Access::Key(KeyNumber::Key0),
             },
-            sdm: None,
-        };
+        );
 
         let (expected_apdu, resp_body) =
             synthesise_change_fs_apdu(enc_key, mac_key, ti, 3, 0x03, &settings);

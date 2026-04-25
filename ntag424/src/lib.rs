@@ -220,16 +220,16 @@
 //!     .change_file_settings(
 //!         transport,
 //!         File::Ndef,
-//!         &FileSettingsPatch {
-//!             comm_mode: CommMode::Plain,
-//!             access_rights: AccessRights {
+//!         &FileSettingsPatch::new(
+//!             CommMode::Plain,
+//!             AccessRights {
 //!                 read: Access::Free,
 //!                 write: Access::Key(KeyNumber::Key0),
 //!                 read_write: Access::Key(KeyNumber::Key0),
 //!                 change: Access::Key(KeyNumber::Key0),
 //!             },
-//!             sdm: Some(*sdm_settings),
-//!         },
+//!         )
+//!         .with_sdm(*sdm_settings),
 //!     )
 //!     .await?;
 //!

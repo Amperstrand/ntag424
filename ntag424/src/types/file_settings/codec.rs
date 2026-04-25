@@ -261,15 +261,15 @@ impl FileSettingsView {
     /// Convert to a [`FileSettingsPatch`] suitable for
     /// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
     pub fn into_patch(self) -> FileSettingsPatch {
-        FileSettingsPatch {
-            comm_mode: self.comm_mode,
-            access_rights: self.access_rights,
-            sdm: self.sdm,
+        let patch = FileSettingsPatch::new(self.comm_mode, self.access_rights);
+        match self.sdm {
+            Some(sdm) => patch.with_sdm(sdm),
+            None => patch,
         }
     }
 }
 
-/// File settings update payload for
+/// Builder for the file settings update payload passed to
 /// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
 ///
 /// `FileType` and file size are omitted — they cannot be changed.
@@ -277,16 +277,27 @@ impl FileSettingsView {
 /// NT4H2421Gx §10.7.1, Table 69.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileSettingsPatch {
-    /// Communication mode for the file (how data is protected on the wire).
-    ///
-    /// The mode passed to [`read_file_with_mode`](crate::Session::read_file_with_mode)
-    /// and [`write_file_with_mode`](crate::Session::write_file_with_mode)
-    /// must match this.
-    pub comm_mode: CommMode,
-    /// Access rights for the file.
-    pub access_rights: AccessRights,
-    /// Optional Secure Dynamic Messaging (SDM) settings, if SDM should be enabled for the file.
-    pub sdm: Option<Sdm>,
+    comm_mode: CommMode,
+    access_rights: AccessRights,
+    sdm: Option<Sdm>,
+}
+
+impl FileSettingsPatch {
+    /// Create a new patch with the given communication mode and access rights,
+    /// with SDM disabled.
+    pub fn new(comm_mode: CommMode, access_rights: AccessRights) -> Self {
+        Self {
+            comm_mode,
+            access_rights,
+            sdm: None,
+        }
+    }
+
+    /// Enable Secure Dynamic Messaging with the given configuration.
+    pub fn with_sdm(mut self, sdm: Sdm) -> Self {
+        self.sdm = Some(sdm);
+        self
+    }
 }
 
 /// Maximum encoded file settings patch length in bytes.

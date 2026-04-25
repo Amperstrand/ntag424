@@ -15,6 +15,11 @@ use super::file_settings::Access;
 /// wire if the caller explicitly set it through one of the `with_*` methods.
 /// Unset options are omitted, so the corresponding tag-side configuration
 /// stays unchanged.
+///
+/// **Last-writer-wins:** each `with_*` method unconditionally overwrites any
+/// previous value for that option. Calling `with_failed_auth_counter_enabled`
+/// followed by `with_failed_auth_counter_disabled` results in disabled — the
+/// second call silently replaces the first.
 #[derive(Debug, Default, Clone)]
 pub struct Configuration {
     picc: Option<[u8; 1]>,
@@ -119,18 +124,22 @@ impl Configuration {
         self
     }
 
-    /// Configure the failed-authentication counter.
+    /// Enable the failed-authentication counter.
     ///
-    /// `limit` must be non-zero when `enabled` is true (tag default: 1000);
-    /// `decrement` is the amount subtracted on each successful authentication
-    /// (tag default: 10). Both values are ignored by the tag when `enabled`
-    /// is false.
-    pub fn with_failed_auth_counter(mut self, enabled: bool, limit: u16, decrement: u16) -> Self {
+    /// `limit` must be non-zero (tag default: 1000); `decrement` is the amount
+    /// subtracted from `limit` on each successful authentication (tag default: 10).
+    pub fn with_failed_auth_counter_enabled(mut self, limit: u16, decrement: u16) -> Self {
         let mut bytes = [0u8; 5];
-        bytes[0] = u8::from(enabled);
+        bytes[0] = 1;
         bytes[1..3].copy_from_slice(&limit.to_le_bytes());
         bytes[3..5].copy_from_slice(&decrement.to_le_bytes());
         self.failed_auth_counter = Some(bytes);
+        self
+    }
+
+    /// Disable the failed-authentication counter.
+    pub fn with_failed_auth_counter_disabled(mut self) -> Self {
+        self.failed_auth_counter = Some([0u8; 5]);
         self
     }
 
@@ -182,7 +191,7 @@ mod tests {
     #[test]
     fn build_emits_tag_tamper_in_table_50_order() {
         let option_ids: alloc::vec::Vec<_> = Configuration::new()
-            .with_failed_auth_counter(true, 1000, 10)
+            .with_failed_auth_counter_enabled(1000, 10)
             .with_tag_tamper_enabled(Access::NoAccess)
             .with_pdcap2_5(0xAA)
             .with_random_uid_enabled()

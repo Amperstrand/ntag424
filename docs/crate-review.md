@@ -140,20 +140,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
     The current design pushes the responsibility onto the user, which is
     exactly what the `sdm_url_config!` macro is meant to hide — it should be
     hidden in the manual path too.
-- **`Configuration::with_failed_auth_counter(true, 1000, 10)`**
-  (`types/configuration.rs:123`) takes positional `(bool, u16, u16)`.
-  Trivially easy to swap `limit` and `decrement`. Split into
-  `.with_failed_auth_counter_enabled(limit, decrement)` and
-  `.with_failed_auth_counter_disabled()`.
-- **`Configuration` builder "last writer wins" semantics** aren't
-  documented; calling `with_failed_auth_counter(true, …)` followed by
-  `with_failed_auth_counter(false, …)` silently overwrites. Spell this out.
-- **`FileSettingsPatch` uses naked `pub` fields** while `Configuration`
-  uses a typed builder. Pick one pattern for "things you build to send to
-  the tag". Since `Sdm::try_new` already does extensive validation,
-  `FileSettingsPatch` with public fields is defensible — but then consider
-  exposing `Configuration`'s fields too, so users aren't switching between
-  styles in the same block of provisioning code.
 - **`FileReadKey`** (`types/file_settings.rs:280‑290`) adds ceremony
   without enforcing an invariant: `FileReadKey::new(k)` accepts any
   `KeyNumber`. If the "Free / NoAccess" exclusion is meant to be

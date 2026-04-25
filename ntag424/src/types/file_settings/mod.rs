@@ -123,11 +123,7 @@ mod tests {
             None,
         )
         .unwrap();
-        FileSettingsPatch {
-            comm_mode: CommMode::Plain,
-            access_rights: std_access_rights(),
-            sdm: Some(sdm),
-        }
+        FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
     }
 
     #[test]
@@ -249,11 +245,7 @@ mod tests {
             Some(Offset(0x2E)),
         )
         .unwrap();
-        FileSettingsPatch {
-            comm_mode: CommMode::Plain,
-            access_rights: std_access_rights(),
-            sdm: Some(sdm),
-        }
+        FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
     }
 
     #[test]
@@ -299,11 +291,7 @@ mod tests {
             Some(Offset(0x17)),
         )
         .unwrap();
-        let patch = FileSettingsPatch {
-            comm_mode: CommMode::Plain,
-            access_rights: std_access_rights(),
-            sdm: Some(sdm),
-        };
+        let patch = FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm);
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
         let n = patch.encode(&mut buf).expect("encode");
         assert_eq!(
