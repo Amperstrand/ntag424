@@ -283,7 +283,8 @@ struct ParsedTemplate<const N: usize> {
 /// # Example
 ///
 /// ```
-/// use ntag424::sdm::{sdm_url_config, CryptoMode, SdmUrlOptions};
+/// use ntag424::sdm::{sdm_url_config, SdmUrlOptions};
+/// use ntag424::types::file_settings::CryptoMode;
 /// use ntag424::types::KeyNumber;
 ///
 /// let opts = SdmUrlOptions {

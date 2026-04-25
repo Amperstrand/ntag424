@@ -69,7 +69,7 @@
 //! ```
 //! # #[cfg(all(feature = "sdm", feature = "alloc"))]
 //! # fn main() {
-//! use ntag424::sdm::CryptoMode;
+//! use ntag424::types::file_settings::CryptoMode;
 //!
 //! let (ndef, _sdm) = ntag424::sdm_url_config!(
 //!     "https://example.com/?p={picc}&m={mac}",
@@ -184,7 +184,7 @@
 //!     Session, SessionError, Transport,
 //!     File, KeyNumber, NonMasterKeyNumber,
 //!     Access, AccessRights, CommMode, FileSettingsPatch,
-//!     sdm::CryptoMode,
+//!     types::file_settings::CryptoMode,
 //!     key_diversification::diversify_ntag424,
 //! };
 //!
@@ -416,7 +416,7 @@ pub mod sdm {
 /// Two forms are supported:
 ///
 /// ```rust
-/// # use ntag424::sdm::CryptoMode;
+/// # use ntag424::types::file_settings::CryptoMode;
 /// let (ndef, sdm) = ntag424::sdm_url_config!(
 ///     "https://example.com/?[[p={picc}&m={mac}",
 ///     CryptoMode::Aes,
@@ -425,7 +425,8 @@ pub mod sdm {
 /// ```
 ///
 /// ```rust
-/// # use ntag424::sdm::{CryptoMode, SdmUrlOptions};
+/// # use ntag424::types::file_settings::CryptoMode;
+/// # use ntag424::sdm::SdmUrlOptions;
 /// let (ndef, sdm) = ntag424::sdm_url_config!(
 ///     "https://example.com/?u={uid}&m={mac}",
 ///     CryptoMode::Aes,
