@@ -107,9 +107,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
   the inner module itself. Move the example up to the
   `pub mod key_diversification { … }` re‑export in `lib.rs`, or hoist it
   into the re‑exported items' own rustdoc.
-- `src/types/file_settings.rs:994‑995` — two "unescaped backtick" warnings
-  on the doc of `MAX_CHANGE_FILE_SETTINGS_LEN` (the formula spans two lines
-  with stray backticks).
 
 ## 5. API design issues
 
@@ -130,16 +127,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
 - **`Transport::Data: AsRef<[u8]>`** has no documented contract. Why an
   associated type rather than always `&[u8]` or `alloc::vec::Vec<u8>`? The
   `pcsc` crate motivates it, but it should be written down.
-- **`SessionError` uses `#[from]` inconsistently** (`session/mod.rs:31‑63`):
-  `Transport(#[from] E)` allows `?` to propagate transport errors, but
-  `FileSettings(FileSettingsError)` and
-  `OriginalityVerificationFailed(OriginalityError)` do not. Users
-  `map_err` unnecessarily. Add `#[from]` where sensible.
-- **No error enum is `#[non_exhaustive]`.** `SessionError`,
-  `FileSettingsError`, `SdmError`, `SdmUrlError`, `CcError` — all are open
-  to new variants becoming a breaking change. Mark them
-  `#[non_exhaustive]` before 1.0. Particularly important for
-  `FileSettingsError` and `SdmUrlError`, which are likely to grow.
 - **`Sdm::try_new` skips overlap checks with the encrypted PICCData blob**
   (`types/file_settings.rs:571‑573, 605‑609`). This is an explicit
   landmine: a user can build a "validated" `Sdm` that is still structurally

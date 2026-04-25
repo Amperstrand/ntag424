@@ -291,8 +291,7 @@ pub struct FileSettingsPatch {
 
 /// Maximum encoded file settings patch length in bytes.
 ///
-/// `FileOption (1) + AccessRights (2) + SDMOptions (1) + SDMAccessRights (2)
-/// + 9 × 3-byte offset fields`.
+/// `FileOption (1) + AccessRights (2) + SDMOptions (1) + SDMAccessRights (2) + 9 × 3-byte offset fields`.
 pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 9 * 3;
 
 impl FileSettingsPatch {
