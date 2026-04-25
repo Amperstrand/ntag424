@@ -302,6 +302,7 @@
 //!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
 #![no_std]
+#![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "alloc")]
