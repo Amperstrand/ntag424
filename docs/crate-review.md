@@ -97,36 +97,8 @@ public fields are undocumented:
 - `src/types/tt_status.rs:14` — `TagTamperStatus::Unknown(u8)` has no doc
   on what byte values can end up there.
 
-### 4.3 Real rustdoc warnings
-
-Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
-
-- `src/crypto/key_diversification.rs:1` — "documentation test in private
-  item". The module is `pub` only under `#[cfg(feature =
-"key_diversification")]` via `lib.rs:268‑331`, but the doctest lives in
-  the inner module itself. Move the example up to the
-  `pub mod key_diversification { … }` re‑export in `lib.rs`, or hoist it
-  into the re‑exported items' own rustdoc.
-
 ## 5. API design issues
 
-- **`Uid::Random([u8; 4])` vs `Session::<Authenticated>::get_uid`** —
-  `Session::get_selected_uid` returns `Uid` (fixed or random), but
-  `Session::<Authenticated>::get_uid` (`authenticated.rs:145`) returns
-  `[u8; 7]`. Two types for effectively the same concept. Either return `Uid`
-  from both (with `as_fixed()` convenience), or make the asymmetry explicit
-  in the doc ("this command is only issued after authentication, which
-  implies a fixed 7‑byte UID").
-- **`Transport::get_uid` contract is under‑specified** (`src/transport.rs:15`).
-  It returns `Self::Data` of arbitrary length; the only caller
-  (`Session::get_selected_uid`, `session/mod.rs:99‑113`) manually checks for
-  4 or 7 bytes. Either document this contract on the trait, or move the
-  length check into a default method
-  (`fn get_uid(&mut self) -> impl Future<Output = Result<Uid, Self::Error>>`)
-  with a lower‑level hook for raw bytes.
-- **`Transport::Data: AsRef<[u8]>`** has no documented contract. Why an
-  associated type rather than always `&[u8]` or `alloc::vec::Vec<u8>`? The
-  `pcsc` crate motivates it, but it should be written down.
 - **`Sdm::try_new` skips overlap checks with the encrypted PICCData blob**
   (`types/file_settings.rs:571‑573, 605‑609`). This is an explicit
   landmine: a user can build a "validated" `Sdm` that is still structurally

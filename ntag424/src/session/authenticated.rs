@@ -148,7 +148,9 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// Read the permanent tag UID.
     ///
     /// Returns the permanent UID even when the tag is configured for Random ID
-    /// at activation (NT4H2421Gx §10.5.3).
+    /// at activation (NT4H2421Gx §10.5.3). This is in contrast to the unauthenticated
+    /// [`get_selected_uid`](`Session::get_selected_uid`) which will
+    /// return the random ID if used.
     pub async fn get_uid<T: Transport>(
         mut self,
         transport: &mut T,

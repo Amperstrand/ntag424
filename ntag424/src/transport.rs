@@ -17,6 +17,8 @@ pub trait Transport {
     ) -> impl Future<Output = Result<Response<Self::Data>, Self::Error>>;
 
     /// Get the UID of the tag as seen during anticollision.
+    ///
+    /// The data must be four or seven bytes long.
     fn get_uid(&mut self) -> impl Future<Output = Result<Self::Data, Self::Error>>;
 }
 
