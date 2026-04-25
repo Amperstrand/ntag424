@@ -178,7 +178,7 @@ mod tests {
                 }),
             },
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(KeyNumber::Key1),
+                key: KeyNumber::Key1,
                 window: MacWindow {
                     input: Offset::new(0x43).unwrap(),
                     mac: Offset::new(0x43).unwrap(),

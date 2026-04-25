@@ -5,7 +5,7 @@
 
 use crate::types::KeyNumber;
 
-use super::access::{AccessRights, CommMode, CtrRetAccess, FileReadKey, FileType};
+use super::access::{AccessRights, CommMode, CtrRetAccess, FileType};
 use super::error::{FileSettingsError, NibbleSlot, ReservedByte};
 use super::sdm::{
     EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset, PiccData, PlainMirror,
@@ -94,10 +94,7 @@ impl FileSettingsView {
             };
 
             let file_read_key = match file_read_nibble {
-                0x0..=0x4 => Some(FileReadKey::new(key_from_nibble(
-                    file_read_nibble,
-                    NibbleSlot::SdmFileRead,
-                )?)),
+                0x0..=0x4 => Some(key_from_nibble(file_read_nibble, NibbleSlot::SdmFileRead)?),
                 0xF => None,
                 v => {
                     return Err(FileSettingsError::InvalidAccessNibble {
@@ -347,7 +344,7 @@ impl FileSettingsPatch {
             };
             let file_read_nibble = match sdm.file_read() {
                 None => 0xF,
-                Some(ref fr) => fr.key().key().as_byte(),
+                Some(ref fr) => fr.key().as_byte(),
             };
             let ctr_ret_nibble = sdm.picc_data().ctr_ret().to_nibble();
             let ar_word = (u16::from(picc_nibble) << 12)

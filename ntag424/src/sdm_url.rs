@@ -16,9 +16,8 @@ use thiserror::Error;
 use crate::crypto::sdm::CryptoMode;
 use crate::types::KeyNumber;
 use crate::types::file_settings::{
-    CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, FileReadKey,
-    FileSettingsError, MacWindow, Offset, PiccData, PlainMirror, ReadCtrFeatures, ReadCtrMirror,
-    Sdm,
+    CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, FileSettingsError, MacWindow,
+    Offset, PiccData, PlainMirror, ReadCtrFeatures, ReadCtrMirror, Sdm,
 };
 
 const URI_AT: u32 = 7;
@@ -466,13 +465,13 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
             Err(_) => return Err(TemplateCoreError::FileSettings("enc_length invalid")),
         };
         Some(FileRead::MacAndEnc {
-            key: FileReadKey::new(opts.mac_key),
+            key: opts.mac_key,
             window,
             enc: EncFileData { start, length },
         })
     } else {
         Some(FileRead::MacOnly {
-            key: FileReadKey::new(opts.mac_key),
+            key: opts.mac_key,
             window,
         })
     };
@@ -1008,7 +1007,7 @@ mod tests {
             }
         );
         let fr = file_read(&plan);
-        assert_eq!(fr.key().key(), KeyNumber::Key0);
+        assert_eq!(fr.key(), KeyNumber::Key0);
         assert_eq!(fr.window().input.get(), URI_AT + 11);
         assert_eq!(fr.window().mac.get(), URI_AT + 24 + 26);
         assert!(fr.enc().is_none());

@@ -19,7 +19,7 @@
 //!
 //! | Sub-module | Contents |
 //! |---|---|
-//! | [`access`] | `FileType`, `CommMode`, `Access`, `CtrRetAccess`, `AccessRights`, `FileReadKey` |
+//! | [`access`] | `FileType`, `CommMode`, `Access`, `CtrRetAccess`, `AccessRights` |
 //! | [`sdm`] | `Sdm` and all SDM mirror types (`Offset`, `PlainMirror`, `PiccData`, …) |
 //! | [`codec`] | `FileSettingsView` (decoder) and `FileSettingsPatch` (encoder) |
 //! | [`error`] | `FileSettingsError` and sentinel types (`NibbleSlot`, `OverlapKind`, `ReservedByte`) |
@@ -29,7 +29,7 @@ pub mod codec;
 pub mod error;
 pub mod sdm;
 
-pub use access::{Access, AccessRights, CommMode, CtrRetAccess, FileReadKey, FileType};
+pub use access::{Access, AccessRights, CommMode, CtrRetAccess, FileType};
 pub use codec::{FileSettingsPatch, FileSettingsView, MAX_CHANGE_FILE_SETTINGS_LEN};
 pub use error::{FileSettingsError, NibbleSlot, OverlapKind, ReservedByte};
 pub use sdm::{
@@ -88,7 +88,7 @@ mod tests {
             }
         );
         let fr = sdm.file_read().expect("file_read");
-        assert_eq!(fr.key(), FileReadKey::new(KeyNumber::Key0));
+        assert_eq!(fr.key(), KeyNumber::Key0);
         assert_eq!(fr.window().input, Offset(0x44));
         assert_eq!(fr.window().mac, Offset(0x6A));
         let enc = fr.enc().expect("enc");
@@ -114,7 +114,7 @@ mod tests {
                 }),
             },
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(KeyNumber::Key1),
+                key: KeyNumber::Key1,
                 window: MacWindow {
                     input: Offset(0x43),
                     mac: Offset(0x43),
@@ -180,7 +180,7 @@ mod tests {
         let err = Sdm::try_new(
             picc,
             Some(FileRead::MacAndEnc {
-                key: FileReadKey::new(KeyNumber::Key1),
+                key: KeyNumber::Key1,
                 window,
                 enc,
             }),
@@ -203,7 +203,7 @@ mod tests {
                 }),
             },
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(KeyNumber::Key1),
+                key: KeyNumber::Key1,
                 window: MacWindow {
                     input: Offset(0x43),
                     mac: Offset(0x43),
@@ -214,10 +214,7 @@ mod tests {
             Ok(s) => s,
             Err(_) => panic!("const SDM construction failed"),
         };
-        assert_eq!(
-            SDM.file_read().unwrap().key(),
-            FileReadKey::new(KeyNumber::Key1)
-        );
+        assert_eq!(SDM.file_read().unwrap().key(), KeyNumber::Key1);
     }
 
     #[test]
@@ -282,7 +279,7 @@ mod tests {
         let sdm = Sdm::try_new(
             PiccData::None,
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(KeyNumber::Key0),
+                key: KeyNumber::Key0,
                 window: MacWindow {
                     input: Offset(0x12),
                     mac: Offset(0x1C),
@@ -349,7 +346,7 @@ mod tests {
 
     fn mac_only(input: u32, mac: u32) -> Option<FileRead> {
         Some(FileRead::MacOnly {
-            key: FileReadKey::new(KeyNumber::Key0),
+            key: KeyNumber::Key0,
             window: MacWindow {
                 input: Offset(input),
                 mac: Offset(mac),
@@ -359,7 +356,7 @@ mod tests {
 
     fn mac_and_enc(input: u32, mac: u32, enc_start: u32, enc_len: u32) -> Option<FileRead> {
         Some(FileRead::MacAndEnc {
-            key: FileReadKey::new(KeyNumber::Key0),
+            key: KeyNumber::Key0,
             window: MacWindow {
                 input: Offset(input),
                 mac: Offset(mac),

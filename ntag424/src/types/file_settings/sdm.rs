@@ -5,7 +5,7 @@
 
 use crate::types::KeyNumber;
 
-use super::access::{CtrRetAccess, FileReadKey};
+use super::access::CtrRetAccess;
 use super::error::{FileSettingsError, OverlapKind};
 
 /// A 24-bit byte offset into a file.
@@ -234,20 +234,20 @@ pub struct EncFileData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileRead {
     /// Authentication MAC only — no encrypted file data.
-    MacOnly { key: FileReadKey, window: MacWindow },
+    MacOnly { key: KeyNumber, window: MacWindow },
     /// Authentication MAC plus encrypted file data.
     ///
     /// Requires [`PiccData::Encrypted`] with [`EncryptedContent::Both`],
     /// or [`PiccData::Plain`] with [`PlainMirror::Both`].
     MacAndEnc {
-        key: FileReadKey,
+        key: KeyNumber,
         window: MacWindow,
         enc: EncFileData,
     },
 }
 
 impl FileRead {
-    pub const fn key(&self) -> FileReadKey {
+    pub const fn key(&self) -> KeyNumber {
         match self {
             Self::MacOnly { key, .. } | Self::MacAndEnc { key, .. } => *key,
         }

@@ -140,11 +140,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
     The current design pushes the responsibility onto the user, which is
     exactly what the `sdm_url_config!` macro is meant to hide — it should be
     hidden in the manual path too.
-- **`FileReadKey`** (`types/file_settings.rs:280‑290`) adds ceremony
-  without enforcing an invariant: `FileReadKey::new(k)` accepts any
-  `KeyNumber`. If the "Free / NoAccess" exclusion is meant to be
-  structural, enforce it at construction; otherwise use `KeyNumber`
-  directly.
 
 ---
 

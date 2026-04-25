@@ -185,20 +185,3 @@ impl AccessRights {
         v.to_le_bytes()
     }
 }
-
-/// Key used for SDM file-read operations (MAC generation and optional file data encryption).
-///
-/// Only a specific key number is valid; `Free` and `NoAccess` are not permitted here.
-/// The absence of a file-read key is represented by `file_read: None` on [`Sdm`](`super::Sdm`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileReadKey(KeyNumber);
-
-impl FileReadKey {
-    pub const fn new(k: KeyNumber) -> Self {
-        Self(k)
-    }
-
-    pub const fn key(self) -> KeyNumber {
-        self.0
-    }
-}

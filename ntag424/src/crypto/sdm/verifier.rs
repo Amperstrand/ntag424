@@ -156,7 +156,7 @@ impl Verifier {
         let file_read = settings.file_read().ok_or(SdmError::InvalidConfiguration(
             "SDM read access is missing - no MAC key configured",
         ))?;
-        let file_read_key = file_read.key().key();
+        let file_read_key = file_read.key();
 
         let (picc_source, meta_read_key) = match settings.picc_data() {
             PiccData::Encrypted { key, offset, .. } => (

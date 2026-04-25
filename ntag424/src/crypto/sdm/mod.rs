@@ -47,8 +47,8 @@ mod tests {
     use crate::crypto::suite::{aes_cbc_encrypt, cmac_aes, cmac_lrp, truncate_mac};
     use crate::testing::hex_array;
     use crate::types::file_settings::{
-        CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, FileReadKey, MacWindow,
-        Offset, PiccData, PlainMirror, ReadCtrFeatures, Sdm,
+        CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset,
+        PiccData, PlainMirror, ReadCtrFeatures, Sdm,
     };
     use crate::types::{KeyNumber, TagTamperStatus};
 
@@ -92,7 +92,7 @@ mod tests {
                 }),
             },
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(read_key),
+                key: read_key,
                 window: MacWindow {
                     input: Offset::new(mac_input).unwrap(),
                     mac: Offset::new(mac).unwrap(),
@@ -113,7 +113,7 @@ mod tests {
     ) -> Sdm {
         let file_read = match encrypted_file_data {
             Some(range) => FileRead::MacAndEnc {
-                key: FileReadKey::new(read_key),
+                key: read_key,
                 window: MacWindow {
                     input: Offset::new(mac_input).unwrap(),
                     mac: Offset::new(mac).unwrap(),
@@ -124,7 +124,7 @@ mod tests {
                 },
             },
             None => FileRead::MacOnly {
-                key: FileReadKey::new(read_key),
+                key: read_key,
                 window: MacWindow {
                     input: Offset::new(mac_input).unwrap(),
                     mac: Offset::new(mac).unwrap(),
@@ -197,7 +197,7 @@ mod tests {
                 uid: Offset::new(10).unwrap(),
             }),
             Some(FileRead::MacOnly {
-                key: FileReadKey::new(KeyNumber::Key0),
+                key: KeyNumber::Key0,
                 window: MacWindow {
                     input: Offset::new(10).unwrap(),
                     mac: Offset::new(26).unwrap(),
@@ -365,7 +365,7 @@ mod tests {
                     }),
                 },
                 Some(FileRead::MacAndEnc {
-                    key: FileReadKey::new(KeyNumber::Key0),
+                    key: KeyNumber::Key0,
                     window: MacWindow {
                         input: Offset::new(42).unwrap(),
                         mac: Offset::new(74).unwrap(),
@@ -395,7 +395,7 @@ mod tests {
                     }),
                 },
                 Some(FileRead::MacAndEnc {
-                    key: FileReadKey::new(KeyNumber::Key0),
+                    key: KeyNumber::Key0,
                     window: MacWindow {
                         input: Offset::new(42).unwrap(),
                         mac: Offset::new(74).unwrap(),
@@ -422,7 +422,7 @@ mod tests {
                     content: EncryptedContent::Uid,
                 },
                 Some(FileRead::MacAndEnc {
-                    key: FileReadKey::new(KeyNumber::Key0),
+                    key: KeyNumber::Key0,
                     window: MacWindow {
                         input: Offset::new(42).unwrap(),
                         mac: Offset::new(74).unwrap(),
@@ -463,7 +463,7 @@ mod tests {
                     }),
                 },
                 Some(FileRead::MacAndEnc {
-                    key: FileReadKey::new(KeyNumber::Key0),
+                    key: KeyNumber::Key0,
                     window: MacWindow {
                         input: Offset::new(43).unwrap(),
                         mac: Offset::new(74).unwrap(),
@@ -561,7 +561,7 @@ mod tests {
                 }),
             },
             Some(FileRead::MacAndEnc {
-                key: FileReadKey::new(KeyNumber::Key0),
+                key: KeyNumber::Key0,
                 window: MacWindow {
                     input: Offset::new(42).unwrap(),
                     mac: Offset::new(74).unwrap(),
@@ -601,7 +601,7 @@ mod tests {
                     }),
                 },
                 Some(FileRead::MacAndEnc {
-                    key: FileReadKey::new(KeyNumber::Key0),
+                    key: KeyNumber::Key0,
                     window: MacWindow {
                         input: Offset::new(42).unwrap(),
                         mac: Offset::new(74).unwrap(),
