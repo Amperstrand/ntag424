@@ -17,20 +17,11 @@ use super::hex::{decode_hex_array, decode_hex_into, ensure_len};
 use super::keys::{SdmKeys, aes_ecb_encrypt_block, derive_sdm_keys_aes, derive_sdm_keys_lrp};
 use super::picc::{decrypt_picc_data_aes, decrypt_picc_data_lrp};
 use crate::crypto::suite::aes_cbc_decrypt;
+use crate::types::file_settings::CryptoMode;
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-/// Cryptographic suite used for SDM.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum CryptoMode {
-    /// AES-128 based SDM (§9.3 AES path).
-    Aes,
-    /// Leakage Resilient Primitive (§9.3 LRP path).
-    Lrp,
-}
 
 /// Errors from SDM verification.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -304,17 +295,14 @@ impl Verifier {
         match &self.picc_source {
             PiccSource::Encrypted { offset } => {
                 let offset = *offset as usize;
+                ensure_len(ndef_data, offset + self.mode.picc_blob_ascii_len() as usize)?;
                 match self.mode {
                     CryptoMode::Aes => {
-                        // 16 binary bytes = 32 ASCII hex chars.
-                        ensure_len(ndef_data, offset + 32)?;
                         let enc = decode_hex_array::<16>(ndef_data, offset)?;
                         let picc = decrypt_picc_data_aes(meta_key, &enc)?;
                         Ok((picc.uid, picc.read_ctr))
                     }
                     CryptoMode::Lrp => {
-                        // 24 binary bytes = 48 ASCII hex chars (8 PICCRand + 16 ct).
-                        ensure_len(ndef_data, offset + 48)?;
                         let wire = decode_hex_array::<24>(ndef_data, offset)?;
                         let picc = decrypt_picc_data_lrp(meta_key, &wire)?;
                         Ok((picc.uid, picc.read_ctr))

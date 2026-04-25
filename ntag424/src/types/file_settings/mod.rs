@@ -33,8 +33,8 @@ pub use access::{Access, AccessRights, CommMode, CtrRetAccess, FileType};
 pub use codec::{FileSettingsPatch, FileSettingsView, MAX_CHANGE_FILE_SETTINGS_LEN};
 pub use error::{FileSettingsError, NibbleSlot, OverlapKind, ReservedByte};
 pub use sdm::{
-    EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset, PiccData, PlainMirror,
-    ReadCtrFeatures, ReadCtrMirror, Sdm,
+    CryptoMode, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset, PiccData,
+    PlainMirror, ReadCtrFeatures, ReadCtrMirror, Sdm,
 };
 
 #[cfg(test)]
@@ -121,6 +121,7 @@ mod tests {
                 },
             }),
             None,
+            CryptoMode::Aes,
         )
         .unwrap();
         FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
@@ -185,6 +186,7 @@ mod tests {
                 enc,
             }),
             None,
+            CryptoMode::Aes,
         )
         .unwrap_err();
         assert_eq!(err, FileSettingsError::EncOutsideMacWindow);
@@ -210,6 +212,7 @@ mod tests {
                 },
             }),
             None,
+            CryptoMode::Aes,
         ) {
             Ok(s) => s,
             Err(_) => panic!("const SDM construction failed"),
@@ -224,6 +227,7 @@ mod tests {
             PiccData::Plain(PlainMirror::Uid { uid: Offset(0x20) }),
             None,
             Some(Offset(0x2E)),
+            CryptoMode::Aes,
         )
         .unwrap();
         assert_eq!(sdm.tamper_status(), Some(Offset(0x2E)));
@@ -240,6 +244,7 @@ mod tests {
             PiccData::Plain(PlainMirror::Uid { uid: Offset(0x20) }),
             None,
             Some(Offset(0x2E)),
+            CryptoMode::Aes,
         )
         .unwrap();
         FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
@@ -286,6 +291,7 @@ mod tests {
                 },
             }),
             Some(Offset(0x17)),
+            CryptoMode::Aes,
         )
         .unwrap();
         let patch = FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm);
@@ -370,7 +376,8 @@ mod tests {
 
     #[test]
     fn rejects_mac_input_after_mac() {
-        let err = Sdm::try_new(PiccData::None, mac_only(0x20, 0x10), None).unwrap_err();
+        let err =
+            Sdm::try_new(PiccData::None, mac_only(0x20, 0x10), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(err, FileSettingsError::MacInputAfterMac);
     }
 
@@ -382,7 +389,8 @@ mod tests {
             offset: Offset(0),
             content: EncryptedContent::Uid,
         };
-        let err = Sdm::try_new(picc, mac_and_enc(0, 0x40, 0, 32), None).unwrap_err();
+        let err =
+            Sdm::try_new(picc, mac_and_enc(0, 0x40, 0, 32), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(err, FileSettingsError::EncRequiresBothMirrors);
     }
 
@@ -396,7 +404,8 @@ mod tests {
                 ret_access: CtrRetAccess::NoAccess,
             }),
         };
-        let err = Sdm::try_new(picc, mac_and_enc(0, 0x40, 0, 32), None).unwrap_err();
+        let err =
+            Sdm::try_new(picc, mac_and_enc(0, 0x40, 0, 32), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(err, FileSettingsError::EncRequiresBothMirrors);
     }
 
@@ -404,7 +413,7 @@ mod tests {
     fn rejects_overlap_uid_and_rctr() {
         // UID at 0x10 (14 bytes), RCtr at 0x15 (overlaps UID).
         let picc = plain_both(0x10, 0x15);
-        let err = Sdm::try_new(picc, None, None).unwrap_err();
+        let err = Sdm::try_new(picc, None, None, CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::UidAndRCtr)
@@ -415,7 +424,7 @@ mod tests {
     fn rejects_overlap_uid_and_tamper() {
         // UID at 0x10 (14 bytes), TT at 0x1A - inside UID span.
         let picc = PiccData::Plain(PlainMirror::Uid { uid: Offset(0x10) });
-        let err = Sdm::try_new(picc, None, Some(Offset(0x1A))).unwrap_err();
+        let err = Sdm::try_new(picc, None, Some(Offset(0x1A)), CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::UidAndTamper)
@@ -434,7 +443,7 @@ mod tests {
                 },
             },
         });
-        let err = Sdm::try_new(picc, None, Some(Offset(0x14))).unwrap_err();
+        let err = Sdm::try_new(picc, None, Some(Offset(0x14)), CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::RCtrAndTamper)
@@ -445,7 +454,7 @@ mod tests {
     fn rejects_overlap_uid_and_mac() {
         // UID at 0x10 (14 bytes), MAC window mac-offset at 0x15 - inside UID span.
         let picc = PiccData::Plain(PlainMirror::Uid { uid: Offset(0x10) });
-        let err = Sdm::try_new(picc, mac_only(0x00, 0x15), None).unwrap_err();
+        let err = Sdm::try_new(picc, mac_only(0x00, 0x15), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::UidAndMac)
@@ -464,7 +473,7 @@ mod tests {
                 },
             },
         });
-        let err = Sdm::try_new(picc, mac_only(0x00, 0x12), None).unwrap_err();
+        let err = Sdm::try_new(picc, mac_only(0x00, 0x12), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::RCtrAndMac)
@@ -474,8 +483,13 @@ mod tests {
     #[test]
     fn rejects_overlap_tamper_and_mac() {
         // TT at 0x10 (2 bytes), MAC at 0x11 - overlaps TT.
-        let err =
-            Sdm::try_new(PiccData::None, mac_only(0x00, 0x11), Some(Offset(0x10))).unwrap_err();
+        let err = Sdm::try_new(
+            PiccData::None,
+            mac_only(0x00, 0x11),
+            Some(Offset(0x10)),
+            CryptoMode::Aes,
+        )
+        .unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::TamperAndMac)
@@ -487,7 +501,8 @@ mod tests {
         // Plain UID at 0x10, ENC starts at 0x15 (overlaps UID's 14-byte span 0x10..0x1E).
         // Use plain_both so validation (requires both uid+rctr) passes.
         let picc = plain_both(0x10, 0x60);
-        let err = Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x15, 32), None).unwrap_err();
+        let err =
+            Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x15, 32), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::EncAndUid)
@@ -500,7 +515,8 @@ mod tests {
         // ENC at 0x1E..0x3E overlaps RCtr.
         // Use plain_both so validation passes.
         let picc = plain_both(0x00, 0x20);
-        let err = Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x1E, 32), None).unwrap_err();
+        let err =
+            Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x1E, 32), None, CryptoMode::Aes).unwrap_err();
         assert_eq!(
             err,
             FileSettingsError::MirrorsOverlap(OverlapKind::EncAndRCtr)
@@ -515,6 +531,7 @@ mod tests {
             both_picc(0),
             mac_and_enc(0, 0x80, 0x20, 32),
             Some(Offset(0x30)),
+            CryptoMode::Aes,
         )
         .unwrap_err();
         assert_eq!(
@@ -531,8 +548,68 @@ mod tests {
             both_picc(0),
             mac_and_enc(0, 0x80, 0x20, 32),
             Some(Offset(0x2E)),
+            CryptoMode::Aes,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rejects_picc_blob_overlapping_mac_aes() {
+        // AES picc blob at 0x00..0x20 (32 bytes), MAC at 0x10 — inside the blob.
+        let picc = both_picc(0x00);
+        let err = Sdm::try_new(picc, mac_only(0x00, 0x10), None, CryptoMode::Aes).unwrap_err();
+        assert_eq!(
+            err,
+            FileSettingsError::MirrorsOverlap(OverlapKind::PiccAndMac)
+        );
+    }
+
+    #[test]
+    fn rejects_picc_blob_overlapping_mac_lrp() {
+        // LRP picc blob at 0x00..0x30 (48 bytes), MAC at 0x28 — inside the blob.
+        let picc = both_picc(0x00);
+        let err = Sdm::try_new(picc, mac_only(0x00, 0x28), None, CryptoMode::Lrp).unwrap_err();
+        assert_eq!(
+            err,
+            FileSettingsError::MirrorsOverlap(OverlapKind::PiccAndMac)
+        );
+    }
+
+    #[test]
+    fn rejects_picc_blob_overlapping_tamper() {
+        // AES picc blob at 0x00..0x20, TT at 0x10.
+        let picc = both_picc(0x00);
+        let err = Sdm::try_new(picc, None, Some(Offset(0x10)), CryptoMode::Aes).unwrap_err();
+        assert_eq!(
+            err,
+            FileSettingsError::MirrorsOverlap(OverlapKind::PiccAndTamper)
+        );
+    }
+
+    #[test]
+    fn rejects_picc_blob_overlapping_enc_file_data() {
+        // AES picc blob at 0x00..0x20, enc file data at 0x10..0x30 — overlaps blob.
+        let picc = both_picc(0x00);
+        let err =
+            Sdm::try_new(picc, mac_and_enc(0, 0x80, 0x10, 32), None, CryptoMode::Aes).unwrap_err();
+        assert_eq!(
+            err,
+            FileSettingsError::MirrorsOverlap(OverlapKind::PiccAndEnc)
+        );
+    }
+
+    #[test]
+    fn picc_blob_just_before_mac_is_ok() {
+        // AES picc blob at 0x00..0x20 (32 bytes), MAC at exactly 0x20 — no overlap.
+        let picc = both_picc(0x00);
+        Sdm::try_new(picc, mac_only(0x00, 0x20), None, CryptoMode::Aes).unwrap();
+    }
+
+    #[test]
+    fn lrp_blob_just_before_mac_is_ok() {
+        // LRP picc blob at 0x00..0x30 (48 bytes), MAC at exactly 0x30 — no overlap.
+        let picc = both_picc(0x00);
+        Sdm::try_new(picc, mac_only(0x00, 0x30), None, CryptoMode::Lrp).unwrap();
     }
 
     // -- Negative-path tests: FileSettingsView::decode reserved-bit checks ------

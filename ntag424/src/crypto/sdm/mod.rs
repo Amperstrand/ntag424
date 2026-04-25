@@ -37,7 +37,7 @@ pub mod keys;
 pub mod picc;
 pub mod verifier;
 
-pub use verifier::{CryptoMode, SdmError, SdmVerification, Verifier};
+pub use verifier::{SdmError, SdmVerification, Verifier};
 
 #[cfg(test)]
 mod tests {
@@ -47,8 +47,8 @@ mod tests {
     use crate::crypto::suite::{aes_cbc_encrypt, cmac_aes, cmac_lrp, truncate_mac};
     use crate::testing::hex_array;
     use crate::types::file_settings::{
-        CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset,
-        PiccData, PlainMirror, ReadCtrFeatures, Sdm,
+        CryptoMode, CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow,
+        Offset, PiccData, PlainMirror, ReadCtrFeatures, Sdm,
     };
     use crate::types::{KeyNumber, TagTamperStatus};
 
@@ -81,6 +81,7 @@ mod tests {
         picc_offset: u32,
         mac_input: u32,
         mac: u32,
+        mode: CryptoMode,
     ) -> Sdm {
         Sdm::try_new(
             PiccData::Encrypted {
@@ -99,6 +100,7 @@ mod tests {
                 },
             }),
             None,
+            mode,
         )
         .unwrap()
     }
@@ -110,6 +112,7 @@ mod tests {
         mac_input: u32,
         mac: u32,
         encrypted_file_data: Option<core::ops::Range<u32>>,
+        mode: CryptoMode,
     ) -> Sdm {
         let file_read = match encrypted_file_data {
             Some(range) => FileRead::MacAndEnc {
@@ -142,6 +145,7 @@ mod tests {
             },
             Some(file_read),
             None,
+            mode,
         )
         .unwrap()
     }
@@ -151,7 +155,14 @@ mod tests {
     /// Build settings + NDEF for Table 4 (encrypted PICC, empty MAC input).
     fn table4_fixture() -> (Sdm, alloc::vec::Vec<u8>) {
         // Layout: [10-byte prefix][32-char PICCData hex][16-char SDMMAC hex]
-        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 10, 42, 42);
+        let settings = encrypted_settings(
+            KeyNumber::Key0,
+            KeyNumber::Key0,
+            10,
+            42,
+            42,
+            CryptoMode::Aes,
+        );
         let ndef = build_ndef(
             b"HELLOWORLD", // 10-byte prefix
             Some("EF963FF7828658A599F3041510671E88"),
@@ -204,6 +215,7 @@ mod tests {
                 },
             }),
             Some(Offset::new(24).unwrap()),
+            CryptoMode::Aes,
         )
         .unwrap();
 
@@ -262,7 +274,8 @@ mod tests {
         ndef.extend_from_slice(b"x");
         ndef.extend_from_slice(mac_hex.as_bytes());
 
-        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 7, 7, 56);
+        let settings =
+            encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 7, 7, 56, CryptoMode::Lrp);
 
         let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
@@ -295,6 +308,7 @@ mod tests {
             0,
             96,
             Some(63..95),
+            CryptoMode::Lrp,
         );
 
         let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
@@ -335,7 +349,8 @@ mod tests {
         ndef.extend_from_slice(b"x"); // offset 55
         ndef.extend_from_slice(mac_hex.as_bytes()); // offset 56, len 16
 
-        let settings = encrypted_settings(KeyNumber::Key0, KeyNumber::Key2, 7, 7, 56);
+        let settings =
+            encrypted_settings(KeyNumber::Key0, KeyNumber::Key2, 7, 7, 56, CryptoMode::Lrp);
 
         let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
         let result = v.verify_with_meta_key(&ndef, &file_key, &meta_key).unwrap();
@@ -345,7 +360,7 @@ mod tests {
 
     #[test]
     fn try_new_rejects_no_file_read() {
-        let settings = Sdm::try_new(PiccData::None, None, None).unwrap();
+        let settings = Sdm::try_new(PiccData::None, None, None, CryptoMode::Aes).unwrap();
         assert!(matches!(
             Verifier::try_new(settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(_)),
@@ -376,6 +391,7 @@ mod tests {
                     },
                 }),
                 None,
+                CryptoMode::Aes,
             )
             .is_ok()
         );
@@ -406,6 +422,7 @@ mod tests {
                     },
                 }),
                 None,
+                CryptoMode::Aes,
             ),
             Err(FileSettingsError::EncRequiresBothMirrors),
         ));
@@ -433,6 +450,7 @@ mod tests {
                     },
                 }),
                 None,
+                CryptoMode::Aes,
             ),
             Err(FileSettingsError::EncRequiresBothMirrors),
         ));
@@ -474,6 +492,7 @@ mod tests {
                     },
                 }),
                 None,
+                CryptoMode::Aes,
             ),
             Err(FileSettingsError::EncOutsideMacWindow),
         ));
@@ -506,6 +525,7 @@ mod tests {
             42,
             74,
             Some(42..74),
+            CryptoMode::Aes,
         );
 
         let ndef = build_ndef(
@@ -572,6 +592,7 @@ mod tests {
                 },
             }),
             Some(Offset::new(44).unwrap()),
+            CryptoMode::Aes,
         )
         .unwrap();
 
@@ -612,6 +633,7 @@ mod tests {
                     },
                 }),
                 Some(Offset::new(58).unwrap()),
+                CryptoMode::Aes,
             ),
             Err(FileSettingsError::MirrorsOverlap(_)),
         ));

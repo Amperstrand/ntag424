@@ -13,11 +13,11 @@ use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
 use thiserror::Error;
 
-use crate::crypto::sdm::CryptoMode;
 use crate::types::KeyNumber;
 use crate::types::file_settings::{
-    CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, FileSettingsError, MacWindow,
-    Offset, PiccData, PlainMirror, ReadCtrFeatures, ReadCtrMirror, Sdm,
+    CryptoMode, CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead,
+    FileSettingsError, MacWindow, Offset, PiccData, PlainMirror, ReadCtrFeatures, ReadCtrMirror,
+    Sdm,
 };
 
 const URI_AT: u32 = 7;
@@ -477,7 +477,7 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
     };
 
     let tamper_status = try_offset!(Some(parsed.tt_offset), "tt_offset");
-    let sdm_settings = match Sdm::try_new(picc_data, file_read, tamper_status) {
+    let sdm_settings = match Sdm::try_new(picc_data, file_read, tamper_status, mode) {
         Ok(sdm) => sdm,
         Err(FileSettingsError::MacInputAfterMac) => {
             return Err(TemplateCoreError::FileSettings("mac_input > mac"));
@@ -753,10 +753,7 @@ const fn placeholder_fill_len(placeholder: Placeholder, mode: CryptoMode) -> usi
         Placeholder::Ctr => 6,
         Placeholder::Tt => 2,
         Placeholder::Mac => 16,
-        Placeholder::Picc(_) => match mode {
-            CryptoMode::Aes => 32,
-            CryptoMode::Lrp => 48,
-        },
+        Placeholder::Picc(_) => mode.picc_blob_ascii_len() as usize,
     }
 }
 

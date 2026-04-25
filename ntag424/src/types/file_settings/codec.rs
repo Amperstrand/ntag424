@@ -235,7 +235,7 @@ impl FileSettingsView {
                 _ => return Err(FileSettingsError::InvalidSdmFlags),
             };
 
-            let sdm = Sdm::try_new(picc_data, file_read, tt_offset)?;
+            let sdm = Sdm::try_new_from_wire(picc_data, file_read, tt_offset)?;
             Some(sdm)
         } else {
             None

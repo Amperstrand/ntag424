@@ -8,6 +8,26 @@ use crate::types::KeyNumber;
 use super::access::CtrRetAccess;
 use super::error::{FileSettingsError, OverlapKind};
 
+/// Cryptographic suite used for SDM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum CryptoMode {
+    /// AES-128 based SDM (§9.3 AES path).
+    Aes,
+    /// Leakage Resilient Primitive (§9.3 LRP path).
+    Lrp,
+}
+
+impl CryptoMode {
+    /// Number of ASCII hex characters occupied by the encrypted PICCData blob.
+    pub const fn picc_blob_ascii_len(self) -> u32 {
+        match self {
+            Self::Aes => PICC_BLOB_LEN_AES,
+            Self::Lrp => PICC_BLOB_LEN_LRP,
+        }
+    }
+}
+
 /// A 24-bit byte offset into a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Offset(pub(super) u32);
@@ -272,6 +292,8 @@ const UID_PLACEHOLDER_LEN: u32 = 14; // 7 binary bytes × 2 hex chars
 const RCTR_PLACEHOLDER_LEN: u32 = 6; // 3 binary bytes × 2 hex chars
 const TT_PLACEHOLDER_LEN: u32 = 2; // 1 binary byte × 2 hex chars
 const MAC_PLACEHOLDER_LEN: u32 = 16; // 8 binary bytes × 2 hex chars (truncated CMAC)
+const PICC_BLOB_LEN_AES: u32 = 32; // 16 binary bytes × 2 hex chars
+const PICC_BLOB_LEN_LRP: u32 = 48; // 24 binary bytes × 2 hex chars (8 PICCRand + 16 ct)
 
 /// Returns `true` when byte ranges `[a, a+a_len)` and `[b, b+b_len)` overlap.
 const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
@@ -292,10 +314,8 @@ const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
 /// the NDEF URL and configuration together from a template.
 ///
 /// Mirror placeholders in the NDEF file are ASCII hex strings; their byte widths are:
-/// UID = 14, read counter = 6, tag tamper status = 2, authentication MAC = 16.
-/// The encrypted identity data blob width depends on the crypto suite (32 bytes for AES,
-/// 48 for LRP) and is **not** overlap-checked here — callers must ensure it does not
-/// overlap with other placeholders.
+/// UID = 14, read counter = 6, tag tamper status = 2, authentication MAC = 16,
+/// encrypted identity data blob = 32 (AES) or 48 (LRP).
 ///
 /// NT4H2421Gx §9.3, §10.7.1 Table 69.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,14 +347,84 @@ impl Sdm {
     /// - `window.input ≤ window.mac`
     /// - (`MacAndEnc`): encrypted file data range lies within the MAC window
     /// - (`MacAndEnc`): `picc_data` includes both UID and read counter
-    /// - pairwise non-overlap between plain UID, plain read counter, tag tamper
-    ///   status, authentication MAC, and encrypted file data placeholders
-    ///   (NT4H2421Gx Table 71). Overlap with the encrypted identity data blob
-    ///   is **not** checked here because its size depends on the crypto suite
-    ///   (32 bytes for AES, 48 for LRP).
+    /// - pairwise non-overlap between all placeholders, including the encrypted
+    ///   identity data blob (NT4H2421Gx Table 71); blob size is 32 bytes for AES,
+    ///   48 bytes for LRP
     /// - (`MacAndEnc`): `tamper_status`, if inside the encrypted file data range,
     ///   must fall entirely within the plaintext half
     pub const fn try_new(
+        picc_data: PiccData,
+        file_read: Option<FileRead>,
+        tamper_status: Option<Offset>,
+        mode: CryptoMode,
+    ) -> Result<Self, FileSettingsError> {
+        // Run all mode-independent checks first.
+        if let Err(e) = Self::try_new_inner(picc_data, file_read, tamper_status) {
+            return Err(e);
+        }
+
+        // Check overlap between the encrypted PICCData blob and every other placeholder.
+        // The blob size depends on mode, so this check requires a CryptoMode parameter.
+        if let PiccData::Encrypted { offset, .. } = picc_data {
+            let picc_len = mode.picc_blob_ascii_len();
+            let picc_start = offset.0;
+
+            let tt_range: Option<(u32, u32)> = if let Some(tt) = tamper_status {
+                Some((tt.0, TT_PLACEHOLDER_LEN))
+            } else {
+                None
+            };
+            let mac_range: Option<(u32, u32)> = if let Some(ref fr) = file_read {
+                Some((fr.window().mac.0, MAC_PLACEHOLDER_LEN))
+            } else {
+                None
+            };
+            let enc_range: Option<(u32, u32)> =
+                if let Some(FileRead::MacAndEnc { enc, .. }) = file_read {
+                    Some((enc.start.0, enc.length.0))
+                } else {
+                    None
+                };
+
+            macro_rules! check_picc {
+                ($other:expr, $kind:expr) => {
+                    if let Some((b, bl)) = $other {
+                        if ranges_overlap(picc_start, picc_len, b, bl) {
+                            return Err(FileSettingsError::MirrorsOverlap($kind));
+                        }
+                    }
+                };
+            }
+
+            // When PiccData is Encrypted, uid_range and rctr_range are both None
+            // (plain mirrors and encrypted mirrors are mutually exclusive), so we
+            // only need to check tamper status, MAC, and enc file data.
+            check_picc!(tt_range, OverlapKind::PiccAndTamper);
+            check_picc!(mac_range, OverlapKind::PiccAndMac);
+            check_picc!(enc_range, OverlapKind::PiccAndEnc);
+        }
+
+        Ok(Self {
+            picc_data,
+            file_read,
+            tamper_status,
+        })
+    }
+
+    /// Deserialize SDM settings decoded from wire bytes.
+    ///
+    /// Performs the same checks as [`try_new`](Self::try_new) except the
+    /// overlap check against the encrypted PICCData blob, which requires a
+    /// [`CryptoMode`] that is not encoded in the wire format.
+    pub(super) const fn try_new_from_wire(
+        picc_data: PiccData,
+        file_read: Option<FileRead>,
+        tamper_status: Option<Offset>,
+    ) -> Result<Self, FileSettingsError> {
+        Self::try_new_inner(picc_data, file_read, tamper_status)
+    }
+
+    const fn try_new_inner(
         picc_data: PiccData,
         file_read: Option<FileRead>,
         tamper_status: Option<Offset>,

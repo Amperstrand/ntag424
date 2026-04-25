@@ -185,6 +185,7 @@ mod tests {
                 },
             }),
             None,
+            CryptoMode::Aes,
         )
         .expect("valid SDM settings");
 

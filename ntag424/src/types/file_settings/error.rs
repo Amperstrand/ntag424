@@ -45,6 +45,9 @@ pub enum OverlapKind {
     EncAndUid,
     EncAndRCtr,
     TamperInCiphertextHalf,
+    PiccAndTamper,
+    PiccAndMac,
+    PiccAndEnc,
 }
 
 impl fmt::Display for OverlapKind {
@@ -64,6 +67,9 @@ impl fmt::Display for OverlapKind {
                     "TamperStatus overlaps the ciphertext half of EncFileData"
                 )
             }
+            Self::PiccAndTamper => write!(f, "PICCData blob and TamperStatus"),
+            Self::PiccAndMac => write!(f, "PICCData blob and MAC"),
+            Self::PiccAndEnc => write!(f, "PICCData blob and EncFileData"),
         }
     }
 }
