@@ -75,7 +75,10 @@ fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
 /// `WriteData` (INS `8D`, §10.8.2) in `CommMode.Plain`.
 ///
 /// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) Data 00`.
-/// Does not require or touch any secure-messaging state.
+/// This helper only emits the plain APDU framing: it does not compute or
+/// verify secure-messaging data itself. When called through an authenticated
+/// session wrapper, that wrapper is responsible for advancing the tracked
+/// command counter after a successful response.
 ///
 /// Panics if `data` is empty or exceeds 248 bytes, or if `data.len()`
 /// does not equal `length`.

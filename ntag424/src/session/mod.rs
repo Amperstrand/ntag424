@@ -87,19 +87,22 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 ///
 /// ## Why most authenticated methods take `self` by value
 ///
-/// Secure-channel commands (MAC-protected or encrypted) advance `CmdCtr` on
-/// the PICC. If the host sends a command but receives an error — transport
-/// failure, bad MAC, unexpected status — it cannot know whether the PICC
-/// already incremented its counter. Reusing the session afterwards would leave
-/// the host and PICC counters out of sync, causing all subsequent secure
-/// commands to fail. Consuming `self` and returning it only on success makes
-/// this explicit: on error the session is dropped, and the caller must
-/// re-authenticate.
+/// Authenticated-session commands advance `CmdCtr` on the PICC after a
+/// successful exchange, including commands sent with plain wire framing.
+/// MAC-protected and encrypted commands additionally derive or verify
+/// secure-messaging data from the current counter value. If the host sends
+/// one of those commands but receives an error — transport failure, bad MAC,
+/// unexpected status — it cannot know whether the PICC already incremented
+/// its counter. Reusing the session afterwards would leave the host and PICC
+/// counters out of sync, causing all subsequent secure commands to fail.
+/// Consuming `self` and returning it only on success makes this explicit:
+/// on error the session is dropped, and the caller must re-authenticate.
 ///
-/// Methods that only issue plain-mode commands — [`Session::read_file_plain`]
-/// and [`Session::write_file_plain`] — take `&mut self` instead: they never
-/// touch the MAC counter, so a transport error leaves the session intact and
-/// the call is safe to retry.
+/// The plain authenticated helpers [`Session::read_file_plain`] and
+/// [`Session::write_file_plain`] take `&mut self` because the command framing
+/// itself is plain: no request or response MAC is computed or verified. On a
+/// successful response they still advance the tracked authenticated-session
+/// counter to match the PICC behavior observed on hardware.
 pub struct Session<S> {
     state: S,
     /// Whether the NDEF application is selected.

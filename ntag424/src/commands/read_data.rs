@@ -86,9 +86,12 @@ fn want_plain_bytes(length: u32, buf_len: usize) -> usize {
 /// `ReadData` (INS `AD`, §10.8.1) in `CommMode.Plain`.
 ///
 /// Wire: `90 AD 00 00 07 FileNo Offset(3 LE) Length(3 LE) 00`.
-/// Does not require or touch any secure-messaging state - safe to use
-/// either unauthenticated or while authenticated when access was granted
-/// via a free (`Eh`) access condition (§8.2.3.3).
+/// This helper only emits the plain APDU framing: it does not compute or
+/// verify secure-messaging data itself. It is therefore safe to use either
+/// unauthenticated or while authenticated when access was granted via a free
+/// (`Eh`) access condition (§8.2.3.3). When called through an authenticated
+/// session wrapper, that wrapper is responsible for advancing the tracked
+/// command counter after a successful response.
 ///
 /// Returns the number of bytes copied into `buf`.
 pub(crate) async fn read_data_plain<T: Transport>(

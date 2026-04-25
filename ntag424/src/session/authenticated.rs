@@ -272,6 +272,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ///
     /// This must be used when the only access
     /// condition granting the current session access is free access.
+    /// The APDU itself is sent in plain framing, but a successful authenticated-
+    /// session read still advances the tracked command counter.
     ///
     /// `length = 0` means "entire file from `offset`". Returns the
     /// number of bytes copied into `buf`.
@@ -305,12 +307,12 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// 256-byte short-Le response limit (NT4H2421Gx §10.8.1). When
     /// `length != 0`, `buf.len()` must be at least `length`.
     ///
-    /// This method consumes `self` and returns it on success because MAC
-    /// and Full modes advance the secure channel's command counter; losing
-    /// the session on error prevents counter desynchronisation. Plain mode
-    /// also consumes `self` for uniformity of the return type — use
-    /// [`Self::read_file_plain`] when you need a retryable plain read on
-    /// an authenticated session.
+    /// This method consumes `self` and returns it on success because all
+    /// successful authenticated-session reads advance the shared command
+    /// counter, even when the wire framing is plain. MAC and Full modes also
+    /// derive or verify secure-messaging data from that counter; Plain mode
+    /// is included here for a uniform return type. Use [`Self::read_file_plain`]
+    /// when you specifically want plain framing.
     pub async fn read_file_with_mode<T: Transport>(
         mut self,
         transport: &mut T,
@@ -346,6 +348,8 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     ///
     /// This must be used when the only access
     /// condition granting the current session access is free access.
+    /// The APDU itself is sent in plain framing, but a successful authenticated-
+    /// session write still advances the tracked command counter.
     pub async fn write_file_plain<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -371,12 +375,12 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     /// authenticated. You may use [`Self::write_file_plain`]
     /// in this case.
     ///
-    /// This method consumes `self` and returns it on success because MAC
-    /// and Full modes advance the secure channel's command counter; losing
-    /// the session on error prevents counter desynchronisation. Plain mode
-    /// also consumes `self` for uniformity of the return type — use
-    /// [`Self::write_file_plain`] when you need a retryable plain write on
-    /// an authenticated session.
+    /// This method consumes `self` and returns it on success because all
+    /// successful authenticated-session writes advance the shared command
+    /// counter, even when the wire framing is plain. MAC and Full modes also
+    /// derive or verify secure-messaging data from that counter; Plain mode
+    /// is included here for a uniform return type. Use [`Self::write_file_plain`]
+    /// when you specifically want plain framing.
     pub async fn write_file_with_mode<T: Transport>(
         mut self,
         transport: &mut T,
