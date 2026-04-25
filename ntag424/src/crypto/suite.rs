@@ -225,22 +225,28 @@ impl SessionSuite for AesSuite {
     }
 }
 
-/// AES-128 CBC encryption in place. `buf.len()` must be a positive
-/// multiple of 16; no padding is applied.
+/// AES-128 CBC encryption in place. No padding is applied.
+///
+/// Panics if `buf.len()` is not a positive multiple of 16.
 ///
 /// Shared between the §9.1.4 session-message path (IV derived from
 /// `TI || CmdCtr`) and the §9.1.5 authentication handshake (zero IV,
 /// no padding).
 pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
-    debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    assert!(
+        !buf.is_empty() && buf.len().is_multiple_of(16),
+        "aes_cbc_encrypt: buffer length must be a positive multiple of 16",
+    );
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     for chunk in buf.chunks_exact_mut(16) {
         for (b, p) in chunk.iter_mut().zip(prev.iter()) {
             *b ^= *p;
         }
+        let mut block = Block::default();
+        block.copy_from_slice(chunk);
         let mut out = Block::default();
-        cipher.encrypt_block_b2b(&Block::try_from(&*chunk).unwrap(), &mut out);
+        cipher.encrypt_block_b2b(&block, &mut out);
         chunk.copy_from_slice(&out);
         prev.copy_from_slice(chunk);
     }
@@ -248,14 +254,19 @@ pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
 
 /// In-place inverse of [`aes_cbc_encrypt`]. Same length preconditions.
 pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
-    debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    assert!(
+        !buf.is_empty() && buf.len().is_multiple_of(16),
+        "aes_cbc_decrypt: buffer length must be a positive multiple of 16",
+    );
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     let mut save = [0u8; 16];
     for chunk in buf.chunks_exact_mut(16) {
         save.copy_from_slice(chunk);
+        let mut block = Block::default();
+        block.copy_from_slice(chunk);
         let mut out = Block::default();
-        cipher.decrypt_block_b2b(&Block::try_from(&*chunk).unwrap(), &mut out);
+        cipher.decrypt_block_b2b(&block, &mut out);
         chunk.copy_from_slice(&out);
         for (b, p) in chunk.iter_mut().zip(prev.iter()) {
             *b ^= *p;
@@ -359,6 +370,19 @@ mod tests {
     use super::*;
     use crate::testing::{hex_array, hex_bytes};
     use alloc::vec::Vec;
+
+    #[test]
+    #[should_panic(expected = "aes_cbc_encrypt: buffer length must be a positive multiple of 16")]
+    fn aes_cbc_encrypt_rejects_empty_buffer() {
+        aes_cbc_encrypt(&[0u8; 16], &[0u8; 16], &mut []);
+    }
+
+    #[test]
+    #[should_panic(expected = "aes_cbc_decrypt: buffer length must be a positive multiple of 16")]
+    fn aes_cbc_decrypt_rejects_non_block_buffer() {
+        let mut buf = [0u8; 15];
+        aes_cbc_decrypt(&[0u8; 16], &[0u8; 16], &mut buf);
+    }
 
     // AN12196 §5.10 "AuthenticateEV2First with key 0x03". Worked example
     // with Kx = all zeros, RndA / RndB from the transcript, and the
