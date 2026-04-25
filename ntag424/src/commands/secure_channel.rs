@@ -200,7 +200,6 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
     /// `MACt`, and advances `CmdCtr`. Returns the response data with
     /// the MAC stripped.
     ///
-    /// Panics if `header.len() + data.len() + 8 > 255`.
     pub(crate) async fn send_mac<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -210,11 +209,20 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         header: &[u8],
         data: &[u8],
     ) -> Result<MacResponse, SessionError<T::Error>> {
-        let body_len = header.len() + data.len() + MAC_LEN;
-        assert!(
-            body_len <= MAX_APDU_BODY,
-            "CommMode.MAC body exceeds 255 bytes",
-        );
+        let body_len = header
+            .len()
+            .checked_add(data.len())
+            .and_then(|len| len.checked_add(MAC_LEN))
+            .ok_or(SessionError::ApduBodyTooLarge {
+                got: usize::MAX,
+                max: MAX_APDU_BODY,
+            })?;
+        if body_len > MAX_APDU_BODY {
+            return Err(SessionError::ApduBodyTooLarge {
+                got: body_len,
+                max: MAX_APDU_BODY,
+            });
+        }
         let mac = self.compute_cmd_mac(cmd, header, data);
 
         let mut apdu = [0u8; 5 + MAX_APDU_BODY + 1];

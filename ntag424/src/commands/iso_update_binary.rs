@@ -45,41 +45,52 @@ const ISO_UPDATE_BINARY_MAX: usize = 255;
 /// The PICC response carries no data - only `SW1 SW2` (`9000h` on
 /// success).
 ///
-/// Panics if `data` is empty or exceeds 255 bytes, if
-/// `short_file_id` is `Some(0)` or `Some(v > 0x1E)`, or if `offset`
-/// exceeds the range allowed by the addressing mode.
 pub(crate) async fn iso_update_binary<T: Transport>(
     transport: &mut T,
     short_file_id: Option<u8>,
     offset: u16,
     data: &[u8],
 ) -> Result<(), SessionError<T::Error>> {
-    assert!(
-        !data.is_empty(),
-        "iso_update_binary: data must be non-empty",
-    );
-    assert!(
-        data.len() <= ISO_UPDATE_BINARY_MAX,
-        "iso_update_binary: data exceeds 255 bytes",
-    );
+    if data.is_empty() {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "data.len()",
+            value: 0,
+            reason: "must be non-zero",
+        });
+    }
+    if data.len() > ISO_UPDATE_BINARY_MAX {
+        return Err(SessionError::ApduBodyTooLarge {
+            got: data.len(),
+            max: ISO_UPDATE_BINARY_MAX,
+        });
+    }
 
     let (p1, p2) = match short_file_id {
         Some(sfid) => {
-            assert!(
-                (0x01..=0x1E).contains(&sfid),
-                "iso_update_binary: short_file_id must be 01h..1Eh (got {sfid:#04x})",
-            );
-            assert!(
-                offset <= u16::from(u8::MAX),
-                "iso_update_binary: offset must be ≤ 0xFF with a short FileID (got {offset:#06x})",
-            );
+            if !(0x01..=0x1E).contains(&sfid) {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "short_file_id",
+                    value: sfid as usize,
+                    reason: "must be 0x01..=0x1E",
+                });
+            }
+            if offset > u16::from(u8::MAX) {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: offset as usize,
+                    reason: "must be <= 0xFF with a short FileID",
+                });
+            }
             (0x80 | sfid, offset as u8)
         }
         None => {
-            assert!(
-                offset <= 0x7FFF,
-                "iso_update_binary: offset must be ≤ 0x7FFF (got {offset:#06x})",
-            );
+            if offset > 0x7FFF {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: offset as usize,
+                    reason: "must be <= 0x7FFF",
+                });
+            }
             let be = offset.to_be_bytes();
             (be[0], be[1])
         }
@@ -144,6 +155,45 @@ mod tests {
         let expected = [0x00, 0xD6, 0x01, 0x23, 0x02, 0x55, 0x55];
         let mut transport = TestTransport::new([Exchange::new(&expected, &[], 0x90, 0x00)]);
         block_on(iso_update_binary(&mut transport, None, 0x0123, &data)).expect("update ok");
+    }
+
+    #[test]
+    fn rejects_empty_data_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        match block_on(iso_update_binary(&mut transport, None, 0, &[])) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "data.len()",
+                value: 0,
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for empty data, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn rejects_oversized_offset_without_transmit() {
+        let data = [0x01];
+        let mut transport = TestTransport::new([]);
+        match block_on(iso_update_binary(&mut transport, None, 0x8000, &data)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "offset",
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for offset, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn rejects_apdu_body_overflow_without_transmit() {
+        let data = [0u8; ISO_UPDATE_BINARY_MAX + 1];
+        let mut transport = TestTransport::new([]);
+        match block_on(iso_update_binary(&mut transport, None, 0, &data)) {
+            Err(SessionError::ApduBodyTooLarge { got: 256, max: 255 }) => (),
+            other => panic!("expected ApduBodyTooLarge, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
     }
 
     /// PICC returning `69 82` (security status not satisfied)

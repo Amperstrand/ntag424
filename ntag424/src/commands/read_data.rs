@@ -48,23 +48,55 @@ const MAC_LEN: usize = 8;
 /// Max addressable file offset/length: 24-bit field per §10.8.1 Table 78.
 const U24_MAX: u32 = 0x00FF_FFFF;
 
+fn validate_request<E: core::error::Error + core::fmt::Debug>(
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf_len: usize,
+) -> Result<(), SessionError<E>> {
+    if file_no > 0x1F {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "file_no",
+            value: file_no as usize,
+            reason: "must fit 5 bits",
+        });
+    }
+    if offset > U24_MAX {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "offset",
+            value: offset as usize,
+            reason: "must fit 24 bits",
+        });
+    }
+    if length > U24_MAX {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "length",
+            value: length as usize,
+            reason: "must fit 24 bits",
+        });
+    }
+    if buf_len == 0 {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "buf.len()",
+            value: 0,
+            reason: "must be non-zero",
+        });
+    }
+    if length != 0 && buf_len < length as usize {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "buf.len()",
+            value: buf_len,
+            reason: "must be at least the requested length",
+        });
+    }
+    Ok(())
+}
+
 /// Build the 7-byte command header `FileNo || Offset(3 LE) || Length(3 LE)`.
-///
-/// Panics if `file_no > 0x1F` (bits 7–5 are RFU per §10.8.1), or if
-/// either `offset` or `length` exceeds 24 bits.
 fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
-    assert!(
-        file_no <= 0x1F,
-        "read_data: file_no must fit 5 bits (got {file_no:#04x})",
-    );
-    assert!(
-        offset <= U24_MAX,
-        "read_data: offset must fit 24 bits (got {offset:#010x})",
-    );
-    assert!(
-        length <= U24_MAX,
-        "read_data: length must fit 24 bits (got {length:#010x})",
-    );
+    debug_assert!(file_no <= 0x1F);
+    debug_assert!(offset <= U24_MAX);
+    debug_assert!(length <= U24_MAX);
     let o = offset.to_le_bytes();
     let l = length.to_le_bytes();
     [file_no, o[0], o[1], o[2], l[0], l[1], l[2]]
@@ -101,14 +133,8 @@ pub(crate) async fn read_data_plain<T: Transport>(
     length: u32,
     buf: &mut [u8],
 ) -> Result<usize, SessionError<T::Error>> {
-    assert!(!buf.is_empty(), "read_data_plain: buf must be non-empty");
+    validate_request(file_no, offset, length, buf.len())?;
     let want = want_plain_bytes(length, buf.len());
-    if length != 0 {
-        assert!(
-            buf.len() >= length as usize,
-            "read_data_plain: buf too small for requested length",
-        );
-    }
 
     let header = build_header(file_no, offset, length);
     let mut apdu = [0u8; 5 + 7 + 1];
@@ -144,14 +170,8 @@ pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
     length: u32,
     buf: &mut [u8],
 ) -> Result<usize, SessionError<T::Error>> {
-    assert!(!buf.is_empty(), "read_data_mac: buf must be non-empty");
+    validate_request(file_no, offset, length, buf.len())?;
     let want = want_plain_bytes(length, buf.len());
-    if length != 0 {
-        assert!(
-            buf.len() >= length as usize,
-            "read_data_mac: buf too small for requested length",
-        );
-    }
 
     let header = build_header(file_no, offset, length);
     let cmd_mac = channel.compute_cmd_mac(0xAD, &header, &[]);
@@ -199,13 +219,7 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
     length: u32,
     buf: &mut [u8],
 ) -> Result<usize, SessionError<T::Error>> {
-    assert!(!buf.is_empty(), "read_data_full: buf must be non-empty");
-    if length != 0 {
-        assert!(
-            buf.len() >= length as usize,
-            "read_data_full: buf too small for requested length",
-        );
-    }
+    validate_request(file_no, offset, length, buf.len())?;
 
     let header = build_header(file_no, offset, length);
     let cmd_mac = channel.compute_cmd_mac(0xAD, &header, &[]);
@@ -344,6 +358,56 @@ mod tests {
             Err(SessionError::ErrorResponse(ResponseStatus::PermissionDenied)) => (),
             other => panic!("expected PermissionDenied, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn read_data_plain_rejects_empty_buffer_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        let mut buf = [];
+        match block_on(read_data_plain(&mut transport, 0x02, 0, 0, &mut buf)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "buf.len()",
+                value: 0,
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for empty buffer, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn read_data_plain_rejects_oversized_offset_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        let mut buf = [0u8; 1];
+        match block_on(read_data_plain(
+            &mut transport,
+            0x02,
+            U24_MAX + 1,
+            0,
+            &mut buf,
+        )) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "offset",
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for offset, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn read_data_plain_rejects_short_buffer_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        let mut buf = [0u8; 1];
+        match block_on(read_data_plain(&mut transport, 0x02, 0, 2, &mut buf)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "buf.len()",
+                value: 1,
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for short buffer, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
     }
 
     /// `CommMode.MAC` round-trip with hand-computed command + response

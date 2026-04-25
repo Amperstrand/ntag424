@@ -31,16 +31,19 @@ const ISO_READ_BINARY_MAX: usize = 256;
 /// file has fewer bytes available past `offset` the PICC returns a shorter
 /// payload - the return value is the actual length copied into `buf`.
 ///
-/// Panics if `buf` is empty, if `short_file_id` is `Some(0)` or
-/// `Some(v > 0x1E)`, or if `offset` exceeds the range allowed by the
-/// selected addressing mode.
 pub(crate) async fn iso_read_binary<T: Transport>(
     transport: &mut T,
     short_file_id: Option<u8>,
     offset: u16,
     buf: &mut [u8],
 ) -> Result<usize, SessionError<T::Error>> {
-    assert!(!buf.is_empty(), "iso_read_binary: buf must be non-empty");
+    if buf.is_empty() {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "buf.len()",
+            value: 0,
+            reason: "must be non-zero",
+        });
+    }
     let want = buf.len().min(ISO_READ_BINARY_MAX);
     let le = if want == ISO_READ_BINARY_MAX {
         0x00
@@ -50,21 +53,30 @@ pub(crate) async fn iso_read_binary<T: Transport>(
 
     let (p1, p2) = match short_file_id {
         Some(sfid) => {
-            assert!(
-                (0x01..=0x1E).contains(&sfid),
-                "iso_read_binary: short_file_id must be 01h..1Eh (got {sfid:#04x})",
-            );
-            assert!(
-                offset <= u16::from(u8::MAX),
-                "iso_read_binary: offset must be ≤ 0xFF with a short FileID (got {offset:#06x})",
-            );
+            if !(0x01..=0x1E).contains(&sfid) {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "short_file_id",
+                    value: sfid as usize,
+                    reason: "must be 0x01..=0x1E",
+                });
+            }
+            if offset > u16::from(u8::MAX) {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: offset as usize,
+                    reason: "must be <= 0xFF with a short FileID",
+                });
+            }
             (0x80 | sfid, offset as u8)
         }
         None => {
-            assert!(
-                offset <= 0x7FFF,
-                "iso_read_binary: offset must be ≤ 0x7FFF (got {offset:#06x})",
-            );
+            if offset > 0x7FFF {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: offset as usize,
+                    reason: "must be <= 0x7FFF",
+                });
+            }
             let be = offset.to_be_bytes();
             (be[0], be[1])
         }
@@ -192,6 +204,35 @@ mod tests {
             Err(SessionError::ErrorResponse(ResponseStatus::FileOrApplicationNotFound)) => (),
             other => panic!("expected FileOrApplicationNotFound, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_empty_buffer_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        let mut buf = [];
+        match block_on(iso_read_binary(&mut transport, None, 0, &mut buf)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "buf.len()",
+                value: 0,
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for empty buffer, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn rejects_oversized_offset_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        let mut buf = [0u8; 1];
+        match block_on(iso_read_binary(&mut transport, None, 0x8000, &mut buf)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "offset",
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for offset, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
     }
 
     /// Reject overlong responses.

@@ -41,6 +41,14 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     ErrorResponse(ResponseStatus),
     #[error("unexpected response length: got {got}, expected {expected}")]
     UnexpectedLength { got: usize, expected: usize },
+    #[error("invalid command parameter {parameter}: {reason} (got {value})")]
+    InvalidCommandParameter {
+        parameter: &'static str,
+        value: usize,
+        reason: &'static str,
+    },
+    #[error("APDU body too large: got {got}, maximum {max}")]
+    ApduBodyTooLarge { got: usize, max: usize },
     #[error(transparent)]
     FileSettings(FileSettingsError),
     #[error("originality verification failed: {0:?}")]

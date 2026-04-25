@@ -50,23 +50,59 @@ const WRITE_DATA_MAX_BODY: usize = 248;
 /// Maximum short-APDU body length.
 const MAX_APDU_BODY: usize = 255;
 
+fn validate_header<E: core::error::Error + core::fmt::Debug>(
+    file_no: u8,
+    offset: u32,
+    length: usize,
+) -> Result<(), SessionError<E>> {
+    if file_no > 0x1F {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "file_no",
+            value: file_no as usize,
+            reason: "must fit 5 bits",
+        });
+    }
+    if offset > U24_MAX {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "offset",
+            value: offset as usize,
+            reason: "must fit 24 bits",
+        });
+    }
+    if length == 0 {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "data.len()",
+            value: 0,
+            reason: "must be non-zero",
+        });
+    }
+    if length > U24_MAX as usize {
+        return Err(SessionError::InvalidCommandParameter {
+            parameter: "data.len()",
+            value: length,
+            reason: "must fit the 24-bit Length field",
+        });
+    }
+    Ok(())
+}
+
+fn validate_body_len<E: core::error::Error + core::fmt::Debug>(
+    body_len: usize,
+) -> Result<(), SessionError<E>> {
+    if body_len > MAX_APDU_BODY {
+        return Err(SessionError::ApduBodyTooLarge {
+            got: body_len,
+            max: MAX_APDU_BODY,
+        });
+    }
+    Ok(())
+}
+
 /// Build the 7-byte command header `FileNo || Offset(3 LE) || Length(3 LE)`.
-///
-/// Panics if `file_no > 0x1F` (bits 7–5 are RFU per §10.8.2), if either
-/// `offset` or `length` exceeds 24 bits, or if `length` is zero.
 fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
-    assert!(
-        file_no <= 0x1F,
-        "write_data: file_no must fit 5 bits (got {file_no:#04x})",
-    );
-    assert!(
-        offset <= U24_MAX,
-        "write_data: offset must fit 24 bits (got {offset:#010x})",
-    );
-    assert!(
-        length > 0 && length <= U24_MAX,
-        "write_data: length must be 1..FFFFFFh (got {length:#010x})",
-    );
+    debug_assert!(file_no <= 0x1F);
+    debug_assert!(offset <= U24_MAX);
+    debug_assert!(length > 0 && length <= U24_MAX);
     let o = offset.to_le_bytes();
     let l = length.to_le_bytes();
     [file_no, o[0], o[1], o[2], l[0], l[1], l[2]]
@@ -80,19 +116,14 @@ fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
 /// session wrapper, that wrapper is responsible for advancing the tracked
 /// command counter after a successful response.
 ///
-/// Panics if `data` is empty or exceeds 248 bytes, or if `data.len()`
-/// does not equal `length`.
 pub(crate) async fn write_data_plain<T: Transport>(
     transport: &mut T,
     file_no: u8,
     offset: u32,
     data: &[u8],
 ) -> Result<(), SessionError<T::Error>> {
-    assert!(!data.is_empty(), "write_data_plain: data must be non-empty");
-    assert!(
-        data.len() <= WRITE_DATA_MAX_BODY,
-        "write_data_plain: data exceeds 248 bytes",
-    );
+    validate_header(file_no, offset, data.len())?;
+    validate_body_len(7 + data.len())?;
 
     let header = build_header(file_no, offset, data.len() as u32);
     let lc = (7 + data.len()) as u8;
@@ -117,7 +148,6 @@ pub(crate) async fn write_data_plain<T: Transport>(
 /// Response: `MACt(8)`, `91 00`. Verifies the trailing `MACt` and advances
 /// `CmdCtr` on success.
 ///
-/// Panics if `data` is empty or `header + data + MAC` exceeds 255 bytes.
 pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -125,7 +155,7 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     offset: u32,
     data: &[u8],
 ) -> Result<(), SessionError<T::Error>> {
-    assert!(!data.is_empty(), "write_data_mac: data must be non-empty");
+    validate_header(file_no, offset, data.len())?;
     let header = build_header(file_no, offset, data.len() as u32);
 
     let body = channel
@@ -154,8 +184,6 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
 /// Method 2, encrypted with `SesAuthENCKey`, and then MAC'd together
 /// with the header.
 ///
-/// Panics if `data` is empty or if the resulting APDU body (header +
-/// ciphertext + MAC) exceeds 255 bytes.
 pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -163,16 +191,13 @@ pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
     offset: u32,
     data: &[u8],
 ) -> Result<(), SessionError<T::Error>> {
-    assert!(!data.is_empty(), "write_data_full: data must be non-empty",);
+    validate_header(file_no, offset, data.len())?;
 
     let header = build_header(file_no, offset, data.len() as u32);
 
     // ISO/IEC 9797-1 Method 2 padding: data || 0x80 || 0x00..
     let padded_len = (data.len() + 1).div_ceil(BLOCK) * BLOCK;
-    assert!(
-        7 + padded_len + MAC_LEN <= MAX_APDU_BODY,
-        "write_data_full: payload too large for short APDU",
-    );
+    validate_body_len(7 + padded_len + MAC_LEN)?;
 
     // Build padded plaintext in a stack buffer. Max plaintext limited by
     // the 255-byte APDU body: 255 - 7(header) - 8(MAC) = 240 bytes of
@@ -272,6 +297,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn write_data_plain_rejects_empty_data_without_transmit() {
+        let mut transport = TestTransport::new([]);
+        match block_on(write_data_plain(&mut transport, 0x02, 0, &[])) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "data.len()",
+                value: 0,
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for empty data, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn write_data_plain_rejects_oversized_offset_without_transmit() {
+        let data = [0x01];
+        let mut transport = TestTransport::new([]);
+        match block_on(write_data_plain(&mut transport, 0x02, U24_MAX + 1, &data)) {
+            Err(SessionError::InvalidCommandParameter {
+                parameter: "offset",
+                ..
+            }) => (),
+            other => panic!("expected InvalidCommandParameter for offset, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn write_data_plain_rejects_apdu_body_overflow_without_transmit() {
+        let data = [0u8; WRITE_DATA_MAX_BODY + 1];
+        let mut transport = TestTransport::new([]);
+        match block_on(write_data_plain(&mut transport, 0x02, 0, &data)) {
+            Err(SessionError::ApduBodyTooLarge { got: 256, max: 255 }) => (),
+            other => panic!("expected ApduBodyTooLarge, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+    }
+
     /// `CommMode.MAC` round-trip with hand-computed command + response MACs.
     ///
     /// Pins the framing: `90 8D 00 00 <Lc> Header Data MACt(8) 00`,
@@ -324,6 +388,26 @@ mod tests {
 
         assert_eq!(state.counter(), 1);
         assert_eq!(transport.remaining(), 0);
+    }
+
+    #[test]
+    fn write_data_mac_rejects_apdu_body_overflow_without_transmit() {
+        let mut state = authenticated_aes(
+            [0u8; 16],
+            hex_array("4C6626F5E72EA694202139295C7A7FC7"),
+            [0x9D, 0x00, 0xC4, 0xDF],
+            0,
+        );
+        let data = [0u8; 241];
+        let mut transport = TestTransport::new([]);
+        let mut channel = SecureChannel::new(&mut state);
+
+        match block_on(write_data_mac(&mut transport, &mut channel, 0x02, 0, &data)) {
+            Err(SessionError::ApduBodyTooLarge { got: 256, max: 255 }) => (),
+            other => panic!("expected ApduBodyTooLarge, got {other:?}"),
+        }
+        assert_eq!(transport.remaining(), 0);
+        assert_eq!(channel.cmd_ctr(), 0);
     }
 
     /// Reject a bad `WriteData` response MAC.

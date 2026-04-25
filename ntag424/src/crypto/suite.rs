@@ -344,20 +344,20 @@ impl SessionSuite for LrpSuite {
     }
 
     fn encrypt(&mut self, _dir: Direction, _ti: &[u8; 4], _cmd_ctr: u16, buf: &mut [u8]) {
-        assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+        debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
         let mut ctr = self.enc_ctr.to_be_bytes();
         self.enc_key
             .lricb_encrypt_in_place(&mut ctr, buf)
-            .expect("valid LRICB input");
+            .expect("LRP encrypt input must be non-empty and block-aligned");
         self.enc_ctr = u32::from_be_bytes(ctr);
     }
 
     fn decrypt(&mut self, _dir: Direction, _ti: &[u8; 4], _cmd_ctr: u16, buf: &mut [u8]) {
-        assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+        debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
         let mut ctr = self.enc_ctr.to_be_bytes();
         self.enc_key
             .lricb_decrypt_in_place(&mut ctr, buf)
-            .expect("valid LRICB input");
+            .expect("LRP decrypt input must be non-empty and block-aligned");
         self.enc_ctr = u32::from_be_bytes(ctr);
     }
 }
