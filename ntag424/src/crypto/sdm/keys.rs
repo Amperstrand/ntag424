@@ -14,7 +14,7 @@ use aes::{
 };
 
 use crate::crypto::ct_eq_8;
-use crate::crypto::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
+use crate::crypto::lrp::{Lrp, generate_plaintexts, generate_updated_keys};
 use crate::crypto::suite::{cmac_aes, cmac_lrp, truncate_mac};
 
 #[cfg(feature = "alloc")]
@@ -98,11 +98,8 @@ pub(super) fn derive_sdm_keys_lrp(
     let master: [u8; 16] = cmac_lrp(kx_lrp, &sv);
 
     // SesSDMFileReadSPT, then UK[0] = MAC key, UK[1] = ENC key.
-    let mut pt_iter = generate_plaintexts(master);
-    let plaintexts: [Block; 16] = core::array::from_fn(|_| pt_iter.next().unwrap());
-    let mut uk_iter = generate_updated_keys(master);
-    let uk_mac = uk_iter.next().unwrap();
-    let uk_enc = uk_iter.next().unwrap();
+    let plaintexts = generate_plaintexts(master);
+    let [uk_mac, uk_enc] = generate_updated_keys::<2>(master);
 
     SdmKeys::Lrp {
         mac: make_lrp_session_state(Lrp::from_parts(plaintexts, uk_mac)),

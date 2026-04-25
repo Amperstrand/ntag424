@@ -329,11 +329,8 @@ impl SessionSuite for LrpSuite {
 
         // SesAuthSPT = plaintexts(SesAuthMasterKey);
         // SesAuthMACUpdateKey = UK[0], SesAuthENCUpdateKey = UK[1].
-        let mut pt_iter = generate_plaintexts(master);
-        let plaintexts: [Block; 16] = core::array::from_fn(|_| pt_iter.next().unwrap());
-        let mut uk_iter = generate_updated_keys(master);
-        let uk_mac = uk_iter.next().unwrap();
-        let uk_enc = uk_iter.next().unwrap();
+        let plaintexts = generate_plaintexts(master);
+        let [uk_mac, uk_enc] = generate_updated_keys::<2>(master);
 
         Self {
             mac_key: Lrp::from_parts(plaintexts, uk_mac),
@@ -625,11 +622,8 @@ mod tests {
             hex_array("00010080993C4EED466BFC0E7EE1D30C1EBD0DEA6F6481E0D70E9A174E789669");
 
         let master = cmac_lrp(Lrp::from_base_key(auth_key), &sv);
-        let mut pt_iter = generate_plaintexts(master);
-        let plaintexts: [Block; 16] = core::array::from_fn(|_| pt_iter.next().unwrap());
-        let mut uk_iter = generate_updated_keys(master);
-        let uk_mac = uk_iter.next().unwrap();
-        let uk_enc = uk_iter.next().unwrap();
+        let plaintexts = generate_plaintexts(master);
+        let [uk_mac, uk_enc] = generate_updated_keys::<2>(master);
 
         let mut suite = LrpSuite {
             mac_key: Lrp::from_parts(plaintexts, uk_mac),
@@ -703,11 +697,8 @@ mod tests {
             hex_array("0001008008A6953C60BC3D34E53766689732E2A203FF23855751D644ED519669");
 
         let master = cmac_lrp(Lrp::from_base_key(auth_key), &sv);
-        let mut pt_iter = generate_plaintexts(master);
-        let plaintexts: [Block; 16] = core::array::from_fn(|_| pt_iter.next().unwrap());
-        let mut uk_iter = generate_updated_keys(master);
-        let uk_mac = uk_iter.next().unwrap();
-        let uk_enc = uk_iter.next().unwrap();
+        let plaintexts = generate_plaintexts(master);
+        let [uk_mac, uk_enc] = generate_updated_keys::<2>(master);
 
         let mut suite = LrpSuite {
             mac_key: Lrp::from_parts(plaintexts, uk_mac),

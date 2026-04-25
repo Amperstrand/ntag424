@@ -8,8 +8,6 @@
 //!
 //! LRP is a drop-in replacement for AES.
 
-use core::iter::from_fn;
-
 use aes::{
     Aes128,
     cipher::{
@@ -21,33 +19,33 @@ use aes::{
 
 pub(crate) type Block = Array<u8, <aes::Aes128 as BlockSizeUser>::BlockSize>;
 
-/// Yields the secret plaintexts P[0], P[1], ... derived from key `k`
+/// Generate the 16 secret plaintexts P[0]..P[15] derived from key `k`
 /// per AN12304 §3.1.
-pub(crate) fn generate_plaintexts(k: impl Into<Block>) -> impl Iterator<Item = Block> {
+pub(crate) fn generate_plaintexts(k: impl Into<Block>) -> [Block; 16] {
     let mut h = k.into();
     Aes128::new(&h).encrypt_block_b2b(&Array::from([0x55; 16]), &mut h);
 
-    from_fn(move || {
+    core::array::from_fn(|_| {
         let cipher = Aes128::new(&h);
         let mut p_i = Block::default();
         cipher.encrypt_block_b2b(&Array::from([0xaa; 16]), &mut p_i);
         cipher.encrypt_block_b2b(&Array::from([0x55; 16]), &mut h);
-        Some(p_i)
+        p_i
     })
 }
 
-/// Yields the updated keys UK[0], UK[1], ... derived from key `k`
+/// Generate the first `N` updated keys UK[0]..UK[N-1] derived from key `k`
 /// per AN12304 §3.2.
-pub(crate) fn generate_updated_keys(k: impl Into<Block>) -> impl Iterator<Item = Block> {
+pub(crate) fn generate_updated_keys<const N: usize>(k: impl Into<Block>) -> [Block; N] {
     let mut h = k.into();
     Aes128::new(&h).encrypt_block_b2b(&Array::from([0xaa; 16]), &mut h);
 
-    from_fn(move || {
+    core::array::from_fn(|_| {
         let cipher = Aes128::new(&h);
         let mut k_i = Block::default();
         cipher.encrypt_block_b2b(&Array::from([0xaa; 16]), &mut k_i);
         cipher.encrypt_block_b2b(&Array::from([0x55; 16]), &mut h);
-        Some(k_i)
+        k_i
     })
 }
 
@@ -122,9 +120,8 @@ impl Lrp {
     /// Uses `UK[0]` as `k'`, the NTAG 424 DNA MACing key.
     pub fn from_base_key(key: impl Into<Block>) -> Self {
         let key = key.into();
-        let mut it = generate_plaintexts(key);
-        let plaintexts: [Block; 16] = core::array::from_fn(|_| it.next().unwrap());
-        let k_prime = generate_updated_keys(key).next().unwrap();
+        let plaintexts = generate_plaintexts(key);
+        let [k_prime] = generate_updated_keys::<1>(key);
         Self {
             plaintexts,
             k_prime,
@@ -294,7 +291,7 @@ mod tests {
 
     #[test]
     fn plaintexts_an12304() {
-        let got: Vec<Block> = generate_plaintexts(BASE_KEY).take(16).collect();
+        let got = generate_plaintexts(BASE_KEY);
         for i in 0..16 {
             assert_eq!(got[i].as_slice(), &P[i], "P[{i}]");
         }
@@ -302,7 +299,7 @@ mod tests {
 
     #[test]
     fn updated_keys_an12304() {
-        let got: Vec<Block> = generate_updated_keys(BASE_KEY).take(3).collect();
+        let got = generate_updated_keys::<3>(BASE_KEY);
         for i in 0..3 {
             assert_eq!(got[i].as_slice(), &UK[i], "UK[{i}]");
         }
@@ -374,11 +371,8 @@ mod tests {
 
         for (i, v) in vectors.iter().enumerate() {
             let key = hex_array(v.key);
-            let plaintexts: [Block; 16] = {
-                let mut it = generate_plaintexts(key);
-                core::array::from_fn(|_| it.next().unwrap())
-            };
-            let uk = generate_updated_keys(key).nth(v.uk).unwrap();
+            let plaintexts = generate_plaintexts(key);
+            let uk = generate_updated_keys::<4>(key)[v.uk];
             let nibbles = hex_nibbles(v.iv);
             let got = eval_lrp(&plaintexts, uk, &nibbles, v.finalize);
             let want: [u8; 16] = hex_array(v.res);
