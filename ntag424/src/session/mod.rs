@@ -69,10 +69,37 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 
 /// An NTAG 424 DNA session.
 ///
-/// A unauthenticated session can be initialized using [`Session::default()`].
-/// To get access to commands requiring authentication, call an authentication method,
-/// e.g. [`Session::authenticate_aes`], which performs the handshake and returns a new
-/// session in the authenticated state on success.
+/// ## Authentication state
+///
+/// The type parameter `S` tracks the authentication state at compile time:
+///
+/// | Type | Meaning |
+/// |---|---|
+/// | `Session<Unauthenticated>` | No authenticated session established; only plain-mode commands available. |
+/// | `Session<Authenticated<AesSuite>>` | Authenticated using AES-128. |
+/// | `Session<Authenticated<LrpSuite>>` | Authenticated using LRP. |
+///
+/// Start with [`Session::default()`] (equivalent to `Session<Unauthenticated>`),
+/// then call an authentication method such as [`Session::authenticate_aes`].
+/// Authentication consumes `self` and, on success, returns a session in the new
+/// state. On failure the session is dropped and you must start over from a fresh
+/// [`Session::default()`].
+///
+/// ## Why most authenticated methods take `self` by value
+///
+/// Secure-channel commands (MAC-protected or encrypted) advance `CmdCtr` on
+/// the PICC. If the host sends a command but receives an error — transport
+/// failure, bad MAC, unexpected status — it cannot know whether the PICC
+/// already incremented its counter. Reusing the session afterwards would leave
+/// the host and PICC counters out of sync, causing all subsequent secure
+/// commands to fail. Consuming `self` and returning it only on success makes
+/// this explicit: on error the session is dropped, and the caller must
+/// re-authenticate.
+///
+/// Methods that only issue plain-mode commands — [`Session::read_file_plain`]
+/// and [`Session::write_file_plain`] — take `&mut self` instead: they never
+/// touch the MAC counter, so a transport error leaves the session intact and
+/// the call is safe to retry.
 pub struct Session<S> {
     state: S,
     /// Whether the NDEF application is selected.

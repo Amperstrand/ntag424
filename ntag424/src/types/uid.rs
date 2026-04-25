@@ -13,6 +13,8 @@
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Uid {
     Fixed([u8; 7]),
+    // TODO: is the leading byte 0x08 always?
+    //       can the fixed UIDs also have a leading 0x08?
     Random([u8; 4]),
 }
 
