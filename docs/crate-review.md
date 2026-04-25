@@ -88,9 +88,6 @@ explain the consequences`. Both toggle **permanent** chip behaviour; the
   docs must be complete before a user enables them.
 - `src/types/version.rs:85‑86` — "TODO: clarify padding for random ID which
   are shorter".
-- `src/types/version.rs:93` — "TODO: BE or LE int or what?" for
-  `batch_number()`. The function returns `&[u8; 4]` with _no_ docstring, so a
-  user has no idea what to do with those bytes.
 
 ### 4.2 Missing per‑item docs on public fields / variants
 
@@ -103,10 +100,6 @@ public fields are undocumented:
   included in the 4 bytes.
 - `src/types/tt_status.rs:14` — `TagTamperStatus::Unknown(u8)` has no doc
   on what byte values can end up there.
-- `src/types/version.rs:15‑46, 50‑76` — **every** `hw_*` / `sw_*` getter on
-  `Version` is undocumented. Users have no idea what `hw_protocol_type()`
-  returns or what to compare it against. At minimum link to
-  "NT4H2421Gx §10.5.2, Table 58" next to each.
 
 ### 4.3 Real rustdoc warnings
 

@@ -17,14 +17,27 @@ pub struct Version {
 impl Version {
     // Part 1 - Hardware related information
 
+    /// Hardware vendor ID (`VendorID`). Expected value: `0x04` (NXP Semiconductors).
     pub fn hw_vendor_id(&self) -> u8 {
         self.part1[0]
     }
 
+    /// Hardware type (`HWType`). Expected value: `0x04` (HW type for NTAG).
     pub fn hw_type(&self) -> u8 {
         self.part1[1]
     }
 
+    /// Hardware subtype (`HWSubType`). Encodes antenna capacitance, Tag Tamper
+    /// support, and back modulation strength:
+    ///
+    /// | Value | Meaning |
+    /// |-------|---------|
+    /// | `X8h` | 50 pF antenna + Tag Tamper capable |
+    /// | `0Xh` | Strong back modulation |
+    /// | `8Xh` | Standard back modulation |
+    ///
+    /// Also see [`has_tag_tamper_support`](`Self::has_tag_tamper_support`),
+    /// which uses the low nibble of this field.
     pub fn hw_sub_type(&self) -> u8 {
         self.part1[2]
     }
@@ -34,48 +47,61 @@ impl Version {
         self.hw_sub_type() & 0x0F == 0x08
     }
 
+    /// Hardware major version number (`HWMajorVersion`). Expected value: `0x30`.
     pub fn hw_major_version(&self) -> u8 {
         self.part1[3]
     }
 
+    /// Hardware minor version number (`HWMinorVersion`). Expected value: `0x00`.
     pub fn hw_minor_version(&self) -> u8 {
         self.part1[4]
     }
 
+    /// Hardware storage size (`HWStorageSize`). `0x11` = 256 B < storage size < 512 B;
+    /// other values are RFU.
     pub fn hw_storage_size(&self) -> u8 {
         self.part1[5]
     }
 
+    /// Hardware communication protocol type (`HWProtocol`). Expected value: `0x05`.
     pub fn hw_protocol_type(&self) -> u8 {
         self.part1[6]
     }
 
     // Part 2 - Software related information
 
+    /// Software vendor ID (`VendorID`). Expected value: `0x04` (NXP Semiconductors).
     pub fn sw_vendor_id(&self) -> u8 {
         self.part2[0]
     }
 
+    /// Software type (`SWType`). Expected value: `0x04` (SW type for NTAG).
     pub fn sw_type(&self) -> u8 {
         self.part2[1]
     }
 
+    /// Software subtype (`SWSubType`). Expected value: `0x02`.
     pub fn sw_sub_type(&self) -> u8 {
         self.part2[2]
     }
 
+    /// Software major version number (`SWMajorVersion`). Expected value: `0x01`.
     pub fn sw_major_version(&self) -> u8 {
         self.part2[3]
     }
 
+    /// Software minor version number (`SWMinorVersion`). Expected value: `0x02`.
     pub fn sw_minor_version(&self) -> u8 {
         self.part2[4]
     }
 
+    /// Software storage size (`SWStorageSize`). `0x11` = 256 B < storage size < 512 B;
+    /// other values are RFU.
     pub fn sw_storage_size(&self) -> u8 {
         self.part2[5]
     }
 
+    /// Software communication protocol type (`SWProtocol`). Expected value: `0x05`.
     pub fn sw_protocol_type(&self) -> u8 {
         self.part2[6]
     }
@@ -94,11 +120,12 @@ impl Version {
             .expect("part3 is at least 7 bytes")
     }
 
-    pub fn batch_number(&self) -> &[u8; 4] {
-        // TODO: BE or LE int or what?
-        self.part3[7..]
+    /// Production batch number (`BatchNo`).
+    pub fn batch_number(&self) -> u32 {
+        let batch = self.part3[7..]
             .first_chunk::<4>()
-            .expect("part3 is at least 11 bytes")
+            .expect("part3 is at least 11 bytes");
+        u32::from_be_bytes(*batch)
     }
 
     /// Calendar week of production.
