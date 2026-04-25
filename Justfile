@@ -6,3 +6,7 @@ doc:
 
 license:
   uvx reuse annotate -c 'Jannik Schürg' -l Apache-2.0 -l MIT --merge-copyrights ntag424/**/*.rs
+
+lint:
+  cargo fmt --all --check
+  cargo clippy --workspace --locked --all-targets --all-features -- -D warnings

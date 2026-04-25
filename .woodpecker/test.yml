@@ -1,0 +1,41 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
+
+variables:
+  - &rust_image "rust:1.95"
+  - &cargo_env
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+
+steps:
+  test-default:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked -- --test-threads=4
+
+  test-all-features:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --all-features -- --test-threads=4
+
+  test-key-diversification:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --features key_diversification -- --test-threads=4
+
+  test-sdm:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --features sdm -- --test-threads=4
+
+  test-serde:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --features serde -- --test-threads=4

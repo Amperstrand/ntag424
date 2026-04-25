@@ -642,7 +642,7 @@ mod tests {
             cmd_input.extend_from_slice(&ti);
             assert_eq!(
                 suite.mac(&cmd_input),
-                hex_array(*cmd_mact),
+                hex_array(cmd_mact),
                 "cmd MACt vector {i}"
             );
 
@@ -654,7 +654,7 @@ mod tests {
             resp_input.extend_from_slice(&resp_ciphertext);
             assert_eq!(
                 suite.mac(&resp_input),
-                hex_array(*resp_mact),
+                hex_array(resp_mact),
                 "resp MACt vector {i}"
             );
 

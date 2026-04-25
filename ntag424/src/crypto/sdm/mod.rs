@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn sdm_try_new_rejects_enc_file_data_without_read_access() {
-        assert!(matches!(
+        assert!(
             Sdm::try_new(
                 PiccData::Encrypted {
                     key: KeyNumber::Key0,
@@ -376,9 +376,9 @@ mod tests {
                     },
                 }),
                 None,
-            ),
-            Ok(_),
-        ));
+            )
+            .is_ok()
+        );
     }
 
     #[test]

@@ -1,0 +1,25 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
+
+variables:
+  - &rust_image "rust:1.95"
+  - &cargo_env
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+
+steps:
+  clippy-default:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - rustup component add clippy
+      - cargo clippy --workspace --locked --all-targets -- -D warnings
+
+  clippy-all-features:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - rustup component add clippy
+      - cargo clippy --workspace --locked --all-targets --all-features -- -D warnings

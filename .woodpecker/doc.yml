@@ -1,0 +1,14 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
+
+steps:
+  doc:
+    image: "rustlang/rust:nightly"
+    environment:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+      RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+    commands:
+      - cargo doc --workspace --locked --all-features --no-deps
