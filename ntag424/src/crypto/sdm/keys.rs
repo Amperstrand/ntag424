@@ -13,6 +13,7 @@ use aes::{
     cipher::{Array, BlockCipherEncrypt, KeyInit},
 };
 
+use crate::crypto::ct_eq_8;
 use crate::crypto::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
 use crate::crypto::suite::{cmac_aes, cmac_lrp, truncate_mac};
 
@@ -40,7 +41,7 @@ impl SdmKeys {
             Self::Aes { mac_key, .. } => truncate_mac(&cmac_aes(mac_key, data)),
             Self::Lrp { mac, .. } => truncate_mac(&cmac_lrp(Lrp::clone(mac), data)),
         };
-        ct_eq(&computed, expected)
+        ct_eq_8(&computed, expected)
     }
 }
 
@@ -125,15 +126,6 @@ pub(super) fn aes_ecb_encrypt_block(key: &[u8; 16], input: &[u8; 16]) -> [u8; 16
     let mut out = Array::default();
     cipher.encrypt_block_b2b(&Array::from(*input), &mut out);
     out.into()
-}
-
-/// Constant-time 8-byte equality.
-fn ct_eq(a: &[u8; 8], b: &[u8; 8]) -> bool {
-    let mut x = 0u8;
-    for (&ai, &bi) in a.iter().zip(b.iter()) {
-        x |= ai ^ bi;
-    }
-    x == 0
 }
 
 #[cfg(test)]

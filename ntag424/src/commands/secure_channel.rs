@@ -35,6 +35,7 @@ use core::fmt::Debug;
 use arrayvec::ArrayVec;
 
 use crate::Transport;
+use crate::crypto::ct_eq_8;
 use crate::crypto::suite::{Direction, SessionSuite};
 use crate::session::{Authenticated, SessionError};
 use crate::types::{ResponseCode, ResponseStatus};
@@ -185,7 +186,8 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         let mut buf = [0u8; MAC_INPUT_CAP];
         let len = fill_mac_input(&mut buf, rc, next_ctr.to_le_bytes(), *self.ti(), data, &[]);
         let expected = self.state.suite().mac(&buf[..len]);
-        if expected.as_slice() != received {
+        let received: &[u8; MAC_LEN] = received.try_into().expect("split_at enforces MAC length");
+        if !ct_eq_8(&expected, received) {
             return Err(SessionError::ResponseMacMismatch);
         }
         self.state.advance_counter();
@@ -369,6 +371,27 @@ mod tests {
 
         let mut body = hex_bytes("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
         *body.last_mut().unwrap() ^= 0x01;
+        match ch.verify_response_mac_and_advance::<TestTransportError>(0x00, &body) {
+            Err(SessionError::ResponseMacMismatch) => (),
+            other => panic!("expected ResponseMacMismatch, got {other:?}"),
+        }
+        assert_eq!(ch.cmd_ctr(), 0);
+    }
+
+    /// Reject a bad trailing response MAC even when the first MAC byte differs.
+    #[test]
+    fn response_mac_mismatch_on_first_byte_leaves_counter_untouched() {
+        let mut state = authenticated_aes(
+            hex_array("2B4D963C014DC36F24F69A50A394F875"),
+            hex_array("379D32130CE61705DD5FD8C36B95D764"),
+            [0xDF, 0x05, 0x55, 0x22],
+            0,
+        );
+        let mut ch = SecureChannel::new(&mut state);
+
+        let mut body = hex_bytes("70756055688505B52A5E26E59E329CD6595F672298EA41B7");
+        let mac_start = body.len() - MAC_LEN;
+        body[mac_start] ^= 0x01;
         match ch.verify_response_mac_and_advance::<TestTransportError>(0x00, &body) {
             Err(SessionError::ResponseMacMismatch) => (),
             other => panic!("expected ResponseMacMismatch, got {other:?}"),
