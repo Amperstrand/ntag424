@@ -189,7 +189,7 @@ impl AccessRights {
 /// Key used for SDM file-read operations (MAC generation and optional file data encryption).
 ///
 /// Only a specific key number is valid; `Free` and `NoAccess` are not permitted here.
-/// The absence of a file-read key is represented by `file_read: None` on [`Sdm`].
+/// The absence of a file-read key is represented by `file_read: None` on [`Sdm`](`super::Sdm`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileReadKey(KeyNumber);
 

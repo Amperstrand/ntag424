@@ -385,7 +385,6 @@ pub mod key_diversification {
 }
 
 #[cfg(feature = "sdm")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sdm")))]
 pub mod sdm {
     //! Secure Dynamic Messaging (SDM) server-side verification (§9.3).
     //!

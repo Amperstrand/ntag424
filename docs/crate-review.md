@@ -6,10 +6,6 @@ against the spec, and its feature‑gating / `no_std` hygiene is solid. What
 follows are concrete things worth fixing before a 1.0, ordered by impact for a
 hands‑on user.
 
-I validated the most critical findings by reading the source and running
-`RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`; only three
-real rustdoc warnings are reported today (see §4.4).
-
 ---
 
 ## 1. Top‑level story works, with some gaps
@@ -115,21 +111,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
   on the doc of `MAX_CHANGE_FILE_SETTINGS_LEN` (the formula spans two lines
   with stray backticks).
 
-Note: an earlier exploration claimed "6 broken intra‑doc links". That was
-**not reproducible**. The three warnings above are the full set on today's
-tree.
-
-### 4.4 `docs.rs` feature tags
-
-- `lib.rs:264‑266` — `pub mod sdm` carries
-  `#[cfg_attr(docsrs, doc(cfg(feature = "sdm")))]`. Good.
-- `lib.rs:267` — `pub mod key_diversification` is `#[cfg(feature =
-"key_diversification")]` but **missing** the `doc(cfg(...))` attribute.
-  Users browsing docs.rs won't see a feature badge.
-- The `alloc`‑gated items in `src/sdm_url.rs` (`:27`, `:89`, `:228`) and
-  `src/crypto/sdm.rs` (`:21`, `:92`, `:160`) are similarly missing
-  `doc(cfg(...))` annotations.
-
 ## 5. API design issues
 
 - **`Uid::Random([u8; 4])` vs `Session::<Authenticated>::get_uid`** —
@@ -195,9 +176,6 @@ tree.
   `KeyNumber`. If the "Free / NoAccess" exclusion is meant to be
   structural, enforce it at construction; otherwise use `KeyNumber`
   directly.
-- **Version capability helpers** — `has_tag_tamper_support()` is good, but
-  there's no analogous `supports_lrp()` / `supports_originality()`. Hands‑on
-  users will otherwise copy‑paste hex comparisons.
 
 ---
 
