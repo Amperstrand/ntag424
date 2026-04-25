@@ -130,10 +130,6 @@ Running `RUSTDOCFLAGS='-W rustdoc::all' cargo doc --all-features --no-deps`:
 - **`Transport::Data: AsRef<[u8]>`** has no documented contract. Why an
   associated type rather than always `&[u8]` or `alloc::vec::Vec<u8>`? The
   `pcsc` crate motivates it, but it should be written down.
-- **`Response` has `pub` fields** (`transport.rs:19‑23`). Consider adding a
-  convenience `status(&self) -> ResponseStatus` accessor so users aren't
-  forced to re‑implement the `(sw1 << 8) | sw2` match in every
-  integration.
 - **`SessionError` uses `#[from]` inconsistently** (`session/mod.rs:31‑63`):
   `Transport(#[from] E)` allows `?` to propagate transport errors, but
   `FileSettings(FileSettingsError)` and

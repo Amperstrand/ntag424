@@ -29,3 +29,10 @@ pub struct Response<D: AsRef<[u8]>> {
     /// Status word 2 (SW2) as returned by the tag.
     pub sw2: u8,
 }
+
+impl<D: AsRef<[u8]>> Response<D> {
+    /// Get the status code.
+    pub fn status(&self) -> u16 {
+        (self.sw1 as u16) << 8 | self.sw2 as u16
+    }
+}
