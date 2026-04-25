@@ -183,7 +183,7 @@
 //! use ntag424::{
 //!     Session, SessionError, Transport,
 //!     File, KeyNumber, NonMasterKeyNumber,
-//!     Access, AccessRights, CommMode, FileSettingsPatch,
+//!     Access, AccessRights, CommMode, FileSettingsUpdate,
 //!     types::file_settings::CryptoMode,
 //!     key_diversification::diversify_ntag424,
 //! };
@@ -216,21 +216,13 @@
 //!     .await?;
 //!
 //! // Lock down the NDEF file and enable SDM.
+//! // `ChangeFileSettings` overwrites all mutable file settings, so when you
+//! // are modifying an existing file it is safest to read the current settings
+//! // first and start from `into_update()`.
+//! let (settings, session) = session.get_file_settings(transport, File::Ndef).await?;
+//! let settings = settings.into_update().with_sdm(*sdm_settings);
 //! let session = session
-//!     .change_file_settings(
-//!         transport,
-//!         File::Ndef,
-//!         &FileSettingsPatch::new(
-//!             CommMode::Plain,
-//!             AccessRights {
-//!                 read: Access::Free,
-//!                 write: Access::Key(KeyNumber::Key0),
-//!                 read_write: Access::Key(KeyNumber::Key0),
-//!                 change: Access::Key(KeyNumber::Key0),
-//!             },
-//!         )
-//!         .with_sdm(*sdm_settings),
-//!     )
+//!     .change_file_settings(transport, File::Ndef, &settings)
 //!     .await?;
 //!
 //! // Derive a unique key for each application key slot from the master key and UID.
@@ -454,6 +446,6 @@ pub use transport::{Response, Transport};
 pub use session::{Session, SessionError};
 
 pub use types::{
-    Access, AccessRights, CommMode, Configuration, File, FileSettingsPatch, FileSettingsView,
+    Access, AccessRights, CommMode, Configuration, File, FileSettingsUpdate, FileSettingsView,
     KeyNumber, NonMasterKeyNumber, TagTamperStatus, TagTamperStatusReadout, Uid, Version,
 };

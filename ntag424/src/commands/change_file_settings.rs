@@ -11,7 +11,7 @@ use crate::{
     crypto::suite::SessionSuite,
     session::SessionError,
     types::{
-        FileSettingsPatch, ResponseCode, ResponseStatus,
+        FileSettingsUpdate, ResponseCode, ResponseStatus,
         file_settings::MAX_CHANGE_FILE_SETTINGS_LEN,
     },
 };
@@ -29,7 +29,7 @@ const CMD: u8 = 0x5F;
 /// Authentication with the key indicated by the file's `Change` access
 /// condition must be established before calling this. The command data
 /// field (`FileOption || AccessRights [|| SDM block]`) is produced by
-/// [`FileSettingsPatch::encode`], then ISO/IEC 9797-1 Method 2 padded,
+/// [`FileSettingsUpdate::encode`], then ISO/IEC 9797-1 Method 2 padded,
 /// encrypted with `SesAuthENCKey`, and MAC'd together with the
 /// `FileNo` header byte (§9.1.10 Figure 9).
 ///
@@ -40,7 +40,7 @@ pub(crate) async fn change_file_settings<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
     file_no: u8,
-    settings: &FileSettingsPatch,
+    settings: &FileSettingsUpdate,
 ) -> Result<(), SessionError<T::Error>> {
     // Encode the ChangeFileSettings data payload.
     let mut raw = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
@@ -118,7 +118,7 @@ mod tests {
         ti: [u8; 4],
         cmd_ctr: u16,
         file_no: u8,
-        settings: &FileSettingsPatch,
+        settings: &FileSettingsUpdate,
     ) -> (Vec<u8>, Vec<u8>) {
         let mut suite = AesSuite::from_keys(enc_key, mac_key);
 
@@ -189,7 +189,7 @@ mod tests {
         )
         .expect("valid SDM settings");
 
-        let settings = FileSettingsPatch::new(
+        let settings = FileSettingsUpdate::new(
             CommMode::Plain,
             AccessRights {
                 read: Access::Free,
@@ -224,7 +224,7 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettingsPatch::new(
+        let settings = FileSettingsUpdate::new(
             CommMode::Plain,
             AccessRights {
                 read: Access::Free,
@@ -261,7 +261,7 @@ mod tests {
         let mac_key = hex_array("FE4EDBF46536557E304682F33E63A84F");
         let ti = hex_array("D779B1D0");
 
-        let settings = FileSettingsPatch::new(
+        let settings = FileSettingsUpdate::new(
             CommMode::Full,
             AccessRights {
                 read: Access::Key(KeyNumber::Key2),

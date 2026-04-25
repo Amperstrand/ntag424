@@ -8,9 +8,21 @@
 //!
 //! [`FileSettingsView`] is the decoded result returned by
 //! [`Session::get_file_settings`](`crate::Session::get_file_settings`).
-//! [`FileSettingsPatch`] is the update input for
+//! [`FileSettingsUpdate`] is the update input for
 //! [`Session::change_file_settings`](`crate::Session::change_file_settings`).
 //! [`Sdm`] holds Secure Dynamic Messaging configuration; construct it via [`Sdm::try_new`].
+//!
+//! `ChangeFileSettings` overwrites all mutable file-settings fields together.
+//! When modifying an existing file, the safest pattern is:
+//!
+//! 1. Read the current settings with [`Session::get_file_settings`](`crate::Session::get_file_settings`)
+//! 2. Convert the returned [`FileSettingsView`] with [`FileSettingsView::into_update`]
+//! 3. Apply only the changes you intend before calling
+//!    [`Session::change_file_settings`](`crate::Session::change_file_settings`)
+//!
+//! Starting from [`FileSettingsUpdate::new`] is best reserved for cases where
+//! you intentionally want to replace the full communication-mode and
+//! access-rights configuration.
 //!
 //! Wire format references: NT4H2421Gx §10.7.1, §10.7.2; access-rights nibble layout
 //! per §8.2.3.3, Tables 6 and 7; CommMode encoding per Table 22.
@@ -21,7 +33,7 @@
 //! |---|---|
 //! | [`access`] | `FileType`, `CommMode`, `Access`, `CtrRetAccess`, `AccessRights` |
 //! | [`sdm`] | `Sdm` and all SDM mirror types (`Offset`, `PlainMirror`, `PiccData`, …) |
-//! | [`codec`] | `FileSettingsView` (decoder) and `FileSettingsPatch` (encoder) |
+//! | [`codec`] | `FileSettingsView` (decoder) and `FileSettingsUpdate` (encoder) |
 //! | [`error`] | `FileSettingsError` and sentinel types (`NibbleSlot`, `OverlapKind`, `ReservedByte`) |
 
 pub mod access;
@@ -30,7 +42,7 @@ pub mod error;
 pub mod sdm;
 
 pub use access::{Access, AccessRights, CommMode, CtrRetAccess, FileType};
-pub use codec::{FileSettingsPatch, FileSettingsView, MAX_CHANGE_FILE_SETTINGS_LEN};
+pub use codec::{FileSettingsUpdate, FileSettingsView, MAX_CHANGE_FILE_SETTINGS_LEN};
 pub use error::{FileSettingsError, NibbleSlot, OverlapKind, ReservedByte};
 pub use sdm::{
     CryptoMode, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset, PiccData,
@@ -103,7 +115,7 @@ mod tests {
         0x40, 0x00, 0xE0, 0xC1, 0xF1, 0x21, 0x20, 0x00, 0x00, 0x43, 0x00, 0x00, 0x43, 0x00, 0x00,
     ];
 
-    fn an12196_change_patch() -> FileSettingsPatch {
+    fn an12196_change_patch() -> FileSettingsUpdate {
         let sdm = Sdm::try_new(
             PiccData::Encrypted {
                 key: KeyNumber::Key2,
@@ -124,7 +136,7 @@ mod tests {
             CryptoMode::Aes,
         )
         .unwrap();
-        FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
+        FileSettingsUpdate::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
     }
 
     #[test]
@@ -139,7 +151,7 @@ mod tests {
     fn decode_round_trip_for_get_file_settings() {
         // Decode GET, convert to patch, re-encode, compare to expected CHANGE payload.
         let fs = FileSettingsView::decode(AN12196_GET_FS_PAYLOAD).unwrap();
-        let patch = fs.into_patch();
+        let patch = fs.into_update();
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
         let n = patch.encode(&mut buf).unwrap();
         // Expected CHANGE payload: FileOption(1) + AR(2) + SDM block(…)
@@ -239,7 +251,7 @@ mod tests {
         0x40, 0x00, 0xE0, 0x89, 0xFF, 0xEF, 0x20, 0x00, 0x00, 0x2E, 0x00, 0x00,
     ];
 
-    fn tt_change_patch() -> FileSettingsPatch {
+    fn tt_change_patch() -> FileSettingsUpdate {
         let sdm = Sdm::try_new(
             PiccData::Plain(PlainMirror::Uid { uid: Offset(0x20) }),
             None,
@@ -247,7 +259,7 @@ mod tests {
             CryptoMode::Aes,
         )
         .unwrap();
-        FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
+        FileSettingsUpdate::new(CommMode::Plain, std_access_rights()).with_sdm(sdm)
     }
 
     #[test]
@@ -274,7 +286,7 @@ mod tests {
         assert_eq!(sdm.tamper_status(), Some(Offset(0x2E)));
 
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
-        let n = fs.into_patch().encode(&mut buf).expect("encode");
+        let n = fs.into_update().encode(&mut buf).expect("encode");
         assert_eq!(&buf[..n], TT_CHANGE_FS_PAYLOAD);
     }
 
@@ -294,7 +306,7 @@ mod tests {
             CryptoMode::Aes,
         )
         .unwrap();
-        let patch = FileSettingsPatch::new(CommMode::Plain, std_access_rights()).with_sdm(sdm);
+        let patch = FileSettingsUpdate::new(CommMode::Plain, std_access_rights()).with_sdm(sdm);
         let mut buf = [0u8; MAX_CHANGE_FILE_SETTINGS_LEN];
         let n = patch.encode(&mut buf).expect("encode");
         assert_eq!(

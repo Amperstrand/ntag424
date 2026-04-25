@@ -255,10 +255,23 @@ impl FileSettingsView {
         })
     }
 
-    /// Convert to a [`FileSettingsPatch`] suitable for
+    /// Convert to a [`FileSettingsUpdate`] suitable for
     /// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
-    pub fn into_patch(self) -> FileSettingsPatch {
-        let patch = FileSettingsPatch::new(self.comm_mode, self.access_rights);
+    ///
+    /// This preserves the current communication mode, access rights, and SDM
+    /// settings, making it the safest starting point for a read-modify-write
+    /// update flow:
+    ///
+    /// 1. Call [`Session::get_file_settings`](`crate::Session::get_file_settings`)
+    /// 2. Convert the returned [`FileSettingsView`] with [`Self::into_update`]
+    /// 3. Modify the resulting update
+    ///
+    /// `ChangeFileSettings` overwrites all mutable file-settings fields in one
+    /// shot, so starting from [`FileSettingsUpdate::new`] is only appropriate
+    /// when you intend to set the complete communication-mode and access-rights
+    /// configuration yourself.
+    pub fn into_update(self) -> FileSettingsUpdate {
+        let patch = FileSettingsUpdate::new(self.comm_mode, self.access_rights);
         match self.sdm {
             Some(sdm) => patch.with_sdm(sdm),
             None => patch,
@@ -273,15 +286,26 @@ impl FileSettingsView {
 ///
 /// NT4H2421Gx §10.7.1, Table 69.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileSettingsPatch {
+pub struct FileSettingsUpdate {
     comm_mode: CommMode,
     access_rights: AccessRights,
     sdm: Option<Sdm>,
 }
 
-impl FileSettingsPatch {
-    /// Create a new patch with the given communication mode and access rights,
+impl FileSettingsUpdate {
+    /// Create a new update with the given communication mode and access rights,
     /// with SDM disabled.
+    ///
+    /// This is a full replacement for the mutable `ChangeFileSettings` payload:
+    /// the provided communication mode, access rights, and any later SDM choice
+    /// will overwrite the tag's current values.
+    ///
+    /// If you only want to adjust one aspect of the current settings (for
+    /// example enabling or changing SDM), first read the current settings with
+    /// [`Session::get_file_settings`](`crate::Session::get_file_settings`),
+    /// convert them with [`FileSettingsView::into_update`], then modify that
+    /// update. Starting from `new` is easiest to get wrong because omitted
+    /// values are not preserved from the tag.
     pub fn new(comm_mode: CommMode, access_rights: AccessRights) -> Self {
         Self {
             comm_mode,
@@ -302,7 +326,7 @@ impl FileSettingsPatch {
 /// `FileOption (1) + AccessRights (2) + SDMOptions (1) + SDMAccessRights (2) + 9 × 3-byte offset fields`.
 pub const MAX_CHANGE_FILE_SETTINGS_LEN: usize = 1 + 2 + 1 + 2 + 9 * 3;
 
-impl FileSettingsPatch {
+impl FileSettingsUpdate {
     /// Encode into the data payload of `ChangeFileSettings`.
     ///
     /// The leading `FileNo` byte is **not** written.

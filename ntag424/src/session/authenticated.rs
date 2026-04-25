@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use crate::commands::AuthResult;
+use crate::{FileSettingsUpdate, commands::AuthResult};
 
 /// State of an authenticated session.
 ///
@@ -175,6 +175,13 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
     }
 
     /// Read file settings.
+    ///
+    /// This is the recommended starting point before calling
+    /// [`Self::change_file_settings`]: convert the returned
+    /// [`FileSettingsView`] with [`FileSettingsView::into_update`] and then
+    /// modify that update. `ChangeFileSettings` overwrites all mutable fields,
+    /// so starting from the current view helps avoid accidentally replacing
+    /// access rights or communication mode while changing SDM.
     pub async fn get_file_settings<T: Transport>(
         mut self,
         transport: &mut T,
@@ -245,7 +252,7 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         mut self,
         transport: &mut T,
         file: File,
-        settings: &FileSettingsPatch,
+        settings: &FileSettingsUpdate,
     ) -> Result<Self, SessionError<T::Error>> {
         let mut channel = SecureChannel::new(&mut self.state);
         change_file_settings(transport, &mut channel, file.file_no(), settings).await?;
