@@ -5,6 +5,7 @@
 
 use crate::Transport;
 use crate::commands::authenticate::AuthResult;
+use crate::crypto::ct_eq_16;
 use crate::crypto::suite::{Direction, LrpSuite, SessionSuite};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
@@ -92,7 +93,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
     let mut verify_input = [0u8; 32];
     verify_input[..16].copy_from_slice(&rnd_b);
     verify_input[16..].copy_from_slice(&rnd_a);
-    if suite.mac_full(&verify_input) != picc_response {
+    if !ct_eq_16(&suite.mac_full(&verify_input), &picc_response) {
         return Err(SessionError::AuthenticationMismatch);
     }
 
@@ -221,7 +222,7 @@ fn verify_and_extract_auth_result<E: core::error::Error + core::fmt::Debug>(
     verify_input[..16].copy_from_slice(rnd_b);
     verify_input[16..32].copy_from_slice(rnd_a);
     verify_input[32..].copy_from_slice(picc_data);
-    if suite.mac_full(&verify_input) != *picc_response {
+    if !ct_eq_16(&suite.mac_full(&verify_input), picc_response) {
         return Err(SessionError::AuthenticationMismatch);
     }
 

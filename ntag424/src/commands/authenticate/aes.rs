@@ -5,6 +5,7 @@
 
 use crate::Transport;
 use crate::commands::authenticate::AuthResult;
+use crate::crypto::ct_eq_16;
 use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt, aes_cbc_encrypt};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
@@ -163,7 +164,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     let mut rnd_a_received = [0u8; 16];
     rnd_a_received[0] = rnd_a_prime[15];
     rnd_a_received[1..].copy_from_slice(&rnd_a_prime[..15]);
-    if &rnd_a_received != rnd_a {
+    if !ct_eq_16(&rnd_a_received, rnd_a) {
         return Err(SessionError::AuthenticationMismatch);
     }
 
@@ -199,7 +200,7 @@ fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
     let mut rnd_a_received = [0u8; 16];
     rnd_a_received[0] = plain[15];
     rnd_a_received[1..].copy_from_slice(&plain[..15]);
-    if &rnd_a_received != rnd_a {
+    if !ct_eq_16(&rnd_a_received, rnd_a) {
         return Err(SessionError::AuthenticationMismatch);
     }
 

@@ -19,9 +19,14 @@ pub(crate) fn ct_eq_8(a: &[u8; 8], b: &[u8; 8]) -> bool {
     a.ct_eq(b).into()
 }
 
+/// Constant-time 16-byte equality for authentication nonces and full MACs.
+pub(crate) fn ct_eq_16(a: &[u8; 16], b: &[u8; 16]) -> bool {
+    a.ct_eq(b).into()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ct_eq_8;
+    use super::{ct_eq_8, ct_eq_16};
 
     #[test]
     fn ct_eq_8_accepts_equal_inputs() {
@@ -36,5 +41,20 @@ mod tests {
     #[test]
     fn ct_eq_8_rejects_last_byte_mismatch() {
         assert!(!ct_eq_8(b"12345670", b"12345678"));
+    }
+
+    #[test]
+    fn ct_eq_16_accepts_equal_inputs() {
+        assert!(ct_eq_16(b"1234567890abcdef", b"1234567890abcdef"));
+    }
+
+    #[test]
+    fn ct_eq_16_rejects_first_byte_mismatch() {
+        assert!(!ct_eq_16(b"0234567890abcdef", b"1234567890abcdef"));
+    }
+
+    #[test]
+    fn ct_eq_16_rejects_last_byte_mismatch() {
+        assert!(!ct_eq_16(b"1234567890abcdee", b"1234567890abcdef"));
     }
 }
