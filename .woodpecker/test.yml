@@ -4,7 +4,7 @@ when:
   - event: manual
 
 variables:
-  - &rust_image "rust:1.95"
+  - &rust_image "rust:1.88.0"
   - &cargo_env
       CARGO_BUILD_JOBS: "4"
       CARGO_TERM_COLOR: "always"

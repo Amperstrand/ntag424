@@ -5,7 +5,7 @@ when:
 
 steps:
   fmt:
-    image: "rust:1.95"
+    image: "rust:1.88.0"
     environment:
       CARGO_TERM_COLOR: "always"
     commands:

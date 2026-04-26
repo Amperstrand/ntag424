@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 readme = "../README.md"
 repository = "https://codeberg.org/jannschu/ntag424"
 edition = "2024"
+rust-version = "1.88.0"
 
 [features]
 default = ["alloc"]

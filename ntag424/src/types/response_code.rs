@@ -88,8 +88,8 @@ impl ResponseCode {
 impl core::fmt::Display for ResponseCode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Iso { sw1, sw2 } => write!(f, "ISO SW={:02X}{:02X}", sw1, sw2),
-            Self::Desfire { sw1, sw2 } => write!(f, "DESFire SW={:02X}{:02X}", sw1, sw2),
+            Self::Iso { sw1, sw2 } => write!(f, "ISO SW={sw1:02X}{sw2:02X}"),
+            Self::Desfire { sw1, sw2 } => write!(f, "DESFire SW={sw1:02X}{sw2:02X}"),
         }
     }
 }

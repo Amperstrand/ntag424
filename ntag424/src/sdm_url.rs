@@ -1308,7 +1308,7 @@ mod tests {
     #[test]
     fn error_file_too_long() {
         let long_path = "a".repeat(240);
-        let url = alloc::format!("https://example.com/{}?p={{picc}}&m={{mac}}", long_path);
+        let url = alloc::format!("https://example.com/{long_path}?p={{picc}}&m={{mac}}");
         let err = sdm_url_config(&url, CryptoMode::Aes, key0_opts()).unwrap_err();
         assert!(matches!(err, SdmUrlError::FileTooLong { .. }));
     }
