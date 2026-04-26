@@ -1,3 +1,6 @@
+![Crates.io Version](https://img.shields.io/crates/v/ntag424?style=flat-square)
+![docs.rs](https://img.shields.io/docsrs/ntag424?style=flat-square)
+
 # ntag424 Communication Protocol Library
 
 A transport-agnostic Rust crate for communicating with
