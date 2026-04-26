@@ -436,6 +436,69 @@ impl<S: SessionSuite> Session<Authenticated<S>> {
         }
     }
 
+    /// Write file bytes.
+    ///
+    /// This is a convenience wrapper around [`Self::write_file_with_mode`] that
+    /// determines the communication mode from the file settings. It uses
+    /// [`Self::get_file_settings`] to read the correct mode.
+    ///
+    /// If you already know the required mode you should use
+    /// [`Self::write_file_with_mode`] directly to avoid the extra round trip.
+    pub async fn write_file<T: Transport>(
+        self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        data: &[u8],
+    ) -> Result<Self, SessionError<T::Error>> {
+        let (settings, session) = self.get_file_settings(transport, file).await?;
+        let rights = &settings.access_rights;
+        let free_access = rights.write == Access::Free || rights.read_write == Access::Free;
+        let my_key = Access::Key(session.key_number());
+        let me_write = rights.write == my_key || rights.read_write == my_key;
+        // 8.2.3.3
+        let comm_mode = if free_access && !me_write {
+            CommMode::Plain
+        } else {
+            settings.comm_mode
+        };
+        session
+            .write_file_with_mode(transport, file, offset, data, comm_mode)
+            .await
+    }
+
+    /// Read file bytes.
+    ///
+    /// This is a convenience wrapper around [`Self::read_file_with_mode`] that
+    /// determines the communication mode from the file settings. It uses
+    /// [`Self::get_file_settings`] to read the correct mode.
+    ///
+    /// If you already know the required mode you should use
+    /// [`Self::read_file_with_mode`] directly to avoid the extra round trip.
+    pub async fn read_file<T: Transport>(
+        self,
+        transport: &mut T,
+        file: File,
+        offset: u32,
+        length: u32,
+        buf: &mut [u8],
+    ) -> Result<(usize, Self), SessionError<T::Error>> {
+        let (settings, session) = self.get_file_settings(transport, file).await?;
+        let rights = &settings.access_rights;
+        let free_access = rights.read == Access::Free || rights.read_write == Access::Free;
+        let my_key = Access::Key(session.key_number());
+        let me_read = rights.read == my_key || rights.read_write == my_key;
+        // 8.2.3.3
+        let comm_mode = if free_access && !me_read {
+            CommMode::Plain
+        } else {
+            settings.comm_mode
+        };
+        session
+            .read_file_with_mode(transport, file, offset, length, comm_mode, buf)
+            .await
+    }
+
     /// Return the session transaction identifier.
     ///
     /// This value is assigned by the tag on the first authentication

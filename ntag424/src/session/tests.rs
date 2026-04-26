@@ -5,10 +5,181 @@
 
 use super::*;
 
+use crate::crypto::suite::AesSuite;
 use crate::testing::{
     Exchange, TestTransport, aes_key0_suite_085bc941, block_on, hex_array, hex_bytes,
     lrp_key0_suite_bbe12900,
 };
+use crate::types::{Access, AccessRights, FileSettingsUpdate};
+use alloc::vec::Vec;
+
+fn test_aes_session(
+    key_number: KeyNumber,
+    cmd_counter: u16,
+) -> (
+    Session<Authenticated<AesSuite>>,
+    [u8; 16],
+    [u8; 16],
+    [u8; 4],
+) {
+    let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+    let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+    let ti = [0x9D, 0x00, 0xC4, 0xDF];
+    let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti, key_number);
+    for _ in 0..cmd_counter {
+        state.advance_counter();
+    }
+    (
+        Session {
+            state,
+            ndef_selected: true,
+            ef_selected: None,
+        },
+        enc_key,
+        mac_key,
+        ti,
+    )
+}
+
+fn build_header(file_no: u8, offset: u32, length: u32) -> [u8; 7] {
+    let mut header = [0u8; 7];
+    header[0] = file_no;
+    header[1..4].copy_from_slice(&offset.to_le_bytes()[..3]);
+    header[4..7].copy_from_slice(&length.to_le_bytes()[..3]);
+    header
+}
+
+fn file_settings_payload(comm_mode: CommMode, rights: AccessRights, file_size: u32) -> Vec<u8> {
+    let mut payload = Vec::from([0x00]);
+    let mut encoded = [0u8; 32];
+    let n = FileSettingsUpdate::new(comm_mode, rights)
+        .encode(&mut encoded)
+        .expect("test file settings must encode");
+    payload.extend_from_slice(&encoded[..n]);
+    payload.extend_from_slice(&file_size.to_le_bytes()[..3]);
+    payload
+}
+
+fn get_file_settings_mac_exchange(
+    enc_key: [u8; 16],
+    mac_key: [u8; 16],
+    ti: [u8; 4],
+    cmd_counter: u16,
+    file_no: u8,
+    payload: &[u8],
+) -> Exchange {
+    let suite = AesSuite::from_keys(enc_key, mac_key);
+    let cmd_mac = suite.mac(&[
+        0xF5,
+        cmd_counter.to_le_bytes()[0],
+        cmd_counter.to_le_bytes()[1],
+        ti[0],
+        ti[1],
+        ti[2],
+        ti[3],
+        file_no,
+    ]);
+    let mut expected_apdu = Vec::from([0x90, 0xF5, 0x00, 0x00, 0x09, file_no]);
+    expected_apdu.extend_from_slice(&cmd_mac);
+    expected_apdu.push(0x00);
+
+    let next_ctr = cmd_counter.wrapping_add(1);
+    let mut mac_input = Vec::from([0x00]);
+    mac_input.extend_from_slice(&next_ctr.to_le_bytes());
+    mac_input.extend_from_slice(&ti);
+    mac_input.extend_from_slice(payload);
+    let resp_mac = suite.mac(&mac_input);
+
+    let mut resp_body = payload.to_vec();
+    resp_body.extend_from_slice(&resp_mac);
+
+    Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)
+}
+
+fn read_file_plain_exchange(file_no: u8, offset: u32, length: u32, payload: &[u8]) -> Exchange {
+    let header = build_header(file_no, offset, length);
+    let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x07]);
+    expected_apdu.extend_from_slice(&header);
+    expected_apdu.push(0x00);
+    Exchange::new(&expected_apdu, payload, 0x91, 0x00)
+}
+
+fn read_file_mac_exchange(
+    enc_key: [u8; 16],
+    mac_key: [u8; 16],
+    ti: [u8; 4],
+    cmd_counter: u16,
+    header: [u8; 7],
+    payload: &[u8],
+) -> Exchange {
+    let suite = AesSuite::from_keys(enc_key, mac_key);
+
+    let mut mac_input = Vec::from([0xAD]);
+    mac_input.extend_from_slice(&cmd_counter.to_le_bytes());
+    mac_input.extend_from_slice(&ti);
+    mac_input.extend_from_slice(&header);
+    let cmd_mac = suite.mac(&mac_input);
+
+    let mut expected_apdu = Vec::from([0x90, 0xAD, 0x00, 0x00, 0x0F]);
+    expected_apdu.extend_from_slice(&header);
+    expected_apdu.extend_from_slice(&cmd_mac);
+    expected_apdu.push(0x00);
+
+    let next_ctr = cmd_counter.wrapping_add(1);
+    let mut resp_mac_input = Vec::from([0x00]);
+    resp_mac_input.extend_from_slice(&next_ctr.to_le_bytes());
+    resp_mac_input.extend_from_slice(&ti);
+    resp_mac_input.extend_from_slice(payload);
+    let resp_mac = suite.mac(&resp_mac_input);
+
+    let mut resp_body = payload.to_vec();
+    resp_body.extend_from_slice(&resp_mac);
+
+    Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)
+}
+
+fn write_file_plain_exchange(file_no: u8, offset: u32, data: &[u8]) -> Exchange {
+    let header = build_header(file_no, offset, data.len() as u32);
+    let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, (7 + data.len()) as u8]);
+    expected_apdu.extend_from_slice(&header);
+    expected_apdu.extend_from_slice(data);
+    expected_apdu.push(0x00);
+    Exchange::new(&expected_apdu, &[], 0x91, 0x00)
+}
+
+fn write_file_mac_exchange(
+    enc_key: [u8; 16],
+    mac_key: [u8; 16],
+    ti: [u8; 4],
+    cmd_counter: u16,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Exchange {
+    let suite = AesSuite::from_keys(enc_key, mac_key);
+    let header = build_header(file_no, offset, data.len() as u32);
+
+    let mut mac_input = Vec::from([0x8D]);
+    mac_input.extend_from_slice(&cmd_counter.to_le_bytes());
+    mac_input.extend_from_slice(&ti);
+    mac_input.extend_from_slice(&header);
+    mac_input.extend_from_slice(data);
+    let cmd_mac = suite.mac(&mac_input);
+
+    let mut expected_apdu = Vec::from([0x90, 0x8D, 0x00, 0x00, (15 + data.len()) as u8]);
+    expected_apdu.extend_from_slice(&header);
+    expected_apdu.extend_from_slice(data);
+    expected_apdu.extend_from_slice(&cmd_mac);
+    expected_apdu.push(0x00);
+
+    let next_ctr = cmd_counter.wrapping_add(1);
+    let mut resp_mac_input = Vec::from([0x00]);
+    resp_mac_input.extend_from_slice(&next_ctr.to_le_bytes());
+    resp_mac_input.extend_from_slice(&ti);
+    let resp_mac = suite.mac(&resp_mac_input);
+
+    Exchange::new(&expected_apdu, &resp_mac, 0x91, 0x00)
+}
 
 /// Replay the AN12196 AES-first transcript.
 ///
@@ -761,5 +932,110 @@ fn read_file_with_mode_plain_hw_lrp_advances_counter() {
     assert_eq!(n, 256);
     assert_eq!(&buf[..n], payload.as_slice());
     assert_eq!(session.cmd_counter(), 10);
+    assert_eq!(transport.remaining(), 0);
+}
+
+#[test]
+fn read_file_uses_plain_when_only_free_access_grants_read() {
+    let (session, enc_key, mac_key, ti) = test_aes_session(KeyNumber::Key0, 0);
+    let rights = AccessRights {
+        read: Access::Free,
+        write: Access::NoAccess,
+        read_write: Access::NoAccess,
+        change: Access::Key(KeyNumber::Key0),
+    };
+    let settings = file_settings_payload(CommMode::Mac, rights, 32);
+    let payload = [0xDE, 0xAD, 0xBE, 0xEF];
+    let mut transport = TestTransport::new([
+        get_file_settings_mac_exchange(enc_key, mac_key, ti, 0, File::Ndef.file_no(), &settings),
+        read_file_plain_exchange(File::Ndef.file_no(), 0, 4, &payload),
+    ]);
+
+    let mut buf = [0u8; 8];
+    let (n, session) = block_on(session.read_file(&mut transport, File::Ndef, 0, 4, &mut buf))
+        .expect("free-access read should fall back to plain mode");
+
+    assert_eq!(n, 4);
+    assert_eq!(&buf[..n], &payload);
+    assert_eq!(session.cmd_counter(), 2);
+    assert_eq!(transport.remaining(), 0);
+}
+
+#[test]
+fn read_file_uses_configured_mode_when_authenticated_key_grants_read() {
+    let (session, enc_key, mac_key, ti) = test_aes_session(KeyNumber::Key0, 0);
+    let rights = AccessRights {
+        read: Access::Key(KeyNumber::Key0),
+        write: Access::NoAccess,
+        read_write: Access::Free,
+        change: Access::Key(KeyNumber::Key0),
+    };
+    let settings = file_settings_payload(CommMode::Mac, rights, 32);
+    let payload = [0xCA, 0xFE, 0xBA, 0xBE];
+    let mut transport = TestTransport::new([
+        get_file_settings_mac_exchange(enc_key, mac_key, ti, 0, File::Ndef.file_no(), &settings),
+        read_file_mac_exchange(
+            enc_key,
+            mac_key,
+            ti,
+            1,
+            build_header(File::Ndef.file_no(), 0, 4),
+            &payload,
+        ),
+    ]);
+
+    let mut buf = [0u8; 8];
+    let (n, session) = block_on(session.read_file(&mut transport, File::Ndef, 0, 4, &mut buf))
+        .expect("matching key should keep configured secure mode");
+
+    assert_eq!(n, 4);
+    assert_eq!(&buf[..n], &payload);
+    assert_eq!(session.cmd_counter(), 2);
+    assert_eq!(transport.remaining(), 0);
+}
+
+#[test]
+fn write_file_uses_plain_when_only_write_access_is_free() {
+    let (session, enc_key, mac_key, ti) = test_aes_session(KeyNumber::Key0, 0);
+    let rights = AccessRights {
+        read: Access::NoAccess,
+        write: Access::Free,
+        read_write: Access::NoAccess,
+        change: Access::Key(KeyNumber::Key0),
+    };
+    let settings = file_settings_payload(CommMode::Mac, rights, 32);
+    let data = [0xDE, 0xAD, 0xBE, 0xEF];
+    let mut transport = TestTransport::new([
+        get_file_settings_mac_exchange(enc_key, mac_key, ti, 0, File::Ndef.file_no(), &settings),
+        write_file_plain_exchange(File::Ndef.file_no(), 0, &data),
+    ]);
+
+    let session = block_on(session.write_file(&mut transport, File::Ndef, 0, &data))
+        .expect("free write access should fall back to plain mode");
+
+    assert_eq!(session.cmd_counter(), 2);
+    assert_eq!(transport.remaining(), 0);
+}
+
+#[test]
+fn write_file_uses_configured_mode_when_authenticated_key_grants_write() {
+    let (session, enc_key, mac_key, ti) = test_aes_session(KeyNumber::Key0, 0);
+    let rights = AccessRights {
+        read: Access::NoAccess,
+        write: Access::Key(KeyNumber::Key0),
+        read_write: Access::Free,
+        change: Access::Key(KeyNumber::Key0),
+    };
+    let settings = file_settings_payload(CommMode::Mac, rights, 32);
+    let data = [0xCA, 0xFE, 0xBA, 0xBE];
+    let mut transport = TestTransport::new([
+        get_file_settings_mac_exchange(enc_key, mac_key, ti, 0, File::Ndef.file_no(), &settings),
+        write_file_mac_exchange(enc_key, mac_key, ti, 1, File::Ndef.file_no(), 0, &data),
+    ]);
+
+    let session = block_on(session.write_file(&mut transport, File::Ndef, 0, &data))
+        .expect("matching key should keep configured secure mode");
+
+    assert_eq!(session.cmd_counter(), 2);
     assert_eq!(transport.remaining(), 0);
 }
