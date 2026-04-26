@@ -1,5 +1,5 @@
-![Crates.io Version](https://img.shields.io/crates/v/ntag424?style=flat-square)
-![docs.rs](https://img.shields.io/docsrs/ntag424?style=flat-square)
+[![Crates.io Version](https://img.shields.io/crates/v/ntag424?style=flat-square)](https://crates.io/crates/ntag424)
+[![docs.rs](https://img.shields.io/docsrs/ntag424?style=flat-square)](https://docs.rs/ntag424)
 
 # ntag424 Communication Protocol Library
 
