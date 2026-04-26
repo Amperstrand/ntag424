@@ -1,0 +1,61 @@
+depends_on:
+  - test
+
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+variables:
+  - &rust_image "rust:1.88.0"
+  - &cargo_env
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+
+steps:
+  verify-release:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' ntag424/Cargo.toml | head -n1)"
+      - test -n "$crate_version"
+      - tag_version="${CI_COMMIT_TAG#v}"
+      - '[ "$tag_version" = "$crate_version" ] || { echo "tag ${CI_COMMIT_TAG} does not match crate version ${crate_version}" >&2; exit 1; }'
+      - git fetch --force --tags
+      - git tag -l --format='%(contents)' "$CI_COMMIT_TAG" > RELEASE_NOTES.md
+      - test -s RELEASE_NOTES.md || { echo "annotated tag message is required for releases" >&2; exit 1; }
+
+  publish-crate:
+    image: *rust_image
+    depends_on:
+      - verify-release
+    environment:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+      CARGO_REGISTRY_TOKEN:
+        from_secret: crates_io_token
+    commands:
+      - cargo publish -p ntag424 --locked
+
+  create-codeberg-release:
+    image: codeberg.org/cyborus/forgejo-cli:latest
+    depends_on:
+      - publish-crate
+    environment:
+      CODEBERG_TOKEN:
+        from_secret: codeberg_token
+    commands:
+      - |
+        forge_host="${CI_FORGE_URL#http://}"
+        forge_host="${forge_host#https://}"
+        forge_host="${forge_host%%/*}"
+        fj -H "$forge_host" auth add-key "$CI_REPO_OWNER" "$CODEBERG_TOKEN"
+        if [ "${CI_COMMIT_TAG#*-}" != "$CI_COMMIT_TAG" ]; then
+          prerelease_flag="-p"
+        else
+          prerelease_flag=""
+        fi
+        fj -H "$forge_host" release create "$CI_COMMIT_TAG" \
+          -r "$CI_REPO" \
+          -t "$CI_COMMIT_TAG" \
+          ${prerelease_flag:+$prerelease_flag} \
+          -b "$(cat RELEASE_NOTES.md)"
