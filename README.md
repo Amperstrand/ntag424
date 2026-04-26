@@ -18,7 +18,7 @@ targets both embedded readers and host-side provisioning and verification.
 - **Key diversification** for deriving per-tag keys from a backend
   master key.
 - **Transport-agnostic**: Bring your own NFC reader by implementing the
-  [`Transport`] trait. The crate ships no transport itself.
+  `Transport` trait. The crate ships no transport itself.
 - **`no_std`** with optional `alloc`. Designed so the linker can drop unused
   features under LTO.
 
