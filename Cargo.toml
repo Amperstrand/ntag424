@@ -1,6 +1,10 @@
 [workspace]
-members = ["ntag424"]
+members = ["ntag424", "ntag424-pcsc"]
 resolver = "3"
+
+[workspace.package]
+repository = "https://codeberg.org/jannschu/ntag424"
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 pcsc = "2.9.0"

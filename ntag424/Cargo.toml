@@ -5,9 +5,9 @@ keywords = ["nfc", "ntag424"]
 categories = ["embedded", "cryptography", "no-std"]
 authors = ["Jannik Schürg <jannik.schuerg+crates@posteo.de>"]
 description = "Implementation of the application protocol of NTAG 424 DNA chips."
-license = "MIT OR Apache-2.0"
 readme = "../README.md"
-repository = "https://codeberg.org/jannschu/ntag424"
+license.workspace = true
+repository.workspace = true
 edition = "2024"
 rust-version = "1.88.0"
 

@@ -11,4 +11,6 @@ steps:
       CARGO_TERM_COLOR: "always"
       RUSTDOCFLAGS: "--cfg docsrs -D warnings"
     commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends pkgconf libpcsclite-dev
       - cargo doc --workspace --locked --all-features --no-deps
