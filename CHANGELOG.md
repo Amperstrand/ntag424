@@ -1,11 +1,11 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## [v0.1.0] - 2026-04-26
 
-
+## [v0.1.0-beta1] - 2026-04-26
 
 ### Added
+
 - Initial ntag424-core crate with LRP implementation
 - Add skeleton for session management and transport abstraction
 - Implement ECDSA signature verification for NTAG 424 DNA
@@ -43,9 +43,8 @@ All notable changes to this project will be documented in this file.
 - Add forbid(unsafe_code) to ntag424
 - Make MSRV explicit
 
-
-
 ### Changed
+
 - Rename ntag424core to ntag424-core
 - Reorganize crypto module and switch to impl Future
 - Parameterize Authenticated with SessionSuite
@@ -67,15 +66,14 @@ All notable changes to this project will be documented in this file.
 - Remove `FileReadKey` wrapper type and use `KeyNumber` directly
 - Return fixed arrays from LRP generators
 
-
-
 ### Continuous Integration
+
 - Add CI workflows for clippy, doc, fmt, and test
 - Add no_std check to CI
-
-
+- Add release workflow and just task
 
 ### Documentation
+
 - Add comprehensive SDM documentation
 - Clarify LRP mode configuration behavior
 - Add high-level hardware description for NTAG 424 DNA
@@ -102,9 +100,8 @@ All notable changes to this project will be documented in this file.
 - Remove completed crate review document
 - Clarify the behavior of the plain read/write helpers on authenticated sessions
 
-
-
 ### Fixed
+
 - Correct bit mask for calendar year in version struct
 - Correct rustdoc example in FileSettings
 - Correct SetConfiguration response handling
@@ -123,9 +120,8 @@ All notable changes to this project will be documented in this file.
 - Harden AES-CBC helper block handling
 - Return typed errors for command input validation
 
-
-
 ### Maintenance
+
 - Add dummy types module placeholder
 - Add Justfile for development commands
 - Update crate metadata for publication
@@ -135,16 +131,12 @@ All notable changes to this project will be documented in this file.
 - Remove editor lock files from git
 - Remove obsolete docs
 
-
-
 ### Other
+
 - Normalize em-dashes to hyphens in comments
 
-
-
 ### Tests
+
 - Add test cases using real hardware captures
 - Add comprehensive tests using real hardware captures
 - Add tag tamper tests using real hardware captures
-
-
