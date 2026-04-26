@@ -66,7 +66,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let uid = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_card_uid(&mut transport, &mut ch).await
@@ -134,7 +138,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let result = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_card_uid(&mut transport, &mut ch).await
@@ -160,7 +168,7 @@ mod tests {
         // enc_ctr=5: 1 block from AuthFirst + 4 blocks from ReadSig (64 B).
         // GetVersion and GetKeyVersion x5 are MAC-only (no encryption).
         let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(5);
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         for _ in 0..7 {
             state.advance_counter();
         }

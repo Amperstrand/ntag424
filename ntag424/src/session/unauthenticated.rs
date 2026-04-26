@@ -142,7 +142,7 @@ impl Session<Unauthenticated> {
         let ef_selected = self.ef_selected;
         let auth_result = authenticate_ev2_first_aes(transport, key_no, key, rnd_a).await?;
         Ok(Session {
-            state: Authenticated::with_auth_result(auth_result),
+            state: Authenticated::with_auth_result(auth_result, key_no),
             ndef_selected: true,
             ef_selected,
         })
@@ -166,7 +166,7 @@ impl Session<Unauthenticated> {
         let ef_selected = self.ef_selected;
         let auth_result = authenticate_ev2_first_lrp(transport, key_no, key, rnd_a).await?;
         Ok(Session {
-            state: Authenticated::with_auth_result(auth_result),
+            state: Authenticated::with_auth_result(auth_result, key_no),
             ndef_selected: true,
             ef_selected,
         })

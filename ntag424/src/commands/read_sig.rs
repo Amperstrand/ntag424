@@ -160,7 +160,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let out = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             read_sig_mac(&mut transport, &mut ch).await
@@ -215,7 +219,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let result = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             read_sig_mac(&mut transport, &mut ch).await
@@ -280,7 +288,7 @@ mod tests {
     #[test]
     fn read_sig_mac_hw_aes() {
         let (suite, ti) = aes_key0_suite_085bc941();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // 0→1 (GetVersion)
 
         let mut transport = TestTransport::new([Exchange::new(
@@ -310,7 +318,7 @@ mod tests {
     #[test]
     fn read_sig_mac_hw_lrp() {
         let (suite, ti) = lrp_key0_suite_bbe12900();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // 0→1 (GetVersion)
 
         let mut transport = TestTransport::new([Exchange::new(

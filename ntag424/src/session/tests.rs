@@ -685,7 +685,7 @@ fn authenticate_lrp_hw_key0_full_handshake_b() {
 #[test]
 fn read_file_plain_hw_aes_advances_counter() {
     let (suite, ti) = aes_key0_suite_085bc941();
-    let mut state = Authenticated::new(suite, ti);
+    let mut state = Authenticated::new(suite, ti, KeyNumber::Key0);
     for _ in 0..8 {
         state.advance_counter();
     }
@@ -725,7 +725,7 @@ fn read_file_plain_hw_aes_advances_counter() {
 #[test]
 fn read_file_with_mode_plain_hw_lrp_advances_counter() {
     let (suite, ti) = lrp_key0_suite_bbe12900();
-    let mut state = Authenticated::new(suite, ti);
+    let mut state = Authenticated::new(suite, ti, KeyNumber::Key0);
     for _ in 0..9 {
         state.advance_counter();
     }

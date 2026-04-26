@@ -18,7 +18,7 @@ use core::task::{Context, Poll, Waker};
 
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite, aes_cbc_decrypt};
 use crate::session::Authenticated;
-use crate::{Response, Transport};
+use crate::{KeyNumber, Response, Transport};
 
 /// One expected request / canned response pair.
 ///
@@ -173,7 +173,7 @@ pub(crate) fn aes_key3_state_hw(cmd_counter: u16) -> Authenticated<AesSuite> {
     let mut rnd_b = hex_array::<16>("C8FC6F266D55CA43D3BBDE4CC8479AC2");
     aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
     let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
-    Authenticated::non_first(suite, hex_array("085BC941"), cmd_counter)
+    Authenticated::non_first(suite, hex_array("085BC941"), cmd_counter, KeyNumber::Key3)
 }
 
 /// LRP Key3 `Authenticated` state from real hardware (TI=AFF75859, factory-default all-zero key).
@@ -186,7 +186,7 @@ pub(crate) fn lrp_key3_state_hw(cmd_counter: u16, enc_ctr: u32) -> Authenticated
     // ReadData 128B + M2 pad = 9 blocks → enc_ctr 9; WriteData 8B + M2 pad = 1
     // block → enc_ctr 10; ReadData readback 8B + M2 pad = 1 block → enc_ctr 11.
     let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(enc_ctr);
-    Authenticated::non_first(suite, hex_array("AFF75859"), cmd_counter)
+    Authenticated::non_first(suite, hex_array("AFF75859"), cmd_counter, KeyNumber::Key3)
 }
 
 /// AES Key3 `Authenticated` state from real hardware for MAC-only proprietary-file captures.
@@ -196,7 +196,7 @@ pub(crate) fn aes_key3_mac_state_hw(cmd_counter: u16) -> Authenticated<AesSuite>
     let mut rnd_b = hex_array::<16>("2FE216D6F86B1CBD8937C41D55073383");
     aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
     let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
-    Authenticated::new(suite, hex_array("59237C63")).tap_counter(cmd_counter)
+    Authenticated::new(suite, hex_array("59237C63"), KeyNumber::Key3).tap_counter(cmd_counter)
 }
 
 /// LRP Key3 `Authenticated` state from real hardware for MAC-only proprietary-file captures.
@@ -207,7 +207,7 @@ pub(crate) fn lrp_key3_mac_state_hw(cmd_counter: u16) -> Authenticated<LrpSuite>
     let rnd_b = hex_array::<16>("F344BE464EB5E84CB349EF0716C2DC06");
     // enc_ctr=1: AuthenticateLRPFirst decrypts one block during the handshake.
     let suite = LrpSuite::derive(&key, &rnd_a, &rnd_b).with_enc_ctr(1);
-    Authenticated::new(suite, hex_array("4F4B4865")).tap_counter(cmd_counter)
+    Authenticated::new(suite, hex_array("4F4B4865"), KeyNumber::Key3).tap_counter(cmd_counter)
 }
 
 trait TapCounter<S: SessionSuite> {

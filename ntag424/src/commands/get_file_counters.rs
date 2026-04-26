@@ -123,7 +123,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let ctr = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_file_counters(&mut transport, &mut ch, file_no).await
@@ -178,7 +182,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let result = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_file_counters(&mut transport, &mut ch, file_no).await
@@ -243,7 +251,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let ctr = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_file_counters(&mut transport, &mut ch, file_no).await
@@ -299,7 +311,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let ctr = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_file_counters(&mut transport, &mut ch, file_no).await
@@ -341,7 +357,7 @@ mod tests {
     #[test]
     fn get_file_counters_hw_aes_ndef_five_reads() {
         let (suite, ti) = aes_key0_suite_085bc941();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         for _ in 0..9 {
             state.advance_counter();
         }
@@ -409,7 +425,7 @@ mod tests {
     #[test]
     fn get_file_counters_hw_lrp_permission_denied() {
         let (suite, ti) = lrp_key0_suite_bbe12900();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         for _ in 0..10 {
             state.advance_counter();
         }

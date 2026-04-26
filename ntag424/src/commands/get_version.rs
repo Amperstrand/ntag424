@@ -220,7 +220,11 @@ mod tests {
             Exchange::new(&[0x90, 0xAF, 0x00, 0x00, 0x00], &part3_full, 0x91, 0x00),
         ]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let version = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_version_mac(&mut transport, &mut ch).await
@@ -268,7 +272,11 @@ mod tests {
             Exchange::new(&[0x90, 0xAF, 0x00, 0x00, 0x00], &part3_full, 0x91, 0x00),
         ]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let result = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_version_mac(&mut transport, &mut ch).await
@@ -310,7 +318,7 @@ mod tests {
     #[test]
     fn get_version_mac_hw_aes() {
         let (suite, ti) = aes_key0_suite_085bc941();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
 
         let mut transport = TestTransport::new([
             Exchange::new(
@@ -351,7 +359,7 @@ mod tests {
     #[test]
     fn get_version_mac_hw_lrp() {
         let (suite, ti) = lrp_key0_suite_bbe12900();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
 
         let mut transport = TestTransport::new([
             Exchange::new(

@@ -255,7 +255,11 @@ mod tests {
         ti: [u8; 4],
         cmd_counter: u16,
     ) -> Authenticated<AesSuite> {
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         for _ in 0..cmd_counter {
             state.advance_counter();
         }

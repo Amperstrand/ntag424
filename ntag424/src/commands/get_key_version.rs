@@ -92,7 +92,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let got = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_key_version(&mut transport, &mut ch, key_no).await
@@ -145,7 +149,11 @@ mod tests {
         let mut transport =
             TestTransport::new([Exchange::new(&expected_apdu, &resp_body, 0x91, 0x00)]);
 
-        let mut state = Authenticated::new(AesSuite::from_keys(enc_key, mac_key), ti);
+        let mut state = Authenticated::new(
+            AesSuite::from_keys(enc_key, mac_key),
+            ti,
+            crate::KeyNumber::Key0,
+        );
         let result = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
             get_key_version(&mut transport, &mut ch, key_no).await
@@ -176,7 +184,7 @@ mod tests {
 
         // The PICC ran GetVersion (CmdCtr 0→1) and ReadSig (CmdCtr 1→2)
         // before this GetKeyVersion, so CmdCtr = 2 at command time.
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // 0→1  (GetVersion)
         state.advance_counter(); // 1→2  (ReadSig)
 
@@ -206,7 +214,7 @@ mod tests {
     #[test]
     fn get_key_version_hw_aes_keys_0_to_4() {
         let (suite, ti) = aes_key0_suite_085bc941();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // 0→1 GetVersion
         state.advance_counter(); // 1→2 ReadSig
 
@@ -278,7 +286,7 @@ mod tests {
     #[test]
     fn get_key_version_hw_lrp_keys_0_to_4() {
         let (suite, ti) = lrp_key0_suite_bbe12900();
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // 0→1 GetVersion
         state.advance_counter(); // 1→2 ReadSig
 

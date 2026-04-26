@@ -78,7 +78,7 @@ mod tests {
             &hex_array("A2CC8C9721DFB09E3050DD5FA8A52549"),
             &hex_array("F9E461A3182B78D8FBFBFA6FA4C2DF93"),
         );
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
 
         let expected_apdu = hex_bytes("90F7000008EA53D318617A367B00");
         let resp_body = hex_bytes("95B6CD54B7B7096940B330CDB927AD608C8A41613A7F3984");
@@ -112,7 +112,7 @@ mod tests {
         );
         // GetVersion (CommMode.MAC, 3 frames) advanced CmdCtr to 1 without
         // touching EncCtr. Replay by advancing the counter directly.
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
         state.advance_counter(); // CmdCtr 0→1 (GetVersion)
 
         let expected_apdu = hex_bytes("90F700000879A807E94C968F3300");
@@ -144,7 +144,7 @@ mod tests {
             &hex_array("A2CC8C9721DFB09E3050DD5FA8A52549"),
             &hex_array("F9E461A3182B78D8FBFBFA6FA4C2DF93"),
         );
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
 
         let expected_apdu = hex_bytes("90F7000008EA53D318617A367B00");
         let ciphertext = hex_bytes("95B6CD54B7B7096940B330CDB927AD60");
@@ -190,7 +190,7 @@ mod tests {
             input.extend_from_slice(&short_ciphertext);
             suite.mac(&input)
         };
-        let mut state = Authenticated::new(suite, ti);
+        let mut state = Authenticated::new(suite, ti, crate::KeyNumber::Key0);
 
         let expected_apdu = hex_bytes("90F7000008EA53D318617A367B00");
         let mut resp_body = Vec::from(short_ciphertext);

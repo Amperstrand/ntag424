@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use crate::{FileSettingsUpdate, commands::AuthResult};
+use crate::{Access, FileSettingsUpdate, commands::AuthResult};
 
 /// State of an authenticated session.
 ///
@@ -12,23 +12,28 @@ use crate::{FileSettingsUpdate, commands::AuthResult};
 /// supports AES and LRP.
 pub struct Authenticated<S: SessionSuite> {
     auth_result: AuthResult<S>,
+    key_number: KeyNumber,
     cmd_counter: u16,
 }
 
 impl<S: SessionSuite> Authenticated<S> {
     #[cfg(test)]
-    pub(crate) fn new(suite: S, ti: [u8; 4]) -> Self {
-        Self::with_auth_result(AuthResult {
-            suite,
-            ti,
-            pd_cap2: [0; 6],
-            pcd_cap2: [0; 6],
-        })
+    pub(crate) fn new(suite: S, ti: [u8; 4], key_number: KeyNumber) -> Self {
+        Self::with_auth_result(
+            AuthResult {
+                suite,
+                ti,
+                pd_cap2: [0; 6],
+                pcd_cap2: [0; 6],
+            },
+            key_number,
+        )
     }
 
-    pub(crate) fn with_auth_result(auth_result: AuthResult<S>) -> Self {
+    pub(crate) fn with_auth_result(auth_result: AuthResult<S>, key_number: KeyNumber) -> Self {
         Self {
             auth_result,
+            key_number,
             cmd_counter: 0,
         }
     }
@@ -39,7 +44,12 @@ impl<S: SessionSuite> Authenticated<S> {
     /// replacing the suite with newly derived keys. Used by NonFirst
     /// auth (§9.1.6, §9.2.6).
     #[cfg(test)]
-    pub(crate) fn non_first(suite: S, ti: [u8; 4], cmd_counter: u16) -> Self {
+    pub(crate) fn non_first(
+        suite: S,
+        ti: [u8; 4],
+        cmd_counter: u16,
+        key_number: KeyNumber,
+    ) -> Self {
         Self::non_first_with_auth_result(
             AuthResult {
                 suite,
@@ -48,12 +58,18 @@ impl<S: SessionSuite> Authenticated<S> {
                 pcd_cap2: [0; 6],
             },
             cmd_counter,
+            key_number,
         )
     }
 
-    pub(crate) fn non_first_with_auth_result(auth_result: AuthResult<S>, cmd_counter: u16) -> Self {
+    pub(crate) fn non_first_with_auth_result(
+        auth_result: AuthResult<S>,
+        cmd_counter: u16,
+        key_number: KeyNumber,
+    ) -> Self {
         Self {
             auth_result,
+            key_number,
             cmd_counter,
         }
     }
@@ -83,6 +99,11 @@ impl<S: SessionSuite> Authenticated<S> {
 }
 
 impl<S: SessionSuite> Session<Authenticated<S>> {
+    /// Return the key number used for authentication.
+    pub fn key_number(&self) -> KeyNumber {
+        self.state.key_number
+    }
+
     /// Read software, hardware and production version information.
     ///
     /// Uses MAC mode communication. Consumes `self` and returns it on success
@@ -501,7 +522,7 @@ impl Session<Authenticated<AesSuite>> {
             suite,
             ..self.state.auth_result
         };
-        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter);
+        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter, key_no);
         Ok(self)
     }
 }
@@ -525,7 +546,7 @@ impl Session<Authenticated<LrpSuite>> {
             suite,
             ..self.state.auth_result
         };
-        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter);
+        self.state = Authenticated::non_first_with_auth_result(auth_result, cmd_counter, key_no);
         Ok(self)
     }
 }
