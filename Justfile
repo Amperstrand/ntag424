@@ -102,11 +102,18 @@ release value:
 
   extract_release_notes() {
     awk -v heading="## [$tag]" '
-      index($0, heading) == 1 { printing = 1 }
+      index($0, heading) == 1 {
+        printing = 1
+        next
+      }
       printing {
         if ($0 ~ /^## / && index($0, heading) != 1) {
           exit
         }
+        if (!started && $0 ~ /^[[:space:]]*$/) {
+          next
+        }
+        started = 1
         print
       }
     ' "$changelog"

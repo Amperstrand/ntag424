@@ -45,17 +45,16 @@ steps:
         from_secret: codeberg_token
     commands:
       - |
-        forge_host="${CI_FORGE_URL#http://}"
-        forge_host="${forge_host#https://}"
-        forge_host="${forge_host%%/*}"
+        forge_host="$CI_FORGE_URL"
         fj -H "$forge_host" auth add-key "$CI_REPO_OWNER" "$CODEBERG_TOKEN"
         if [ "${CI_COMMIT_TAG#*-}" != "$CI_COMMIT_TAG" ]; then
           prerelease_flag="-p"
         else
           prerelease_flag=""
         fi
-        fj -H "$forge_host" release create "$CI_COMMIT_TAG" \
+        fj -H "$forge_host" release create \
           -r "$CI_REPO" \
           -t "$CI_COMMIT_TAG" \
           ${prerelease_flag:+$prerelease_flag} \
-          -b "$(cat RELEASE_NOTES.md)"
+          -b "$(cat RELEASE_NOTES.md)" \
+          "$CI_COMMIT_TAG"
