@@ -39,3 +39,10 @@ steps:
     environment: *cargo_env
     commands:
       - cargo test -p ntag424 --locked --features serde -- --test-threads=4
+
+  verify-no-std:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - rustup target add thumbv7em-none-eabihf
+      - cargo build -p ntag424 --locked --no-default-features --target thumbv7em-none-eabihf
