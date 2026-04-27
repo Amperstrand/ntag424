@@ -32,6 +32,8 @@ pub use authenticated::{Authenticated, EncryptedSession};
 pub use authenticated_session::AuthenticatedSession;
 pub use unauthenticated::Unauthenticated;
 
+pub type UnauthenticatedSession = Session<Unauthenticated>;
+
 #[cfg(test)]
 mod tests;
 

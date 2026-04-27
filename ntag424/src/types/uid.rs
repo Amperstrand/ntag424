@@ -26,6 +26,10 @@ impl Uid {
             Self::Random(_) => None,
         }
     }
+
+    pub fn is_random(&self) -> bool {
+        matches!(self, Self::Random(_))
+    }
 }
 
 impl AsRef<[u8]> for Uid {

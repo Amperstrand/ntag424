@@ -52,4 +52,15 @@ impl TagTamperStatusReadout {
     pub fn current(&self) -> TagTamperStatus {
         self.current
     }
+
+    /// Returns `true` if the tag has been tampered with, i.e. if either the permanent or current status is open or unknown.
+    pub fn is_tampered(&self) -> bool {
+        matches!(
+            (self.permanent, self.current),
+            (TagTamperStatus::Open, _)
+                | (_, TagTamperStatus::Open)
+                | (TagTamperStatus::Unknown(_), _)
+                | (_, TagTamperStatus::Unknown(_))
+        )
+    }
 }
