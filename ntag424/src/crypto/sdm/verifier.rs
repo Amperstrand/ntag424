@@ -143,7 +143,7 @@ impl Verifier {
     ///
     /// [`Sdm`]: crate::types::file_settings::Sdm
     /// [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
-    pub fn try_new(settings: Sdm, mode: CryptoMode) -> Result<Self, SdmError> {
+    pub fn try_new(settings: &Sdm, mode: CryptoMode) -> Result<Self, SdmError> {
         let file_read = settings.file_read().ok_or(SdmError::InvalidConfiguration(
             "SDM read access is missing - no MAC key configured",
         ))?;

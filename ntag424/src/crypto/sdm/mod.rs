@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn verify_encrypted_picc_empty_mac() {
         let (settings, ndef) = table4_fixture();
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
         assert_eq!(result.read_ctr, Some(61));
@@ -219,7 +219,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         let tt = result.tamper_status.expect("tag tamper");
         assert_eq!(tt.permanent(), TagTamperStatus::Close);
@@ -232,14 +232,14 @@ mod tests {
         // Tamper with the MAC (last hex char).
         let len = ndef.len();
         ndef[len - 1] = b'0';
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         assert_eq!(v.verify(&ndef, &[0u8; 16]), Err(SdmError::MacMismatch));
     }
 
     #[test]
     fn verify_rejects_short_ndef() {
         let (settings, ndef) = table4_fixture();
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         assert!(matches!(
             v.verify(&ndef[..40], &[0u8; 16]),
             Err(SdmError::NdefTooShort { .. }),
@@ -250,7 +250,7 @@ mod tests {
     fn verify_rejects_invalid_hex() {
         let (settings, mut ndef) = table4_fixture();
         ndef[10] = b'Z'; // corrupt first PICCData hex char
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         assert!(matches!(
             v.verify(&ndef, &[0u8; 16]),
             Err(SdmError::InvalidHex { offset: 10 }),
@@ -277,7 +277,7 @@ mod tests {
         let settings =
             encrypted_settings(KeyNumber::Key0, KeyNumber::Key0, 7, 7, 56, CryptoMode::Lrp);
 
-        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         assert_eq!(result.uid, Some(hex_array("042E1D222A6380")));
         assert_eq!(result.read_ctr, Some(106)); // 0x6a
@@ -311,7 +311,7 @@ mod tests {
             CryptoMode::Lrp,
         );
 
-        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Lrp).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         assert_eq!(result.uid, Some(hex_array("042E1D222A6380")));
         assert_eq!(result.read_ctr, Some(123)); // 0x7b
@@ -352,7 +352,7 @@ mod tests {
         let settings =
             encrypted_settings(KeyNumber::Key0, KeyNumber::Key2, 7, 7, 56, CryptoMode::Lrp);
 
-        let v = Verifier::try_new(settings, CryptoMode::Lrp).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Lrp).unwrap();
         let result = v.verify_with_meta_key(&ndef, &file_key, &meta_key).unwrap();
         assert_eq!(result.uid, Some(uid));
         assert_eq!(result.read_ctr, Some(106));
@@ -362,7 +362,7 @@ mod tests {
     fn try_new_rejects_no_file_read() {
         let settings = Sdm::try_new(PiccData::None, None, None, CryptoMode::Aes).unwrap();
         assert!(matches!(
-            Verifier::try_new(settings, CryptoMode::Aes),
+            Verifier::try_new(&settings, CryptoMode::Aes),
             Err(SdmError::InvalidConfiguration(_)),
         ));
     }
@@ -536,7 +536,7 @@ mod tests {
             &mac_hex_str,
         );
 
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         assert_eq!(result.uid, Some(uid));
         assert_eq!(result.read_ctr, Some(1));
@@ -597,7 +597,7 @@ mod tests {
         .unwrap();
 
         let ndef = build_ndef(b"HELLOWORLD", Some(picc_hex), Some(&enc_hex), b"", &mac_hex);
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         let result = v.verify(&ndef, &key).unwrap();
         let tt = result.tamper_status.expect("tag tamper");
         assert_eq!(tt.permanent(), TagTamperStatus::Close);
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn verify_mac_rejects_wrong_key() {
         let (settings, ndef) = table4_fixture();
-        let v = Verifier::try_new(settings, CryptoMode::Aes).unwrap();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
         let wrong_key = [0xFF; 16];
         assert!(matches!(
             v.verify(&ndef, &wrong_key),
