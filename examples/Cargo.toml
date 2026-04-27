@@ -1,0 +1,7 @@
+[workspace]
+members = ["provision"]
+resolver = "3"
+
+[workspace.dependencies]
+ntag424 = { path = "../ntag424" }
+ntag424-pcsc = { path = "../ntag424-pcsc" }

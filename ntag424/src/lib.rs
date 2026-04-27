@@ -261,6 +261,9 @@
 //! # } // end cfg mod
 //! ```
 //!
+//! For a complete, runnable provisioning tool using a real PC/SC transport,
+//! see `examples/provision/` in the repository.
+//!
 //! # Binary size
 //!
 //! Recommendations if binary size is a concern:

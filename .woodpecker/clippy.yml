@@ -27,3 +27,11 @@ steps:
       - apt-get install -y --no-install-recommends pkgconf libpcsclite-dev
       - rustup component add clippy
       - cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+
+  check-examples:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends pkgconf libpcsclite-dev
+      - cargo check --manifest-path examples/Cargo.toml --locked

@@ -24,15 +24,23 @@ targets both embedded readers and host-side provisioning and verification.
 
 ## Usage
 
-Until there is a release on crates.io, add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-ntag424 = { git = "https://codeberg.org/jannschu/ntag424.git" }
+```sh
+cargo add ntag424
 ```
 
-Then run `cargo doc` and read the documentation. You may want to
-add a `rev = "..."` to the dependency to pin to a specific commit.
+See [docs.rs/ntag424](https://docs.rs/ntag424) for the full API documentation.
+
+## Examples
+
+`examples/provision/` is a complete, runnable provisioning tool built on
+PC/SC. It covers reader selection, originality verification, optional LRP
+mode and tag-tamper setup, per-tag key derivation and replacement, SDM URL
+configuration, and NDEF file setup. Run it with:
+
+```sh
+cd examples
+cargo run --bin ntag424-provision
+```
 
 ## What is NTAG 424 DNA?
 
