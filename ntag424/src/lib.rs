@@ -42,7 +42,15 @@
 //! | NDEF        | _Unauthenticated_   | _Unauthenticated_      |  _Unauthenticated_     | Master Key |
 //! | Proprietary | Key 2   | Key 3      | Key 3      | Master Key |
 //!
-//! The stored AES keys are all constant zero out of the factory and should _all_ be replaced before deployment.
+//! **Default keys out of the factory**: all keys are set to constant zero.
+//!
+//! <div class="warning">
+//!
+//! _All_ keys should be replaced before deployment and
+//! the NDEF file should be locked down with appropriate permissions.
+//! Check the provisioning example in the repository.
+//!
+//! </div>
 //!
 //! ## _Secure Unique NFC_ (SUN) using _Secure Dynamic Messaging_ (SDM)
 //!
