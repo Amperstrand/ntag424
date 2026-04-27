@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use crate::{Access, FileSettingsUpdate, commands::AuthResult};
+use crate::{Access, FileSettingsUpdate, commands::AuthResult, types::file_settings::CryptoMode};
 
 /// State of an authenticated session.
 ///
@@ -102,6 +102,10 @@ macro_rules! impl_authenticated_session {
     ($suite:ty, $authenticate:item) => {
         impl AuthenticatedSession for Session<Authenticated<$suite>> {
             $authenticate
+
+            fn mode(&self) -> CryptoMode {
+                <$suite>::MODE
+            }
 
             fn key_number(&self) -> KeyNumber {
                 self.state.key_number
@@ -498,6 +502,13 @@ pub enum EncryptedSession {
 }
 
 impl AuthenticatedSession for EncryptedSession {
+    fn mode(&self) -> CryptoMode {
+        match self {
+            EncryptedSession::Aes(session) => session.mode(),
+            EncryptedSession::Lrp(session) => session.mode(),
+        }
+    }
+
     fn key_number(&self) -> KeyNumber {
         match self {
             EncryptedSession::Aes(session) => session.state.key_number,

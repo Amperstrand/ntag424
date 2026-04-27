@@ -4,6 +4,7 @@ use super::Unauthenticated;
 use crate::{
     CommMode, Configuration, File, FileSettingsUpdate, FileSettingsView, KeyNumber,
     NonMasterKeyNumber, Session, SessionError, TagTamperStatusReadout, Transport, Version,
+    types::file_settings::CryptoMode,
 };
 
 /// # Value semantics and command-counter safety
@@ -25,6 +26,9 @@ use crate::{
 /// verified. A successful call still advances the tracked counter so the
 /// host stays aligned with the PICC.
 pub trait AuthenticatedSession: Sized {
+    /// Return the session's crypto mode.
+    fn mode(&self) -> CryptoMode;
+
     /// Return the key number used for authentication.
     fn key_number(&self) -> KeyNumber;
 

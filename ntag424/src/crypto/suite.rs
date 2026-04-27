@@ -26,6 +26,8 @@ use aes::{
 };
 use cmac::{Cmac, Mac, digest::InnerInit};
 
+use crate::types::file_settings::CryptoMode;
+
 use super::lrp::{Block, Lrp, generate_plaintexts, generate_updated_keys};
 
 /// Direction of an encrypted message.
@@ -70,6 +72,8 @@ impl Direction {
 /// The AES suite consumes them during IV derivation; the LRP suite ignores
 /// them in `encrypt`/`decrypt` because LRP's IV is the stateful `EncCtr`.
 pub trait SessionSuite: Sized {
+    const MODE: CryptoMode;
+
     /// Derive session keys from the authentication transcript.
     ///
     /// Uses the static application key `kx` and the 16-byte randoms
@@ -203,6 +207,8 @@ impl AesSuite {
 }
 
 impl SessionSuite for AesSuite {
+    const MODE: CryptoMode = CryptoMode::Aes;
+
     fn derive(kx: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> Self {
         let sv1 = session_vector_aes([0xA5, 0x5A], rnd_a, rnd_b);
         let sv2 = session_vector_aes([0x5A, 0xA5], rnd_a, rnd_b);
@@ -321,6 +327,8 @@ impl LrpSuite {
 }
 
 impl SessionSuite for LrpSuite {
+    const MODE: CryptoMode = CryptoMode::Lrp;
+
     fn derive(kx: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> Self {
         // SesAuthMasterKey = CMAC_LRP(Kx, SV), untruncated.
         let kx_lrp = Lrp::from_base_key(*kx);
