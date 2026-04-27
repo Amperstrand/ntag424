@@ -8,7 +8,7 @@
 
 use super::file_settings::Access;
 
-/// Builder for the [`Session::set_configuration`](`crate::Session::set_configuration`) argument.
+/// Builder for the [`AuthenticatedSession::set_configuration`](`crate::AuthenticatedSession::set_configuration`) argument.
 ///
 /// Each option (PICC, secure messaging, capability, Tag Tamper,
 /// failed-authentication counter, HW) is independent and only emitted on the
@@ -92,7 +92,7 @@ impl Configuration {
 
     /// Set the user-configured `PDCap2.5` capability byte.
     ///
-    /// Is sent during first authentication and can be read using [`crate::Session::pcd_cap2`].
+    /// Is sent during first authentication and can be read using [`crate::AuthenticatedSession::pcd_cap2`].
     pub fn with_pdcap2_5(mut self, byte: u8) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[8] = byte;
@@ -101,7 +101,7 @@ impl Configuration {
 
     /// Set the user-configured `PDCap2.6` capability byte.
     ///
-    /// Is sent during first authentication and can be read using [`crate::Session::pcd_cap2`].
+    /// Is sent during first authentication and can be read using [`crate::AuthenticatedSession::pcd_cap2`].
     pub fn with_pdcap2_6(mut self, byte: u8) -> Self {
         let bytes = self.capability.get_or_insert([0; 10]);
         bytes[9] = byte;

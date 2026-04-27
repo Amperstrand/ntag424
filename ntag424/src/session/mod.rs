@@ -25,9 +25,11 @@ use crate::types::{
 };
 
 mod authenticated;
+mod authenticated_session;
 mod unauthenticated;
 
-pub use authenticated::Authenticated;
+pub use authenticated::{Authenticated, EncryptedSession};
+pub use authenticated_session::AuthenticatedSession;
 pub use unauthenticated::Unauthenticated;
 
 #[cfg(test)]
@@ -93,24 +95,9 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
 /// state. On failure the session is dropped and you must start over from a fresh
 /// [`Session::default()`].
 ///
-/// ## Why most authenticated methods take `self` by value
-///
-/// Authenticated-session commands advance `CmdCtr` on the PICC after a
-/// successful exchange, including commands sent with plain wire framing.
-/// MAC-protected and encrypted commands additionally derive or verify
-/// secure-messaging data from the current counter value. If the host sends
-/// one of those commands but receives an error — transport failure, bad MAC,
-/// unexpected status — it cannot know whether the PICC already incremented
-/// its counter. Reusing the session afterwards would leave the host and PICC
-/// counters out of sync, causing all subsequent secure commands to fail.
-/// Consuming `self` and returning it only on success makes this explicit:
-/// on error the session is dropped, and the caller must re-authenticate.
-///
-/// The plain authenticated helpers [`Session::read_file_plain`] and
-/// [`Session::write_file_plain`] take `&mut self` because the command framing
-/// itself is plain: no request or response MAC is computed or verified. On a
-/// successful response they still advance the tracked authenticated-session
-/// counter to match the PICC behavior observed on hardware.
+/// Authenticated operations are provided by [`AuthenticatedSession`], implemented
+/// for `Session<Authenticated<AesSuite>>`, `Session<Authenticated<LrpSuite>>`,
+/// and the type-erased [`EncryptedSession`] wrapper.
 pub struct Session<S> {
     state: S,
     /// Whether the NDEF application is selected.
@@ -129,7 +116,7 @@ impl<S> Session<S> {
     /// Read the UID as seen during card selection phase by the NFC reader.
     ///
     /// In random ID mode the value returned here is the randomized ID, not
-    /// the permanent one. The actual UID can be read using [`Session::get_uid`],
+    /// the permanent one. The actual UID can be read using [`AuthenticatedSession::get_uid`],
     /// which returns the permanent UID even when the tag is in random-ID mode.
     pub async fn get_selected_uid<T: Transport>(
         &self,

@@ -111,7 +111,7 @@ impl Version {
     /// The 7-byte UID of the tag. For tags in random-ID mode, this is the
     /// randomized ID.
     ///
-    /// Use [`Session::get_uid`](`crate::Session::get_uid`) to obtain the real UID on random-ID tags.
+    /// Use [`AuthenticatedSession::get_uid`](`crate::AuthenticatedSession::get_uid`) to obtain the real UID on random-ID tags.
     pub fn uid(&self) -> &[u8; 7] {
         // TODO: clarify padding for random ID which are shorter
         // TODO: reference `get_uid` for real UID on random-ID tags once implemented

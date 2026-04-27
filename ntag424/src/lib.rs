@@ -47,7 +47,7 @@
 //! ## _Secure Unique NFC_ (SUN) using _Secure Dynamic Messaging_ (SDM)
 //!
 //! The NDEF file can define placeholders that are dynamically filled by the tag when read.
-//! This is called _Secure Dynamic Messaging_ (SDM) and is configured through the [file settings](`crate::Session::change_file_settings`)
+//! This is called _Secure Dynamic Messaging_ (SDM) and is configured through the [file settings](`crate::AuthenticatedSession::change_file_settings`)
 //! of the NDEF file.
 //! Typically the NDEF encodes a URL with placeholders for the tag's unique identifier,
 //! and counter, usually encrypted and signed using one of the application keys,
@@ -145,7 +145,7 @@
 //!
 //! **Counter retrieval access** ([`CtrRetAccess`](`crate::types::file_settings::CtrRetAccess`)) —
 //! who may read back the raw counter value via
-//! [`Session::get_file_counters`](`crate::Session::get_file_counters`).
+//! [`AuthenticatedSession::get_file_counters`](`crate::AuthenticatedSession::get_file_counters`).
 //!
 //! The [`sdm_url_config!`] macro builds a `(NDEF bytes, Sdm)` pair from a URL template and
 //! handles offset arithmetic automatically — prefer it over constructing
@@ -163,7 +163,7 @@
 //! - If SUN identifiers are needed, prepare the NDEF file:
 //!   - Write the NDEF file with the desired template, e.g. a URL with placeholders. Maybe
 //!     the [`sdm_url_config!`] macro can be used.
-//!   - Enable SDM via the [file settings](`crate::Session::change_file_settings`) for the NDEF file,
+//!   - Enable SDM via the [file settings](`crate::AuthenticatedSession::change_file_settings`) for the NDEF file,
 //!     also configure the file permissions and cryptographic settings in this step.
 //! - Prepare the proprietary file if needed, write an initial content, and configure the file's
 //!   permissions.
@@ -181,7 +181,7 @@
 //! # #[cfg(all(feature = "sdm", feature = "key_diversification", feature = "alloc"))]
 //! # mod example {
 //! use ntag424::{
-//!     Session, SessionError, Transport,
+//!     AuthenticatedSession, Session, SessionError, Transport,
 //!     File, KeyNumber, NonMasterKeyNumber,
 //!     Access, AccessRights, CommMode, FileSettingsUpdate,
 //!     types::file_settings::CryptoMode,
@@ -329,7 +329,7 @@ pub mod key_diversification {
     //! # #[cfg(feature = "alloc")]
     //! # mod example {
     //! use ntag424::{
-    //!     Session, SessionError, Transport,
+    //!     AuthenticatedSession, Session, SessionError, Transport,
     //!     types::{KeyNumber, NonMasterKeyNumber},
     //!     key_diversification::diversify_ntag424,
     //! };
@@ -443,7 +443,8 @@ macro_rules! sdm_url_config {
 
 pub use transport::{Response, Transport};
 
-pub use session::{Session, SessionError};
+pub use crypto::suite::SessionSuite;
+pub use session::{AuthenticatedSession, EncryptedSession, Session, SessionError};
 
 pub use types::{
     Access, AccessRights, CommMode, Configuration, File, FileSettingsUpdate, FileSettingsView,

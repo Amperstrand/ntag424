@@ -477,7 +477,7 @@ fn authenticate_aes_non_first_an12196_table23_full_handshake() {
 
     // NonFirst: TI and CmdCtr must survive the re-authentication.
     let session =
-        block_on(session.authenticate_aes(&mut transport, KeyNumber::Key0, &key, rnd_a_non_first))
+        block_on(session.authenticate(&mut transport, KeyNumber::Key0, &key, rnd_a_non_first))
             .expect("non_first handshake should succeed");
 
     assert_eq!(
@@ -667,7 +667,7 @@ fn authenticate_lrp_non_first_hw_key0_full_handshake() {
 
     // NonFirst re-auth: TI and CmdCtr must survive.
     let session =
-        block_on(session.authenticate_lrp(&mut transport, KeyNumber::Key0, &key, rnd_a_non_first))
+        block_on(session.authenticate(&mut transport, KeyNumber::Key0, &key, rnd_a_non_first))
             .expect("non_first handshake should succeed");
 
     assert_eq!(
@@ -790,7 +790,7 @@ fn authenticate_aes_non_first_hw_key3() {
     assert_eq!(session.cmd_counter(), 14);
 
     let session =
-        block_on(session.authenticate_aes(&mut transport, KeyNumber::Key3, &key, rnd_a_nonfirst))
+        block_on(session.authenticate(&mut transport, KeyNumber::Key3, &key, rnd_a_nonfirst))
             .expect("Key3 nonfirst auth must succeed");
 
     assert_eq!(

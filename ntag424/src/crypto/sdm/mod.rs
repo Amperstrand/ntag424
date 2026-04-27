@@ -10,7 +10,7 @@
 //!
 //! # Usage
 //!
-//! 1. Obtain the [`Sdm`] from [`Session::get_file_settings`] (or construct one via
+//! 1. Obtain the [`Sdm`] from [`AuthenticatedSession::get_file_settings`] (or construct one via
 //!    [`Sdm::try_new`] matching the tag's configuration).
 //! 2. Create a [`Verifier`] via [`try_new`] with the
 //!    settings and [`CryptoMode`].
@@ -21,7 +21,7 @@
 //! [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
 //! [`try_new`]: Verifier::try_new
 //! [`verify`]: Verifier::verify
-//! [`Session::get_file_settings`]: crate::Session::get_file_settings
+//! [`AuthenticatedSession::get_file_settings`]: crate::AuthenticatedSession::get_file_settings
 //!
 //! # Module layout
 //!

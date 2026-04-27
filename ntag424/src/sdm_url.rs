@@ -107,7 +107,7 @@ impl Default for SdmUrlOptions {
 pub struct SdmUrlConfig {
     /// NDEF file content to be written to the tag.
     pub ndef_bytes: Vec<u8>,
-    /// Settings to be applied with [`change_file_settings`](`crate::Session::change_file_settings`).
+    /// Settings to be applied with [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
     pub sdm_settings: Sdm,
 }
 
@@ -248,7 +248,7 @@ struct ParsedTemplate<const N: usize> {
 ///
 /// Converts a URL string with placeholder tokens into the NDEF file content
 /// and [`SdmUrlConfig`] object. The NDEF file content must be written to the tag,
-/// and settings must be applied with [`change_file_settings`](`crate::Session::change_file_settings`).
+/// and settings must be applied with [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
 ///
 /// # Placeholders
 ///

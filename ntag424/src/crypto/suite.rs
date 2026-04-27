@@ -51,7 +51,7 @@ impl Direction {
 
 /// Post-authentication cipher suite driving NT4H2421Gx Secure Messaging.
 ///
-/// Implemented by [`AesSuite`] (§9.1) and [`LrpSuite`] (§9.2). A suite owns
+/// Implemented for AES (§9.1) and LRP (§9.2). A suite owns
 /// the session keys `SesAuthMACKey` / `SesAuthENCKey` plus any mode-specific
 /// state - most notably the 32-bit LRP `EncCtr` that persists across
 /// messages (§9.2.4). AES has no such counter: its CBC IV is rebuilt from

@@ -56,7 +56,7 @@ impl Session<Unauthenticated> {
     /// be set to [free access](`crate::types::file_settings::Access::Free`) for the call to succeed.
     ///
     /// For files with other access conditions, authentication may be required and
-    /// the caller should use [`Session::read_file_with_mode`].
+    /// the caller should use [`AuthenticatedSession::read_file_with_mode`].
     ///
     /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
     /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
@@ -177,7 +177,7 @@ impl Session<Unauthenticated> {
     /// Reads the 56-byte ECDSA originality signature from the
     /// PICC and verifies it using the NXP master public key.
     ///
-    /// The provided UID must not be a randomized ID - use [`Session::get_uid`] if needed.
+    /// The provided UID must not be a randomized ID - use [`AuthenticatedSession::get_uid`] if needed.
     pub async fn verify_originality<T: Transport>(
         &self,
         transport: &mut T,

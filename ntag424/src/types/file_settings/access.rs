@@ -103,7 +103,7 @@ impl Access {
 }
 
 /// Access right controlling who may retrieve the SDM read counter via
-/// [`Session::get_file_counters`](`crate::Session::get_file_counters`).
+/// [`AuthenticatedSession::get_file_counters`](`crate::AuthenticatedSession::get_file_counters`).
 ///
 /// Uses the same nibble encoding as [`Access`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

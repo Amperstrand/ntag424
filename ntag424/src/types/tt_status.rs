@@ -30,7 +30,7 @@ impl From<u8> for TagTamperStatus {
     }
 }
 
-/// TagTamper status pair returned by [`Session::get_tt_status`](`crate::Session::get_tt_status`).
+/// TagTamper status pair returned by [`AuthenticatedSession::get_tt_status`](`crate::AuthenticatedSession::get_tt_status`).
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TagTamperStatusReadout {
     permanent: TagTamperStatus,

@@ -84,7 +84,7 @@ enum PiccSource {
 
 /// Server-side verifier for NTAG 424 DNA Secure Dynamic Messaging.
 ///
-/// Constructed from [`Sdm`] (obtained from [`Session::get_file_settings`] or
+/// Constructed from [`Sdm`] (obtained from [`AuthenticatedSession::get_file_settings`] or
 /// built with [`Sdm::try_new`]) and the active [`CryptoMode`].
 ///
 /// The constructor validates that the settings are internally consistent
@@ -93,7 +93,7 @@ enum PiccSource {
 ///
 /// [`Sdm`]: crate::types::file_settings::Sdm
 /// [`Sdm::try_new`]: crate::types::file_settings::Sdm::try_new
-/// [`Session::get_file_settings`]: crate::Session::get_file_settings
+/// [`AuthenticatedSession::get_file_settings`]: crate::AuthenticatedSession::get_file_settings
 ///
 /// # Example
 ///

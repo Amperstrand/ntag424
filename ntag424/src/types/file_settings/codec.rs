@@ -13,7 +13,7 @@ use super::sdm::{
 };
 
 /// File settings as returned by
-/// [`Session::get_file_settings`](`crate::Session::get_file_settings`).
+/// [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`).
 ///
 /// NT4H2421Gx §10.7.2, Table 73.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +24,8 @@ pub struct FileSettingsView {
     pub file_size: u32,
     /// Communication mode (how data is protected on the wire).
     ///
-    /// The mode passed to [`read_file_with_mode`](crate::Session::read_file_with_mode)
-    /// and [`write_file_with_mode`](crate::Session::write_file_with_mode)
+    /// The mode passed to [`AuthenticatedSession::read_file_with_mode`](crate::AuthenticatedSession::read_file_with_mode)
+    /// and [`AuthenticatedSession::write_file_with_mode`](crate::AuthenticatedSession::write_file_with_mode)
     /// must match this.
     pub comm_mode: CommMode,
     /// Access rights for the file.
@@ -256,13 +256,13 @@ impl FileSettingsView {
     }
 
     /// Convert to a [`FileSettingsUpdate`] suitable for
-    /// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
+    /// [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
     ///
     /// This preserves the current communication mode, access rights, and SDM
     /// settings, making it the safest starting point for a read-modify-write
     /// update flow:
     ///
-    /// 1. Call [`Session::get_file_settings`](`crate::Session::get_file_settings`)
+    /// 1. Call [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`)
     /// 2. Convert the returned [`FileSettingsView`] with [`Self::into_update`]
     /// 3. Modify the resulting update
     ///
@@ -280,7 +280,7 @@ impl FileSettingsView {
 }
 
 /// Builder for the file settings update payload passed to
-/// [`Session::change_file_settings`](`crate::Session::change_file_settings`).
+/// [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
 ///
 /// `FileType` and file size are omitted — they cannot be changed.
 ///
@@ -302,7 +302,7 @@ impl FileSettingsUpdate {
     ///
     /// If you only want to adjust one aspect of the current settings (for
     /// example enabling or changing SDM), first read the current settings with
-    /// [`Session::get_file_settings`](`crate::Session::get_file_settings`),
+    /// [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`),
     /// convert them with [`FileSettingsView::into_update`], then modify that
     /// update. Starting from `new` is easiest to get wrong because omitted
     /// values are not preserved from the tag.

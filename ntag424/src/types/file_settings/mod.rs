@@ -3,22 +3,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-//! File settings for [`Session::get_file_settings`](`crate::Session::get_file_settings`)
-//! and [`Session::change_file_settings`](`crate::Session::change_file_settings`).
+//! File settings for [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`)
+//! and [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
 //!
 //! [`FileSettingsView`] is the decoded result returned by
-//! [`Session::get_file_settings`](`crate::Session::get_file_settings`).
+//! [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`).
 //! [`FileSettingsUpdate`] is the update input for
-//! [`Session::change_file_settings`](`crate::Session::change_file_settings`).
+//! [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
 //! [`Sdm`] holds Secure Dynamic Messaging configuration; construct it via [`Sdm::try_new`].
 //!
 //! `ChangeFileSettings` overwrites all mutable file-settings fields together.
 //! When modifying an existing file, the safest pattern is:
 //!
-//! 1. Read the current settings with [`Session::get_file_settings`](`crate::Session::get_file_settings`)
+//! 1. Read the current settings with [`AuthenticatedSession::get_file_settings`](`crate::AuthenticatedSession::get_file_settings`)
 //! 2. Convert the returned [`FileSettingsView`] with [`FileSettingsView::into_update`]
 //! 3. Apply only the changes you intend before calling
-//!    [`Session::change_file_settings`](`crate::Session::change_file_settings`)
+//!    [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`)
 //!
 //! Starting from [`FileSettingsUpdate::new`] is best reserved for cases where
 //! you intentionally want to replace the full communication-mode and

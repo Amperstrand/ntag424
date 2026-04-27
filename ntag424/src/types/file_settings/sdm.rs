@@ -83,7 +83,7 @@ pub struct ReadCtrFeatures {
     /// permitted only while the counter is below `n`.
     pub limit: Option<u32>,
     /// Who may retrieve the read counter via
-    /// [`Session::get_file_counters`](`crate::Session::get_file_counters`).
+    /// [`AuthenticatedSession::get_file_counters`](`crate::AuthenticatedSession::get_file_counters`).
     pub ret_access: CtrRetAccess,
 }
 
