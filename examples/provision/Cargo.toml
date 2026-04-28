@@ -8,8 +8,9 @@ name = "ntag424-provision"
 path = "main.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-dialoguer = { version = "0.12.0", default-features = false }
+anyhow.workspace = true
+dialoguer.workspace = true
+example-utils.workspace = true
 ntag424 = { workspace = true, features = [
   "key_diversification",
   "sdm",
@@ -17,7 +18,7 @@ ntag424 = { workspace = true, features = [
   "serde",
 ] }
 ntag424-pcsc.workspace = true
-pcsc = "2.9"
-rand = "0.10.1"
+pcsc.workspace = true
+rand.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

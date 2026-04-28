@@ -24,7 +24,7 @@ use ntag424::{
 use rand::{RngExt as _, rngs::StdRng};
 use serde::Serialize;
 
-mod utils;
+use example_utils as utils;
 
 /// A system identifier is used as additional input to the
 /// key diversification function to derive the session keys
@@ -230,8 +230,7 @@ where
     // WARN: Printing is for demo purposes only,
     //       never print or log sensitive data such as keys in a real application.
     let (version, selected_uid) = check_tag(&mut transport).await?;
-    let (session, uid) =
-        authenticate_and_verify_originality(&mut transport, &selected_uid).await?;
+    let (session, uid) = authenticate_and_verify_originality(&mut transport, &selected_uid).await?;
     let (session, tag_tamper_enabled) =
         configure_tag(&mut transport, session, &version, &selected_uid).await?;
     let session = provision_keys(&mut transport, session, master_key, picc_key, &uid).await?;

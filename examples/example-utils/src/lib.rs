@@ -5,7 +5,7 @@ use pcsc::{Context, Protocols, Scope};
 use rand::{RngExt as _, rngs::StdRng};
 
 /// List available PC/SC readers and let the user select one.
-pub(crate) fn get_pcsc_transport() -> Result<CardTransport> {
+pub fn get_pcsc_transport() -> Result<CardTransport> {
     let ctx = Context::establish(Scope::User)
         .context("failed to establish context, is PC/SC installed and configured correctly?")?;
     let len = ctx
@@ -39,7 +39,7 @@ pub(crate) fn get_pcsc_transport() -> Result<CardTransport> {
 }
 
 /// Try to authenticate using the factory default keys (all zeros).
-pub(crate) async fn authenticate_using_factory_defaults<T: Transport>(
+pub async fn authenticate_using_factory_defaults<T: Transport>(
     transport: &mut T,
 ) -> Result<EncryptedSession>
 where
@@ -74,7 +74,7 @@ where
 /// A simple executor that runs a future to completion.
 ///
 /// This only supports futures that are immediately ready.
-pub(crate) fn block_on<F: Future>(fut: F) -> F::Output {
+pub fn block_on<F: Future>(fut: F) -> F::Output {
     use core::pin::pin;
     use core::task::{Context, Poll, Waker};
 
@@ -86,14 +86,14 @@ pub(crate) fn block_on<F: Future>(fut: F) -> F::Output {
     }
 }
 
-pub(crate) fn ask_user_confirm(prompt: &str) -> Result<bool> {
+pub fn ask_user_confirm(prompt: &str) -> Result<bool> {
     dialoguer::Confirm::new()
         .with_prompt(prompt)
         .interact()
         .context("failed to read input")
 }
 
-pub(crate) fn ask_user_input(prompt: &str, default: &str) -> Result<String> {
+pub fn ask_user_input(prompt: &str, default: &str) -> Result<String> {
     dialoguer::Input::<String>::new()
         .with_prompt(prompt)
         .default(default.to_string())
@@ -102,10 +102,24 @@ pub(crate) fn ask_user_input(prompt: &str, default: &str) -> Result<String> {
 }
 
 /// Format bytes as a hex string, e.g. "DE AD BE EF".
-pub(crate) fn hex(bytes: &[u8]) -> String {
+pub fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
         .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn ascii_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|&b| {
+            if b.is_ascii_graphic() || b == b' ' {
+                format!(" {}", b as char)
+            } else {
+                format!("{:02X}", b)
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }

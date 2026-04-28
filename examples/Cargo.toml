@@ -1,7 +1,12 @@
 [workspace]
-members = ["provision"]
+members = ["example-utils", "provision"]
 resolver = "3"
 
 [workspace.dependencies]
+anyhow = "1.0.102"
+dialoguer = { version = "0.12.0", default-features = false }
+example-utils = { path = "example-utils" }
 ntag424 = { path = "../ntag424" }
 ntag424-pcsc = { path = "../ntag424-pcsc" }
+pcsc = "2.9"
+rand = "0.10.1"
