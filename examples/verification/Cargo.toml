@@ -1,10 +1,10 @@
 [package]
-name = "provision"
+name = "verify"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "ntag424-provision"
+name = "ntag424-verification"
 path = "main.rs"
 
 [dependencies]
@@ -19,6 +19,5 @@ ntag424 = { workspace = true, features = [
 ] }
 ntag424-pcsc.workspace = true
 pcsc.workspace = true
-rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true

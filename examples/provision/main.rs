@@ -165,9 +165,9 @@ where
     T::Error: Send + Sync + 'static,
 {
     let default = if tag_tamper_enabled {
-        "[[https://example.com/?id={picc:uid+ctr}&tt=[{tt}]&mac={mac}"
+        "https://example.com/?id=[[{picc:uid+ctr}&tt=[{tt}]&mac={mac}"
     } else {
-        "[[https://example.com/?id={picc:uid+ctr}&mac={mac}"
+        "https://example.com/?id=[[{picc:uid+ctr}&mac={mac}"
     };
     let template = utils::ask_user_input("Enter the NDEF URL template:", default)?;
     let sdm_url_config = sdm_url_config(
@@ -181,6 +181,7 @@ where
             // grant master-key admin authority. The MAC key (default `mac_key = Key2`)
             // remains per-tag diversified.
             picc_key: KeyNumber::Key1,
+            mac_key: KeyNumber::Key2,
             ..Default::default()
         },
     )
@@ -242,6 +243,7 @@ struct ServerSideData {
     verifier: Verifier,
     master_key: [u8; 16],
     picc_key: [u8; 16],
+    system_identifier: Vec<u8>,
 }
 
 fn main() -> Result<()> {
@@ -271,6 +273,7 @@ fn main() -> Result<()> {
         // WARN: In a real application, you do not print or serialize keys
         master_key,
         picc_key,
+        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
     };
 
     println!(

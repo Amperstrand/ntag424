@@ -262,7 +262,9 @@
 //! ```
 //!
 //! For a complete, runnable provisioning tool using a real PC/SC transport,
-//! see `examples/provision/` in the repository.
+//! see `examples/provision/` in the repository. `examples/verification/` is
+//! a companion that reads the provisioned config and verifies SDM-signed tag
+//! taps against it.
 //!
 //! # Binary size
 //!
@@ -399,6 +401,9 @@ pub mod sdm {
     //! With the `alloc` feature enabled, [`sdm_url_config`] is also
     //! available for converting a URL template into ready-to-write NDEF bytes
     //! and matching [`Sdm`] settings for provisioning.
+    //!
+    //! See `examples/verification/` in the repository for a complete, runnable
+    //! example that pairs with the `examples/provision/` tool.
     //!
     //! [`Sdm`]: crate::types::file_settings::Sdm
     pub use crate::crypto::sdm::*;

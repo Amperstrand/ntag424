@@ -42,6 +42,16 @@ cd examples
 cargo run --bin ntag424-provision
 ```
 
+`examples/verification/` is a companion server-side verifier. It reads the
+JSON output produced by the provision tool, then loops over tag taps —
+decrypting PICC data, deriving the per-tag session key, and verifying the
+SDM MAC. Run it with:
+
+```sh
+cd examples
+cargo run --bin ntag424-verification
+```
+
 ## What is NTAG 424 DNA?
 
 It's an NFC chip that can generate cryptographically signed or encrypted
