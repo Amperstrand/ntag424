@@ -173,19 +173,7 @@ mod tests {
         (settings, ndef)
     }
 
-    #[test]
-    fn verify_encrypted_picc_empty_mac() {
-        let (settings, ndef) = table4_fixture();
-        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
-        let result = v.verify(&ndef, &[0u8; 16]).unwrap();
-        assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
-        assert_eq!(result.read_ctr, Some(61));
-        assert_eq!(result.tamper_status, None);
-        assert_eq!(result.enc_file_data, None);
-    }
-
-    #[test]
-    fn verify_extracts_clear_tamper_status() {
+    fn plain_uid_tamper_fixture() -> (Sdm, alloc::vec::Vec<u8>) {
         let key = [0u8; 16];
         let uid = hex_array::<7>("04DE5F1EACC040");
         let mut ndef = alloc::vec::Vec::new();
@@ -219,11 +207,78 @@ mod tests {
         )
         .unwrap();
 
+        (settings, ndef)
+    }
+
+    #[test]
+    fn verify_encrypted_picc_empty_mac() {
+        let (settings, ndef) = table4_fixture();
         let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
-        let result = v.verify(&ndef, &key).unwrap();
+        let result = v.verify(&ndef, &[0u8; 16]).unwrap();
+        assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
+        assert_eq!(result.read_ctr, Some(61));
+        assert_eq!(result.tamper_status, None);
+        assert_eq!(result.enc_file_data, None);
+    }
+
+    #[test]
+    fn verify_extracts_clear_tamper_status() {
+        let (settings, ndef) = plain_uid_tamper_fixture();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+        let result = v.verify(&ndef, &[0u8; 16]).unwrap();
         let tt = result.tamper_status.expect("tag tamper");
         assert_eq!(tt.permanent(), TagTamperStatus::Close);
         assert_eq!(tt.current(), TagTamperStatus::Open);
+    }
+
+    #[test]
+    fn with_offset_verifies_prefixed_encrypted_picc_ndef() {
+        let (settings, ndef) = table4_fixture();
+        let mut shifted = alloc::vec::Vec::new();
+        shifted.extend_from_slice(b"xx");
+        shifted.extend_from_slice(&ndef);
+
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+        let shifted_v = v.with_offset(2).unwrap();
+        let result = shifted_v.verify(&shifted, &[0u8; 16]).unwrap();
+
+        assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
+        assert_eq!(result.read_ctr, Some(61));
+    }
+
+    #[test]
+    fn with_offset_verifies_sliced_plain_mirror_ndef() {
+        let (settings, ndef) = plain_uid_tamper_fixture();
+
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+        let shifted_v = v.with_offset(-5).unwrap();
+        let result = shifted_v.verify(&ndef[5..], &[0u8; 16]).unwrap();
+
+        assert_eq!(result.uid, Some(hex_array("04DE5F1EACC040")));
+        let tt = result.tamper_status.expect("tag tamper");
+        assert_eq!(tt.permanent(), TagTamperStatus::Close);
+        assert_eq!(tt.current(), TagTamperStatus::Open);
+    }
+
+    #[test]
+    fn with_offset_rejects_out_of_range_adjustments() {
+        let (settings, _) = table4_fixture();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+
+        assert!(v.with_offset(i32::MIN).is_none());
+        assert!(v.with_offset(-11).is_none());
+        assert!(v.with_offset(214).is_none());
+    }
+
+    #[test]
+    fn decrypt_picc_data_does_not_require_mac_bytes() {
+        let (settings, ndef) = table4_fixture();
+        let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+
+        let (uid, read_ctr) = v.decrypt_picc_data(&ndef[..42], &[0u8; 16]).unwrap();
+
+        assert_eq!(uid, Some(hex_array("04DE5F1EACC040")));
+        assert_eq!(read_ctr, Some(61));
     }
 
     #[test]

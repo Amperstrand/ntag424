@@ -189,6 +189,87 @@ impl Verifier {
         })
     }
 
+    /// Return a new verifier with all range offsets increased by `inc`.
+    ///
+    /// This is useful for verifying SDM data using content _decoded_ from the NDEF file.
+    /// The tag needs indices based on the encoded
+    /// NDEF file, but a reader application may want to verify against the decoded content,
+    /// e.g. the URL.
+    ///
+    /// Returns `None` if any offset would underflow or overflow when adjusted by `inc`.
+    pub fn with_offset(&self, inc: i32) -> Option<Self> {
+        fn add(a: u32, b: i32) -> Option<u32> {
+            if b < 0 {
+                a.checked_sub(b.checked_neg()? as u32)
+            } else {
+                a.checked_add(b as u32)
+            }
+            // max NDEF file size is 256
+            .filter(|&r| r <= 255)
+        }
+
+        let mut new = self.clone();
+        match new.picc_source {
+            PiccSource::Encrypted {
+                offset: ref mut picc_off,
+            } => {
+                *picc_off = add(*picc_off, inc)?;
+            }
+            PiccSource::Plain {
+                ref mut uid_offset,
+                ref mut read_ctr_offset,
+            } => {
+                if let Some(uid_off) = uid_offset {
+                    *uid_off = add(*uid_off, inc)?;
+                }
+                if let Some(rctr_off) = read_ctr_offset {
+                    *rctr_off = add(*rctr_off, inc)?;
+                }
+            }
+            PiccSource::None => {}
+        }
+        new.mac_input_offset = add(new.mac_input_offset, inc)?;
+        if let Some(tt) = new.tamper_status_offset {
+            new.tamper_status_offset = Some(add(tt, inc)?);
+        }
+        new.mac_offset = add(new.mac_offset, inc)?;
+        if let Some(range) = new.enc_data {
+            let start = add(range.start, inc)?;
+            let end = add(range.end, inc)?;
+            new.enc_data = Some(start..end);
+        }
+        Some(new)
+    }
+
+    /// Decrypt or read the tag identity data from an NDEF buffer without verifying the MAC.
+    ///
+    /// Returns `(uid, read_ctr)`. Each field is `None` when the corresponding
+    /// mirror was not enabled in the [`Sdm`] settings.
+    ///
+    /// `meta_key` is the value of the application key configured as
+    /// `SDMMetaRead` (used to decrypt the PICCData blob when
+    /// `PiccData::Encrypted` is active). It is ignored for plain or absent
+    /// PICC mirrors.
+    ///
+    /// This is intended for the common two-step server flow where the
+    /// `SDMFileRead` key is derived per-tag from the UID (e.g. via
+    /// `key_diversification::diversify_ntag424`). Call this first to recover
+    /// the UID, derive the file-read key, then pass it to
+    /// [`verify_with_meta_key`](Self::verify_with_meta_key).
+    ///
+    /// [`Sdm`]: crate::types::file_settings::Sdm
+    pub fn decrypt_picc_data(
+        &self,
+        ndef_data: &[u8],
+        meta_key: &[u8; 16],
+    ) -> Result<(Option<[u8; 7]>, Option<u32>), SdmError> {
+        let (uid, ctr_bytes) = self.extract_picc_data(ndef_data, meta_key)?;
+        Ok((
+            uid,
+            ctr_bytes.map(|c| u32::from_le_bytes([c[0], c[1], c[2], 0])),
+        ))
+    }
+
     /// The [`CryptoMode`] this verifier was created with.
     pub fn mode(&self) -> CryptoMode {
         self.mode
