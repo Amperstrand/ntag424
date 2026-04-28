@@ -122,7 +122,7 @@ release value:
   restore_on_exit=1
   trap 'if [ "${restore_on_exit:-0}" = 1 ]; then restore_release_files; fi' EXIT
 
-  cargo set-version -v -p ntag424 --manifest-path "$manifest" "$next_version"
+  cargo set-version -v --manifest-path "$manifest" "$next_version"
   if [ "$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "ntag424") | .version')" != "$next_version" ]; then
     echo "error: failed to update crate version" >&2
     exit 1
