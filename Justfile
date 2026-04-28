@@ -175,7 +175,7 @@ release value:
   restore_on_exit=0
 
   tag_target="$(jj log -r @- --no-graph -T 'commit_id')"
-  printf '%s' "$release_notes" | git tag -a "$tag" "$tag_target" --cleanup=verbatim -F -
+  printf '%s\n\n%s' "$tag" "$release_notes" | git tag -a "$tag" "$tag_target" --cleanup=verbatim -F -
 
   if [ -n "$branch" ]; then
     jj git push --bookmark "$branch"

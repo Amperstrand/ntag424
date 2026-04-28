@@ -24,22 +24,10 @@ steps:
       - git tag -l --format='%(contents)' "$CI_COMMIT_TAG" > RELEASE_NOTES.md
       - test -s RELEASE_NOTES.md || { echo "annotated tag message is required for releases" >&2; exit 1; }
 
-  publish-crate:
-    image: *rust_image
-    depends_on:
-      - verify-release
-    environment:
-      CARGO_BUILD_JOBS: "4"
-      CARGO_TERM_COLOR: "always"
-      CARGO_REGISTRY_TOKEN:
-        from_secret: crates_io_token
-    commands:
-      - cargo publish -p ntag424 --locked
-
   create-codeberg-release:
     image: codeberg.org/cyborus/forgejo-cli:latest
     depends_on:
-      - publish-crate
+      - verify-release
     environment:
       CODEBERG_TOKEN:
         from_secret: codeberg_token
@@ -56,5 +44,17 @@ steps:
           -r "$CI_REPO" \
           -t "$CI_COMMIT_TAG" \
           ${prerelease_flag:+$prerelease_flag} \
-          -b "$(cat RELEASE_NOTES.md)" \
+          --body="$(tail -n +3 RELEASE_NOTES.md)" \
           "$CI_COMMIT_TAG"
+
+  publish-crate:
+    image: *rust_image
+    depends_on:
+      - create-codeberg-release
+    environment:
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+      CARGO_REGISTRY_TOKEN:
+        from_secret: crates_io_token
+    commands:
+      - cargo publish -p ntag424 --locked
