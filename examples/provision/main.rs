@@ -17,83 +17,14 @@
 use anyhow::{Context as _, Result, bail};
 use ntag424::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
-    FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, Transport,
+    FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, Transport, Uid, Version,
     key_diversification::diversify_ntag424,
     sdm::{SdmUrlOptions, Verifier, sdm_url_config},
 };
-use ntag424_pcsc::CardTransport;
-use pcsc::{Context, Protocols, Scope};
 use rand::{RngExt as _, rngs::StdRng};
+use serde::Serialize;
 
-/// List available PC/SC readers and let the user select one.
-fn get_pcsc_transport() -> Result<CardTransport> {
-    let ctx = Context::establish(Scope::User)
-        .context("failed to establish context, is PC/SC installed and configured correctly?")?;
-    let len = ctx
-        .list_readers_len()
-        .context("failed to get readers buffer size")?;
-    let mut readers_buf = vec![0u8; len];
-    let readers: Vec<_> = ctx
-        .list_readers(&mut readers_buf)
-        .context("failed to list readers")?
-        .collect();
-
-    if readers.is_empty() {
-        bail!("No readers found.");
-    }
-
-    let sel = dialoguer::Select::new()
-        .with_prompt("Select a reader")
-        .items(
-            readers
-                .iter()
-                .map(|r| r.to_string_lossy())
-                .collect::<Vec<_>>(),
-        )
-        .interact()
-        .context("failed to select reader")?;
-
-    let card = ctx
-        .connect(readers[sel], pcsc::ShareMode::Shared, Protocols::ANY)
-        .context("failed to connect to reader")?;
-    Ok(CardTransport { card })
-}
-
-/// Try to authenticate using the factory default keys (all zeros).
-async fn authenticate_using_factory_defaults<T: Transport>(
-    transport: &mut T,
-) -> Result<EncryptedSession>
-where
-    T::Error: Send + Sync + 'static,
-{
-    let mut rng: StdRng = rand::make_rng();
-    // first check if AES authentication with factory default keys works
-    if let Ok(s) = Session::new()
-        .authenticate_aes(transport, ntag424::KeyNumber::Key0, &[0; 16], rng.random())
-        .await
-    {
-        let enable_lrp = dialoguer::Confirm::new()
-            .with_prompt(
-                "AES authentication succeeded. Do you want to enable LRP crypto mode permanently?",
-            )
-            .interact()
-            .context("failed to read input")?;
-        if enable_lrp {
-            s.enable_lrp(transport)
-                .await
-                .context("failed to enable LRP mode")?;
-            // Fall through to authentication using factory defaults with LRP,
-            // which should succeed now that it's enabled.
-        } else {
-            return Ok(s.into());
-        }
-    }
-    Ok(Session::new()
-        .authenticate_lrp(transport, ntag424::KeyNumber::Key0, &[0; 16], rng.random())
-        .await
-        .context("failed to authenticate with factory keys")?
-        .into())
-}
+mod utils;
 
 /// A system identifier is used as additional input to the
 /// key diversification function to derive the session keys
@@ -102,23 +33,15 @@ where
 /// You may leave it empty if you do not need more than one
 /// name space for your keys. If you want to use the same master key
 /// for different applications, you should use a different system identifier
-/// for each application to avoid key collisions.
+/// for each application.
 const SYSTEM_IDENTIFIER: &[u8; 16] = b"provisionexample";
 
-async fn provision<T: Transport>(
-    mut transport: T,
-    master_key: &[u8; 16],
-    picc_key: &[u8; 16],
-) -> Result<Verifier>
+async fn check_tag<T: Transport>(transport: &mut T) -> Result<(Version, Uid)>
 where
     T::Error: Send + Sync + 'static,
 {
-    // WARN: Printing is for demo purposes only,
-    //       never print or log sensitive data such as keys in a real application.
-
-    // Check if this seems to be a NTAG424
     let version = Session::new()
-        .get_version(&mut transport)
+        .get_version(transport)
         .await
         .context("failed to get version")?;
     if version.hw_type() != 0x04 {
@@ -128,43 +51,52 @@ where
         );
     }
     let selected_uid = Session::new()
-        .get_selected_uid(&mut transport)
+        .get_selected_uid(transport)
         .await
         .context("failed to read UID")?;
-    println!("Selected UID: {}", hex(selected_uid.as_ref()));
+    println!("Selected UID: {}", utils::hex(selected_uid.as_ref()));
+    Ok((version, selected_uid))
+}
 
-    // Try to authenticate using the default key (all zeros)
-    let session = authenticate_using_factory_defaults(&mut transport).await?;
-
-    // Check originality
+async fn authenticate_and_verify_originality<T: Transport>(
+    transport: &mut T,
+    selected_uid: &Uid,
+) -> Result<(EncryptedSession, [u8; 7])>
+where
+    T::Error: Send + Sync + 'static,
+{
+    let session = utils::authenticate_using_factory_defaults(transport).await?;
     let (uid, session) = session
-        .get_uid(&mut transport)
+        .get_uid(transport)
         .await
         .context("failed to get UID")?;
     if selected_uid.is_random() {
-        println!("UID: {}", hex(uid.as_ref()));
+        println!("UID: {}", utils::hex(&uid));
     }
     let session = session
-        .verify_originality(&mut transport, &uid)
+        .verify_originality(transport, &uid)
         .await
         .context("originality verification failed")?;
+    Ok((session, uid))
+}
 
-    // Update configuration
+async fn configure_tag<T: Transport>(
+    transport: &mut T,
+    session: EncryptedSession,
+    version: &Version,
+    selected_uid: &Uid,
+) -> Result<(EncryptedSession, bool)>
+where
+    T::Error: Send + Sync + 'static,
+{
     let mut config = Configuration::new();
     if selected_uid.is_random() {
         println!("The tag is in random UID mode.");
-    } else if dialoguer::Confirm::new()
-        .with_prompt("Enable random UID mode permanently?")
-        .interact()
-        .context("failed to read input")?
-    {
+    } else if utils::ask_user_confirm("Enable random UID mode permanently?")? {
         config = config.with_random_uid_enabled();
     }
     let tag_tamper_enabled = if version.has_tag_tamper_support()
-        && dialoguer::Confirm::new()
-            .with_prompt("Enable tag tamper feature permanently?")
-            .interact()
-            .context("failed to read input")?
+        && utils::ask_user_confirm("Enable tag tamper feature permanently?")?
     {
         // chose stricter access permissions if needed
         config = config.with_tag_tamper_enabled(Access::Free);
@@ -173,13 +105,12 @@ where
         false
     };
     let mut session = session
-        .set_configuration(&mut transport, &config)
+        .set_configuration(transport, &config)
         .await
         .context("failed to set configuration")?;
-
     if tag_tamper_enabled {
         let (tt_status, new_session) = session
-            .get_tt_status(&mut transport)
+            .get_tt_status(transport)
             .await
             .context("failed to read tag tamper status")?;
         if tt_status.is_tampered() {
@@ -187,10 +118,22 @@ where
         }
         session = new_session;
     }
+    Ok((session, tag_tamper_enabled))
+}
 
-    // Provision Key1..Key4. Key1 holds the cohort-fixed PICC encryption key
-    // (it must be the same on every tag, so the server can decrypt PICC data
-    // before knowing the UID). Key2..Key4 are per-tag diversified.
+async fn provision_keys<T: Transport>(
+    transport: &mut T,
+    mut session: EncryptedSession,
+    master_key: &[u8; 16],
+    picc_key: &[u8; 16],
+    uid: &[u8; 7],
+) -> Result<EncryptedSession>
+where
+    T::Error: Send + Sync + 'static,
+{
+    // Key1 holds the cohort-fixed PICC encryption key (it must be the same on every tag,
+    // so the server can decrypt PICC data before knowing the UID). Key2..Key4 are per-tag
+    // diversified.
     for key_number in [
         NonMasterKeyNumber::Key1,
         NonMasterKeyNumber::Key2,
@@ -200,34 +143,33 @@ where
         let new_key = if key_number == NonMasterKeyNumber::Key1 {
             *picc_key
         } else {
-            diversify_ntag424(master_key, &uid, key_number.into(), SYSTEM_IDENTIFIER)
+            diversify_ntag424(master_key, uid, key_number.into(), SYSTEM_IDENTIFIER)
         };
-        println!("New key {key_number:?}: {}", hex(&new_key));
-        let new_key_version = 0x01; // free to choose
+        println!("New key {key_number:?}: {}", utils::hex(&new_key));
         let old_key = [0u8; 16]; // factory default key
         session = session
-            .change_key(
-                &mut transport,
-                key_number,
-                &new_key,
-                new_key_version,
-                &old_key,
-            )
+            .change_key(transport, key_number, &new_key, 0x01, &old_key)
             .await
             .context(format!("failed to change key {key_number:?}"))?;
     }
+    Ok(session)
+}
 
-    // Create the SDM / NDEF config
+async fn configure_ndef<T: Transport>(
+    transport: &mut T,
+    mut session: EncryptedSession,
+    master_key: &[u8; 16],
+    tag_tamper_enabled: bool,
+) -> Result<Verifier>
+where
+    T::Error: Send + Sync + 'static,
+{
     let default = if tag_tamper_enabled {
         "[[https://example.com/?id={picc:uid+ctr}&tt=[{tt}]&mac={mac}"
     } else {
         "[[https://example.com/?id={picc:uid+ctr}&mac={mac}"
     };
-    let template = dialoguer::Input::<String>::new()
-        .with_prompt("Enter the NDEF URL template:")
-        .default(default.to_string())
-        .interact()
-        .context("failed to read input")?;
+    let template = utils::ask_user_input("Enter the NDEF URL template:", default)?;
     let sdm_url_config = sdm_url_config(
         &template,
         session.mode(),
@@ -246,17 +188,13 @@ where
     let sdm = sdm_url_config.sdm_settings;
     let verifier =
         Verifier::try_new(&sdm, session.mode()).context("failed to create SDM URL verifier")?;
-
-    // Update the NDEF file content
     session = session
-        .write_file(&mut transport, File::Ndef, 0, &sdm_url_config.ndef_bytes)
+        .write_file(transport, File::Ndef, 0, &sdm_url_config.ndef_bytes)
         .await
         .context("failed to write NDEF file")?;
-
-    // Update the NDEF file settings
     session = session
         .change_file_settings(
-            &mut transport,
+            transport,
             File::Ndef,
             &FileSettingsUpdate::new(
                 // Needed for standard readers
@@ -274,19 +212,41 @@ where
         )
         .await
         .context("failed to update NDEF file settings")?;
-
-    // Update master key, destroys session
-    let new_key_version = 0x01; // free to choose
     session
-        .change_master_key(&mut transport, master_key, new_key_version)
+        .change_master_key(transport, master_key, 0x01)
         .await
         .context("failed to change master key")?;
-
     Ok(verifier)
 }
 
+async fn provision<T: Transport>(
+    mut transport: T,
+    master_key: &[u8; 16],
+    picc_key: &[u8; 16],
+) -> Result<Verifier>
+where
+    T::Error: Send + Sync + 'static,
+{
+    // WARN: Printing is for demo purposes only,
+    //       never print or log sensitive data such as keys in a real application.
+    let (version, selected_uid) = check_tag(&mut transport).await?;
+    let (session, uid) =
+        authenticate_and_verify_originality(&mut transport, &selected_uid).await?;
+    let (session, tag_tamper_enabled) =
+        configure_tag(&mut transport, session, &version, &selected_uid).await?;
+    let session = provision_keys(&mut transport, session, master_key, picc_key, &uid).await?;
+    configure_ndef(&mut transport, session, master_key, tag_tamper_enabled).await
+}
+
+#[derive(Serialize)]
+struct ServerSideData {
+    verifier: Verifier,
+    master_key: [u8; 16],
+    picc_key: [u8; 16],
+}
+
 fn main() -> Result<()> {
-    let transport = get_pcsc_transport()?;
+    let transport = utils::get_pcsc_transport()?;
     let mut rng: StdRng = rand::make_rng();
 
     // WARN: Generate and store these keys securely; this is only a demo.
@@ -294,37 +254,32 @@ fn main() -> Result<()> {
     //       not freshly randomized per run.
     let master_key: [u8; 16] = rng.random();
     let picc_key: [u8; 16] = rng.random();
-    println!("New master key: {}", hex(&master_key));
-    println!("New PICC key:   {}", hex(&picc_key));
+    println!("New master key: {}", utils::hex(&master_key));
+    println!("New PICC key:   {}", utils::hex(&picc_key));
 
-    let verifier = block_on(provision(transport, &master_key, &picc_key))?;
-    // The verifier can be used to verify the URL on the server,
-    // with the 'serde' feature you may serialize and store it.
+    let verifier = utils::block_on(provision(transport, &master_key, &picc_key))?;
 
     println!("Provisioning successful.");
+
+    let server_data = ServerSideData {
+        // NOTE: The verifier information is needed on the server side
+        //       to verify the NDEF URL read from the tag.
+        //
+        // It contains information about the placeholders and keys used for encryption and MAC.
+        // The server must load this information from a trusted source (e.g. a database or vault)
+        // or have it hardcoded.
+        verifier,
+        // WARN: In a real application, you do not print or serialize keys
+        master_key,
+        picc_key,
+    };
+
+    println!(
+        "Paste the following data into the verification example, the NDEF file will be read from the tag.\n"
+    );
+
+    serde_json::to_writer_pretty(std::io::stdout(), &server_data)
+        .context("failed to serialize server-side data")?;
+
     Ok(())
-}
-
-/// A simple executor that runs a future to completion.
-///
-/// This only supports futures that are immediately ready.
-fn block_on<F: Future>(fut: F) -> F::Output {
-    use core::pin::pin;
-    use core::task::{Context, Poll, Waker};
-
-    let mut fut = pin!(fut);
-    let mut cx = Context::from_waker(Waker::noop());
-    match fut.as_mut().poll(&mut cx) {
-        Poll::Ready(out) => out,
-        Poll::Pending => panic!("block_on: future yielded"),
-    }
-}
-
-/// Format bytes as a hex string, e.g. "DE AD BE EF".
-fn hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{b:02X}"))
-        .collect::<Vec<_>>()
-        .join(" ")
 }

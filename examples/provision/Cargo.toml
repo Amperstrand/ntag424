@@ -14,7 +14,10 @@ ntag424 = { workspace = true, features = [
   "key_diversification",
   "sdm",
   "alloc",
+  "serde",
 ] }
 ntag424-pcsc.workspace = true
 pcsc = "2.9"
 rand = "0.10.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
