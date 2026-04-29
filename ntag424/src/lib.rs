@@ -120,7 +120,8 @@
 //!
 //! ### SDM configuration
 //!
-//! SDM is configured via the [`Sdm`](`crate::types::file_settings::Sdm`) struct. It has three main parts:
+//! SDM is configured via the [`Sdm`](`crate::types::file_settings::Sdm`) struct. It stores
+//! information about:
 //!
 //! **Tag identity mirroring ([`PiccData`](`crate::types::file_settings::PiccData`))** — what the
 //! tag writes into the NDEF file on every read, and how:
@@ -146,7 +147,7 @@
 //!   of 32) must lie within the MAC window, and `PiccData` must include both UID and read counter.
 //!
 //! **Tag tamper status** — an optional 2-char ASCII placeholder at a configurable offset,
-//! populated with the tag's tamper loop state (requires tamper-detect hardware).
+//! populated with the tag's tamper loop state (requires tamper-detect version of hardware).
 //!
 //! **Read counter limit** — when a read counter is mirrored, an optional `limit` can be set:
 //! unauthenticated SDM reads are refused once the counter reaches the limit.
@@ -175,91 +176,6 @@
 //!     also configure the file permissions and cryptographic settings in this step.
 //! - Prepare the proprietary file if needed, write an initial content, and configure the file's
 //!   permissions.
-//!
-//!
-//! ## Provisioning example
-//!
-//! The following shows a complete provisioning flow for a fresh NTAG 424 DNA tag:
-//! writing an SDM-enabled NDEF template, enabling SDM through file settings, and
-//! replacing all five application keys with per-tag diversified keys derived from a
-//! backend master key. It requires the `sdm`, `key_diversification`, and `alloc`
-//! features.
-//!
-//! ```no_run
-//! # #[cfg(all(feature = "sdm", feature = "key-diversification", feature = "alloc"))]
-//! # mod example {
-//! use ntag424::{
-//!     AuthenticatedSession, Session, SessionError, Transport,
-//!     File, KeyNumber, NonMasterKeyNumber,
-//!     Access, AccessRights, CommMode, FileSettingsUpdate,
-//!     types::file_settings::CryptoMode,
-//!     key_diversification::diversify_ntag424,
-//! };
-//!
-//! # async fn provision<T: Transport>(
-//! #     transport: &mut T,
-//! #     master_key: &[u8; 16],
-//! #     uid: &[u8; 7],
-//! #     sys_id: &[u8],
-//! #     rnd_a: [u8; 16],
-//! # ) -> Result<(), SessionError<T::Error>> {
-//! // Build the NDEF bytes and matching SDM settings from a URL template.
-//! let (ndef, sdm_settings) = ntag424::sdm_url_config!(
-//!     "https://example.com/?p={picc}&m={mac}",
-//!     CryptoMode::Aes,
-//! );
-//!
-//! // let mut transport = ...; // Obtain a Transport implementation for your NFC reader.
-//!
-//! // Write the NDEF template (factory default allows unauthenticated writes).
-//! let mut session = Session::default();
-//! session
-//!     .write_file_unauthenticated(transport, File::Ndef, 0, ndef)
-//!     .await?;
-//!
-//! // Authenticate with the factory default master key (all zeros).
-//! // let rnd_a: [u8; 16] = ...; // In real code, fill this from a cryptographically secure RNG.
-//! let session = session
-//!     .authenticate_aes(transport, KeyNumber::Key0, &[0u8; 16], rnd_a)
-//!     .await?;
-//!
-//! // Lock down the NDEF file and enable SDM.
-//! // `ChangeFileSettings` overwrites all mutable file settings, so when you
-//! // are modifying an existing file it is safest to read the current settings
-//! // first and start from `into_update()`.
-//! let (settings, session) = session.get_file_settings(transport, File::Ndef).await?;
-//! let settings = settings.into_update().with_sdm(*sdm_settings);
-//! let session = session
-//!     .change_file_settings(transport, File::Ndef, &settings)
-//!     .await?;
-//!
-//! // Derive a unique key for each application key slot from the master key and UID.
-//! let key0 = diversify_ntag424(master_key, uid, KeyNumber::Key0, sys_id);
-//! let key1 = diversify_ntag424(master_key, uid, KeyNumber::Key1, sys_id);
-//! let key2 = diversify_ntag424(master_key, uid, KeyNumber::Key2, sys_id);
-//! let key3 = diversify_ntag424(master_key, uid, KeyNumber::Key3, sys_id);
-//! let key4 = diversify_ntag424(master_key, uid, KeyNumber::Key4, sys_id);
-//!
-//! // Replace non-master keys first (old key = factory default all zeros).
-//! let session = session
-//!     .change_key(transport, NonMasterKeyNumber::Key1, &key1, 1, &[0u8; 16])
-//!     .await?;
-//! let session = session
-//!     .change_key(transport, NonMasterKeyNumber::Key2, &key2, 1, &[0u8; 16])
-//!     .await?;
-//! let session = session
-//!     .change_key(transport, NonMasterKeyNumber::Key3, &key3, 1, &[0u8; 16])
-//!     .await?;
-//! let session = session
-//!     .change_key(transport, NonMasterKeyNumber::Key4, &key4, 1, &[0u8; 16])
-//!     .await?;
-//!
-//! // Replace the master key last — this invalidates the current session.
-//! session.change_master_key(transport, &key0, 1).await?;
-//! # Ok(())
-//! # }
-//! # } // end cfg mod
-//! ```
 //!
 //! For a complete, runnable provisioning tool using a real PC/SC transport,
 //! see `examples/provision/` in the repository. `examples/verification/` is
