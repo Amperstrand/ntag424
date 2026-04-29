@@ -11,7 +11,7 @@ pub mod suite;
 
 use subtle::ConstantTimeEq;
 
-#[cfg(feature = "key_diversification")]
+#[cfg(feature = "key-diversification")]
 pub mod key_diversification;
 
 /// Constant-time 8-byte equality for truncated MACs.

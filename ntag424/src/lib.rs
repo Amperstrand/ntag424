@@ -186,7 +186,7 @@
 //! features.
 //!
 //! ```no_run
-//! # #[cfg(all(feature = "sdm", feature = "key_diversification", feature = "alloc"))]
+//! # #[cfg(all(feature = "sdm", feature = "key-diversification", feature = "alloc"))]
 //! # mod example {
 //! use ntag424::{
 //!     AuthenticatedSession, Session, SessionError, Transport,
@@ -324,7 +324,7 @@ pub mod types;
 #[cfg(feature = "sdm")]
 mod sdm_url;
 
-#[cfg(feature = "key_diversification")]
+#[cfg(feature = "key-diversification")]
 pub mod key_diversification {
     //! AES-128 key diversification per AN10922 §2.2.
     //!
