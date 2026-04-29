@@ -128,6 +128,25 @@ pub struct SdmUrlConfig {
     /// url_char_index = ndef_byte_offset - offset + prefix_len
     /// ```
     pub prefix_len: usize,
+    /// NFC Forum URI Record prefix code stored at `ndef_bytes[offset - 1]`.
+    ///
+    /// `0x00` means the URL had no recognized prefix and is stored verbatim.
+    /// See the table in [`sdm_url_config`] for the full code-to-prefix mapping.
+    pub prefix_code: u8,
+}
+
+impl SdmUrlConfig {
+    /// Returns the URI prefix string corresponding to `prefix_code`, if any.
+    pub fn prefix(&self) -> Option<&'static str> {
+        if self.prefix_code == 0 {
+            return Some("");
+        }
+        NDEF_URI_PREFIXES
+            .iter()
+            .find(|(code, _)| *code == self.prefix_code)
+            .map(|(_, prefix)| *prefix)
+            .and_then(|b| core::str::from_utf8(b).ok())
+    }
 }
 
 /// Fixed-capacity byte buffer returned by the hidden const SDM URL builder.
@@ -203,6 +222,7 @@ pub struct ConstSdmNdefPlan<const N: usize> {
     pub ndef_bytes: ConstNdefBytes<N>,
     pub sdm_settings: Sdm,
     pub prefix_len: usize,
+    pub prefix_code: u8,
 }
 
 #[doc(hidden)]
@@ -394,6 +414,7 @@ pub fn sdm_url_config(
             sdm_settings: plan.sdm_settings,
             offset: URI_AT as usize,
             prefix_len: plan.prefix_len,
+            prefix_code: plan.prefix_code,
         }),
         Err(err) => Err(map_runtime_error(url, err)),
     }
@@ -580,6 +601,7 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
         ndef_bytes,
         sdm_settings,
         prefix_len: abbrev_start,
+        prefix_code,
     })
 }
 
@@ -877,9 +899,13 @@ const NDEF_URI_PREFIXES: &[(u8, &[u8])] = &[
     (0x23, b"urn:nfc:".as_slice()),
 ];
 
-/// Parse NDEF bytes from the tag back into a full URL string.
 #[cfg(feature = "alloc")]
-pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<String> {
+type UriString = alloc::string::String;
+#[cfg(not(feature = "alloc"))]
+type UriString = arrayvec::ArrayString<256>;
+
+/// Parse NDEF bytes from the tag back into a full URL string.
+pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<impl AsRef<str>> {
     if ndef_bytes.len() < 7
         || ndef_bytes[2] != 0xD1
         || ndef_bytes[3] != 0x01
@@ -908,7 +934,16 @@ pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<String> {
         return None;
     }
 
-    let mut url = String::with_capacity(prefix.len() + payload_len as usize - 1);
+    let mut url = {
+        #[cfg(feature = "alloc")]
+        {
+            UriString::with_capacity(prefix.len() + payload_len as usize - 1)
+        }
+        #[cfg(not(feature = "alloc"))]
+        {
+            UriString::new()
+        }
+    };
     url.push_str(core::str::from_utf8(prefix).ok()?);
     url.push_str(core::str::from_utf8(&ndef_bytes[7..]).ok()?);
     Some(url)
@@ -1482,26 +1517,32 @@ mod tests {
     #[test]
     fn parse_ndef_uri_no_prefix() {
         let bytes = make_ndef_uri(0x00, b"example.com");
-        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "example.com");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap().as_ref(), "example.com");
     }
 
     #[test]
     fn parse_ndef_uri_https_prefix() {
         let bytes = make_ndef_uri(0x04, b"example.com/path");
-        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://example.com/path");
+        assert_eq!(
+            parse_ndef_uri(&bytes).unwrap().as_ref(),
+            "https://example.com/path"
+        );
     }
 
     #[test]
     fn parse_ndef_uri_https_www_prefix() {
         let bytes = make_ndef_uri(0x02, b"example.com");
-        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://www.example.com");
+        assert_eq!(
+            parse_ndef_uri(&bytes).unwrap().as_ref(),
+            "https://www.example.com"
+        );
     }
 
     #[test]
     fn parse_ndef_uri_empty_content() {
         // payload_len = 1 (prefix code only), no URI content
         let bytes = make_ndef_uri(0x04, b"");
-        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap().as_ref(), "https://");
     }
 
     #[test]
@@ -1567,7 +1608,7 @@ mod tests {
         )
         .unwrap();
         let url = parse_ndef_uri(&plan.ndef_bytes).unwrap();
-        assert!(url.starts_with("https://example.com/?p="));
-        assert!(url.contains("&m="));
+        assert!(url.as_ref().starts_with("https://example.com/?p="));
+        assert!(url.as_ref().contains("&m="));
     }
 }
