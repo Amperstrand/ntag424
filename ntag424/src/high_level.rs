@@ -137,23 +137,27 @@ pub async fn provision<T: Transport>(
     master_key: &[u8; 16],
     rng: &mut impl CryptoRng,
 ) -> Result<TagInformation, HighLevelError<T::Error, Infallible>> {
-    // Key1 holds the cohort-fixed PICC encryption key (it must be the same on every tag,
-    // so the server can decrypt PICC data before knowing the UID). Key2..Key4 are per-tag
-    // diversified.
     let key_fn = |uid| {
-        let key1 = picc_key(master_key);
-        let new_master_key =
-            diversify_ntag424(master_key, &uid, KeyNumber::Key0, SYSTEM_IDENTIFIER);
-        let new_keys = [
-            new_master_key,
-            key1,
-            diversify_ntag424(master_key, &uid, KeyNumber::Key2, SYSTEM_IDENTIFIER),
-            diversify_ntag424(master_key, &uid, KeyNumber::Key3, SYSTEM_IDENTIFIER),
-            diversify_ntag424(master_key, &uid, KeyNumber::Key4, SYSTEM_IDENTIFIER),
-        ];
+        let new_keys = derive_keys_for_uid(master_key, &uid);
         core::future::ready(Ok(new_keys))
     };
     provision_with_fn(transport, url, key_fn, rng).await
+}
+
+/// Derives the five AES keys for a tag from the master key and UID.
+pub fn derive_keys_for_uid(master_key: &[u8; 16], uid: &[u8; 7]) -> [[u8; 16]; 5] {
+    // Key1 holds the cohort-fixed PICC encryption key (it must be the same on every tag,
+    // so the server can decrypt PICC data before knowing the UID). Key2..Key4 are per-tag
+    // diversified.
+    let key1 = picc_key(master_key);
+    let new_master_key = diversify_ntag424(master_key, uid, KeyNumber::Key0, SYSTEM_IDENTIFIER);
+    [
+        new_master_key,
+        key1,
+        diversify_ntag424(master_key, uid, KeyNumber::Key2, SYSTEM_IDENTIFIER),
+        diversify_ntag424(master_key, uid, KeyNumber::Key3, SYSTEM_IDENTIFIER),
+        diversify_ntag424(master_key, uid, KeyNumber::Key4, SYSTEM_IDENTIFIER),
+    ]
 }
 
 /// Variant of `provision` that takes pre-derived keys directly, skipping the key diversification step.
