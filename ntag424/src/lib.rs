@@ -110,10 +110,10 @@
 //! SDMReadCtr || RandomPadding)` (16 bytes, mirrored as 32 ASCII hex chars),
 //! and `m=` is the truncated CMAC under the session MAC key derived from
 //! `(UID, SDMReadCtr)`. By default the [`sdm_url_config!`] macro makes the
-//! MAC window start at the first `/`, `?`, or `#` in the URI body and end
-//! just before the `{mac}` placeholder — for this template that is the 39
-//! bytes `/?p=<32-hex-PICCData>&m=`; use `[[` in the template to move the
-//! start elsewhere (see [`MacWindow`](`crate::types::file_settings::MacWindow`)).
+//! MAC window start at the beginning of the abbreviated URI body and end
+//! just before the `{mac}` placeholder — for this template that is the 50
+//! bytes `example.com/?p=<32-hex-PICCData>&m=`; use `[[` in the template to
+//! move the start elsewhere (see [`MacWindow`](`crate::types::file_settings::MacWindow`)).
 //! A server decrypts `p=`, re-derives the session key, and verifies the
 //! CMAC; see [`sdm::Verifier`].
 //!

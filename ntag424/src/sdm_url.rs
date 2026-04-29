@@ -109,6 +109,25 @@ pub struct SdmUrlConfig {
     pub ndef_bytes: Vec<u8>,
     /// Settings to be applied with [`AuthenticatedSession::change_file_settings`](`crate::AuthenticatedSession::change_file_settings`).
     pub sdm_settings: Sdm,
+    /// Byte offset within `ndef_bytes` at which the abbreviated URI body starts.
+    ///
+    /// Always `7`: two-byte NLEN field, 0xD1 record header, 0x01 type length,
+    /// one-byte payload length, 0x55 URI record type, one-byte URI prefix code.
+    /// The prefix code byte itself sits at `ndef_bytes[offset - 1]`.
+    pub offset: usize,
+    /// Number of bytes stripped from the beginning of the input URL and encoded
+    /// as the single URI prefix code byte at `ndef_bytes[offset - 1]`.
+    ///
+    /// For example, `8` for `https://`, `0` if the URL had no recognized prefix.
+    ///
+    /// Use together with [`offset`](`SdmUrlConfig::offset`) to convert an NDEF
+    /// byte offset (as found in [`sdm_settings`](`SdmUrlConfig::sdm_settings`))
+    /// to a character index in the original URL:
+    ///
+    /// ```text
+    /// url_char_index = ndef_byte_offset - offset + prefix_len
+    /// ```
+    pub prefix_len: usize,
 }
 
 /// Fixed-capacity byte buffer returned by the hidden const SDM URL builder.
@@ -183,6 +202,7 @@ impl<const N: usize> ConstNdefBytes<N> {
 pub struct ConstSdmNdefPlan<const N: usize> {
     pub ndef_bytes: ConstNdefBytes<N>,
     pub sdm_settings: Sdm,
+    pub prefix_len: usize,
 }
 
 #[doc(hidden)]
@@ -271,14 +291,76 @@ struct ParsedTemplate<const N: usize> {
 /// # Range annotations
 ///
 /// - `[[` marks the explicit MAC start. The MAC still ends at `{mac}`. If
-///   omitted, the MAC window starts at the first unescaped `/`, `?`, or `#` in
-///   the abbreviated URI body, or at the end of the body if none exists.
+///   omitted, the MAC window starts at the beginning of the abbreviated URI
+///   body (the part after the NDEF URI prefix code).
 /// - `[...]` reserves an encrypted file data window. The bracket contents are used
 ///   only to define the resulting ASCII length, and are rendered as `'0'`
 ///   bytes in the initial NDEF file. `{uid}`, `{ctr}`, `{picc...}`, and
 ///   `{mac}` are rejected inside this range; `{tt}` is allowed.
 ///
 /// Escape reserved syntax with backslash, e.g. `\{`, `\[`, `\]`, `\\`.
+///
+/// # URI prefix recognition
+///
+/// The following URL prefixes are recognized and compressed to a single code
+/// byte in the NDEF file (NFC Forum URI Record Type Definition §3.2.2 Table 3).
+/// Prefixes with a shared root (e.g. `https://www.` vs `https://`) are checked
+/// longest-match first. If no prefix matches, the URL is stored verbatim with
+/// code 0x00 and [`SdmUrlConfig::prefix_len`] is `0`.
+///
+/// | Prefix                       | Code |
+/// |------------------------------|------|
+/// | `http://www.`                | 0x01 |
+/// | `https://www.`               | 0x02 |
+/// | `http://`                    | 0x03 |
+/// | `https://`                   | 0x04 |
+/// | `tel:`                       | 0x05 |
+/// | `mailto:`                    | 0x06 |
+/// | `ftp://anonymous:anonymous@` | 0x07 |
+/// | `ftp://ftp.`                 | 0x08 |
+/// | `ftps://`                    | 0x09 |
+/// | `sftp://`                    | 0x0A |
+/// | `smb://`                     | 0x0B |
+/// | `nfs://`                     | 0x0C |
+/// | `ftp://`                     | 0x0D |
+/// | `dav://`                     | 0x0E |
+/// | `news:`                      | 0x0F |
+/// | `telnet://`                  | 0x10 |
+/// | `imap:`                      | 0x11 |
+/// | `rtsp://`                    | 0x12 |
+/// | `urn:`                       | 0x13 |
+/// | `pop:`                       | 0x14 |
+/// | `sip:`                       | 0x15 |
+/// | `sips:`                      | 0x16 |
+/// | `tftp:`                      | 0x17 |
+/// | `btspp://`                   | 0x18 |
+/// | `btl2cap://`                 | 0x19 |
+/// | `btgoep://`                  | 0x1A |
+/// | `tcpobex://`                 | 0x1B |
+/// | `irdaobex://`                | 0x1C |
+/// | `file://`                    | 0x1D |
+/// | `urn:epc:id:`                | 0x1E |
+/// | `urn:epc:tag:`               | 0x1F |
+/// | `urn:epc:pat:`               | 0x20 |
+/// | `urn:epc:raw:`               | 0x21 |
+/// | `urn:epc:`                   | 0x22 |
+/// | `urn:nfc:`                   | 0x23 |
+///
+/// ## Consequences for server-side verification
+///
+/// SDM offsets in [`SdmUrlConfig::sdm_settings`] are absolute byte positions
+/// within [`SdmUrlConfig::ndef_bytes`]. An NFC reader reconstructs the full URL
+/// by prepending the prefix string to the abbreviated body before following it.
+/// On the server, which receives the full URL, use this formula to convert an
+/// NDEF byte offset to a URL character index:
+///
+/// ```text
+/// url_char_index = ndef_byte_offset - offset + prefix_len
+/// ```
+///
+/// where [`offset`](`SdmUrlConfig::offset`) is always `7`. For example, with
+/// `prefix_len = 8` (`https://`) and an NDEF MAC offset of `57`:
+/// `url_char_index = 57 - 7 + 8 = 58`.
 ///
 /// # Example
 ///
@@ -310,6 +392,8 @@ pub fn sdm_url_config(
         Ok(plan) => Ok(SdmUrlConfig {
             ndef_bytes: plan.ndef_bytes.as_slice().to_vec(),
             sdm_settings: plan.sdm_settings,
+            offset: URI_AT as usize,
+            prefix_len: plan.prefix_len,
         }),
         Err(err) => Err(map_runtime_error(url, err)),
     }
@@ -495,6 +579,7 @@ const fn build_sdm_ndef_plan_core<const N: usize>(
     Ok(ConstSdmNdefPlan {
         ndef_bytes,
         sdm_settings,
+        prefix_len: abbrev_start,
     })
 }
 
@@ -509,7 +594,6 @@ const fn parse_template<const N: usize>(
     let mut picc = None;
     let mut tt_offset = None;
     let mut mac_offset = None;
-    let mut path_boundary = None;
     let mut saw_mac_start = false;
     let mut mac_start = None;
     let mut in_enc_range = false;
@@ -607,10 +691,6 @@ const fn parse_template<const N: usize>(
                 Ok(width) => width,
                 Err(err) => return Err(err),
             };
-            let escaped = url[i + 1];
-            if path_boundary.is_none() && (escaped == b'/' || escaped == b'?' || escaped == b'#') {
-                path_boundary = Some(current_file_offset_len(uri_content.len()));
-            }
             match uri_content.extend_bytes(url, i + 1, width) {
                 Ok(()) => {}
                 Err(err) => return Err(err),
@@ -665,9 +745,6 @@ const fn parse_template<const N: usize>(
         }
 
         let width = utf8_char_width(b);
-        if path_boundary.is_none() && (b == b'/' || b == b'?' || b == b'#') {
-            path_boundary = Some(current_file_offset_len(uri_content.len()));
-        }
         match uri_content.extend_bytes(url, i, width) {
             Ok(()) => {}
             Err(err) => return Err(err),
@@ -720,13 +797,9 @@ const fn parse_template<const N: usize>(
         None
     };
 
-    let default_mac_input = match path_boundary {
-        Some(boundary) => boundary,
-        None => current_file_offset_len(uri_content.len()),
-    };
     let mac_input = match mac_start {
         Some(start) => start,
-        None => default_mac_input,
+        None => URI_AT,
     };
     if mac_input > mac_offset {
         return Err(TemplateCoreError::MacStartAfterMac);
@@ -767,17 +840,49 @@ const fn picc_content_includes_ctr(content: PiccContent) -> bool {
 }
 
 const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
-    if bytes_eq_at(url, 0, b"https://www.") {
-        (0x02, 12)
-    } else if bytes_eq_at(url, 0, b"http://www.") {
-        (0x01, 11)
-    } else if bytes_eq_at(url, 0, b"https://") {
-        (0x04, 8)
-    } else if bytes_eq_at(url, 0, b"http://") {
-        (0x03, 7)
-    } else {
-        (0x00, 0)
+    macro_rules! prefix {
+        ($code:expr, $prefix:expr) => {
+            if bytes_eq_at(url, 0, $prefix) {
+                return ($code, $prefix.len());
+            }
+        };
     }
+    prefix!(0x01, b"http://www.");
+    prefix!(0x02, b"https://www.");
+    prefix!(0x03, b"http://");
+    prefix!(0x04, b"https://");
+    prefix!(0x05, b"tel:");
+    prefix!(0x06, b"mailto:");
+    prefix!(0x07, b"ftp://anonymous:anonymous@");
+    prefix!(0x08, b"ftp://ftp.");
+    prefix!(0x09, b"ftps://");
+    prefix!(0x0A, b"sftp://");
+    prefix!(0x0B, b"smb://");
+    prefix!(0x0C, b"nfs://");
+    prefix!(0x0D, b"ftp://");
+    prefix!(0x0E, b"dav://");
+    prefix!(0x0F, b"news:");
+    prefix!(0x10, b"telnet://");
+    prefix!(0x11, b"imap:");
+    prefix!(0x12, b"rtsp://");
+    prefix!(0x13, b"urn:");
+    prefix!(0x14, b"pop:");
+    prefix!(0x15, b"sip:");
+    prefix!(0x16, b"sips:");
+    prefix!(0x17, b"tftp:");
+    prefix!(0x18, b"btspp://");
+    prefix!(0x19, b"btl2cap://");
+    prefix!(0x1A, b"btgoep://");
+    prefix!(0x1B, b"tcpobex://");
+    prefix!(0x1C, b"irdaobex://");
+    prefix!(0x1D, b"file://");
+    prefix!(0x1E, b"urn:epc:id:");
+    prefix!(0x1F, b"urn:epc:tag:");
+    prefix!(0x20, b"urn:epc:pat:");
+    prefix!(0x21, b"urn:epc:raw:");
+    prefix!(0x22, b"urn:epc:");
+    prefix!(0x23, b"urn:nfc:");
+    (0x00, 0)
 }
 
 const fn bytes_eq_at(haystack: &[u8], start: usize, needle: &[u8]) -> bool {
@@ -1006,7 +1111,7 @@ mod tests {
         );
         let fr = file_read(&plan);
         assert_eq!(fr.key(), KeyNumber::Key0);
-        assert_eq!(fr.window().input.get(), URI_AT + 11);
+        assert_eq!(fr.window().input.get(), URI_AT);
         assert_eq!(fr.window().mac.get(), URI_AT + 24 + 26);
         assert!(fr.enc().is_none());
         assert_eq!(plan.sdm_settings.tamper_status(), None);
@@ -1078,7 +1183,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(file_read(&plan).window().input.get(), URI_AT + 11);
+        assert_eq!(file_read(&plan).window().input.get(), URI_AT);
     }
 
     #[test]
