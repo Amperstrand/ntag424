@@ -1,18 +1,14 @@
-//! This module contains a high level, opinionated API
-//! for provisioning and using the NTAG 424 DNA.
-
 use core::fmt::Debug;
 use core::{convert::Infallible, error::Error};
 
-use alloc::{borrow::ToOwned, string::String, vec::Vec};
+use alloc::borrow::ToOwned;
 use rand::CryptoRng;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
+use super::{TagInformation, picc_key};
 use crate::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
     FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, SessionError, Transport, Version,
-    key_diversification::{diversify_aes128, diversify_ntag424},
+    key_diversification::diversify_ntag424,
     sdm::{SdmUrlOptions, Verifier, sdm_url_config},
     types::file_settings::CryptoMode,
 };
@@ -20,7 +16,7 @@ use crate::{
 const SYSTEM_IDENTIFIER: &[u8] = b"NTAG424DNA";
 
 #[derive(Debug, thiserror::Error)]
-pub enum HighLevelError<E: Error + Debug, K: Error + Debug> {
+pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
     #[error("PICC data does not contain a UID")]
     NoUid,
     #[error("verification error: {0}")]
@@ -39,15 +35,6 @@ pub enum HighLevelError<E: Error + Debug, K: Error + Debug> {
     NoUidMirroring,
     #[error("key generation failed: {0}")]
     KeyGenerationError(K),
-}
-
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct TagInformation {
-    pub uid: [u8; 7],
-    pub verifier: Verifier,
-    prefix: Option<String>,
-    system_identifier: Vec<u8>,
 }
 
 /// Provisions a new NTAG 424 DNA tag with the given master key and URL.
@@ -136,7 +123,7 @@ pub async fn provision<T: Transport>(
     url: &str,
     master_key: &[u8; 16],
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, HighLevelError<T::Error, Infallible>> {
+) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
     let key_fn = |uid| {
         let new_keys = derive_keys_for_uid(master_key, &uid);
         core::future::ready(Ok(new_keys))
@@ -169,17 +156,21 @@ pub async fn provision_with_keys<T: Transport>(
     url: &str,
     keys: &[[u8; 16]; 5],
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, HighLevelError<T::Error, Infallible>> {
+) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
     provision_with_fn(transport, url, |_| core::future::ready(Ok(*keys)), rng).await
 }
 
 /// Core provisioning function that takes a user-supplied async function to derive the new keys from the UID.
+///
+/// Generalized version of [`provision`](`provision`). The keys are not
+/// derived internally; instead, the caller provides an async function `keys` that takes the UID
+/// and returns the new keys.
 pub async fn provision_with_fn<T: Transport, F, Fut, K>(
     transport: &mut T,
     url: &str,
     keys: F,
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, HighLevelError<T::Error, K>>
+) -> Result<TagInformation, ProvisioningError<T::Error, K>>
 where
     K: Error + Debug,
     F: FnOnce([u8; 7]) -> Fut,
@@ -193,7 +184,7 @@ where
     };
     let sdm_conf = sdm_url_config(url, CryptoMode::Lrp, opts)?;
     if !sdm_conf.mirrors_uid() {
-        return Err(HighLevelError::NoUidMirroring);
+        return Err(ProvisioningError::NoUidMirroring);
     }
     let prefix = sdm_conf.prefix();
 
@@ -202,14 +193,14 @@ where
     let (uid, session) = verify_originality(transport, session).await?;
     let new_keys = keys(uid)
         .await
-        .map_err(HighLevelError::KeyGenerationError)?;
+        .map_err(ProvisioningError::KeyGenerationError)?;
 
     let session = configure(transport, session, &version).await?;
     let verifier = Verifier::try_new(&sdm_conf.sdm_settings, session.mode())?
         // Shift all NDEF byte offsets so the verifier operates on the full URL string
         // (prefix prepended) rather than raw NDEF bytes.
         .with_offset(sdm_conf.prefix_len as i32 - sdm_conf.offset as i32)
-        .ok_or_else(|| HighLevelError::Offset)?;
+        .ok_or_else(|| ProvisioningError::Offset)?;
     let session = configure_ndef(transport, session, sdm_conf).await?;
 
     // Update keys
@@ -285,7 +276,7 @@ async fn configure<T: Transport, K: Error + Debug>(
     transport: &mut T,
     session: EncryptedSession,
     version: &Version,
-) -> Result<EncryptedSession, HighLevelError<T::Error, K>> {
+) -> Result<EncryptedSession, ProvisioningError<T::Error, K>> {
     let mut config = Configuration::new().with_random_uid_enabled();
     let tag_tamper_enabled = if version.has_tag_tamper_support() {
         // Free access lets the tag mirror tamper status into the SDM URL without
@@ -301,7 +292,7 @@ async fn configure<T: Transport, K: Error + Debug>(
     if tag_tamper_enabled {
         let (tt_status, new_session) = session.get_tt_status(transport).await?;
         if tt_status.is_tampered() {
-            return Err(HighLevelError::Tampered);
+            return Err(ProvisioningError::Tampered);
         }
         session = new_session;
     }
@@ -318,10 +309,10 @@ async fn verify_originality<T: Transport>(
 
 async fn check_version<T: Transport, K: Error + Debug>(
     transport: &mut T,
-) -> Result<Version, HighLevelError<T::Error, K>> {
+) -> Result<Version, ProvisioningError<T::Error, K>> {
     let version = Session::new().get_version(transport).await?;
     if version.hw_type() != 0x04 {
-        return Err(HighLevelError::VersionMismatch {
+        return Err(ProvisioningError::VersionMismatch {
             hw_type: version.hw_type(),
         });
     }
@@ -351,13 +342,4 @@ async fn authenticate_using_factory_defaults<T: Transport>(
         .authenticate_lrp(transport, KeyNumber::Key0, &[0; 16], rng.random())
         .await
         .map(EncryptedSession::from)
-}
-
-/// Derives the cohort-fixed PICC encryption key (SDMMetaRead, Key 1).
-///
-/// Domain-separated from [`diversify_ntag424`] outputs: `b"PICC"` begins with byte
-/// `0x50`, whereas `diversify_ntag424` inputs always start with a key-number byte in
-/// `0x00..=0x04`, so the two derivation paths can never collide.
-fn picc_key(master: &[u8; 16]) -> [u8; 16] {
-    diversify_aes128(master, b"PICC")
 }
