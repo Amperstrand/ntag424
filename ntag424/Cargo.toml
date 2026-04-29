@@ -14,7 +14,7 @@ rust-version = "1.88.0"
 [features]
 default = ["alloc"]
 alloc = []
-key_diversification = []
+key-diversification = []
 sdm = []
 serde = ["dep:serde"]
 
