@@ -12,10 +12,11 @@ edition = "2024"
 rust-version = "1.88.0"
 
 [features]
-default = ["alloc"]
+default = ["high-level-api"]
 alloc = ["serde/alloc"]
 key-diversification = []
 sdm = []
+high-level-api = ["dep:rand", "key-diversification", "sdm", "alloc"]
 serde = ["dep:serde"]
 
 [dependencies]
@@ -28,6 +29,7 @@ cmac = "0.8.0"
 p224 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
 subtle = { version = "2", default-features = false }
 thiserror = { version = "2.0.18", default-features = false }
+rand = { version = "0.10.1", optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true

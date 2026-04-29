@@ -147,6 +147,39 @@ impl SdmUrlConfig {
             .map(|(_, prefix)| *prefix)
             .and_then(|b| core::str::from_utf8(b).ok())
     }
+
+    /// Returns `true` if the configuration includes a mirror of the PICC UID.
+    ///
+    /// This is true if the template includes `{picc:uid}`, `{picc:uid+ctr}`/`{picc}`,
+    /// or a plain `{uid}` mirror, and false otherwise.
+    pub fn mirrors_uid(&self) -> bool {
+        matches!(
+            self.sdm_settings.picc_data(),
+            PiccData::Plain(PlainMirror::Uid { .. })
+                | PiccData::Plain(PlainMirror::Both { .. })
+                | PiccData::Encrypted {
+                    content: EncryptedContent::Uid,
+                    ..
+                }
+                | PiccData::Encrypted {
+                    content: EncryptedContent::Both(_),
+                    ..
+                }
+        )
+    }
+
+    /// Returns `true` if the configuration includes a mirror of the SDM read counter.
+    pub fn mirrors_ctr(&self) -> bool {
+        matches!(
+            self.sdm_settings.picc_data(),
+            PiccData::Plain(PlainMirror::RCtr { .. })
+                | PiccData::Plain(PlainMirror::Both { .. })
+                | PiccData::Encrypted {
+                    content: EncryptedContent::RCtr(_) | EncryptedContent::Both(_),
+                    ..
+                }
+        )
+    }
 }
 
 /// Fixed-capacity byte buffer returned by the hidden const SDM URL builder.

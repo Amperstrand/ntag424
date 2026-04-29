@@ -315,6 +315,8 @@ extern crate alloc;
 
 mod commands;
 mod crypto;
+#[cfg(feature = "high-level-api")]
+pub mod high_level;
 mod session;
 #[cfg(test)]
 mod testing;
