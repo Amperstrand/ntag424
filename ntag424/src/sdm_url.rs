@@ -839,49 +839,90 @@ const fn picc_content_includes_ctr(content: PiccContent) -> bool {
     matches!(content, PiccContent::Ctr | PiccContent::Both)
 }
 
-const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
-    macro_rules! prefix {
-        ($code:expr, $prefix:expr) => {
-            if bytes_eq_at(url, 0, $prefix) {
-                return ($code, $prefix.len());
-            }
-        };
+const NDEF_URI_PREFIXES: &[(u8, &[u8])] = &[
+    (0x01, b"http://www.".as_slice()),
+    (0x02, b"https://www.".as_slice()),
+    (0x03, b"http://".as_slice()),
+    (0x04, b"https://".as_slice()),
+    (0x05, b"tel:".as_slice()),
+    (0x06, b"mailto:".as_slice()),
+    (0x07, b"ftp://anonymous:anonymous@".as_slice()),
+    (0x08, b"ftp://ftp.".as_slice()),
+    (0x09, b"ftps://".as_slice()),
+    (0x0A, b"sftp://".as_slice()),
+    (0x0B, b"smb://".as_slice()),
+    (0x0C, b"nfs://".as_slice()),
+    (0x0D, b"ftp://".as_slice()),
+    (0x0E, b"dav://".as_slice()),
+    (0x0F, b"news:".as_slice()),
+    (0x10, b"telnet://".as_slice()),
+    (0x11, b"imap:".as_slice()),
+    (0x12, b"rtsp://".as_slice()),
+    (0x13, b"urn:".as_slice()),
+    (0x14, b"pop:".as_slice()),
+    (0x15, b"sip:".as_slice()),
+    (0x16, b"sips:".as_slice()),
+    (0x17, b"tftp:".as_slice()),
+    (0x18, b"btspp://".as_slice()),
+    (0x19, b"btl2cap://".as_slice()),
+    (0x1A, b"btgoep://".as_slice()),
+    (0x1B, b"tcpobex://".as_slice()),
+    (0x1C, b"irdaobex://".as_slice()),
+    (0x1D, b"file://".as_slice()),
+    (0x1E, b"urn:epc:id:".as_slice()),
+    (0x1F, b"urn:epc:tag:".as_slice()),
+    (0x20, b"urn:epc:pat:".as_slice()),
+    (0x21, b"urn:epc:raw:".as_slice()),
+    (0x22, b"urn:epc:".as_slice()),
+    (0x23, b"urn:nfc:".as_slice()),
+];
+
+/// Parse NDEF bytes from the tag back into a full URL string.
+#[cfg(feature = "alloc")]
+pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<String> {
+    if ndef_bytes.len() < 7
+        || ndef_bytes[2] != 0xD1
+        || ndef_bytes[3] != 0x01
+        || ndef_bytes[5] != 0x55
+    {
+        return None;
     }
-    prefix!(0x01, b"http://www.");
-    prefix!(0x02, b"https://www.");
-    prefix!(0x03, b"http://");
-    prefix!(0x04, b"https://");
-    prefix!(0x05, b"tel:");
-    prefix!(0x06, b"mailto:");
-    prefix!(0x07, b"ftp://anonymous:anonymous@");
-    prefix!(0x08, b"ftp://ftp.");
-    prefix!(0x09, b"ftps://");
-    prefix!(0x0A, b"sftp://");
-    prefix!(0x0B, b"smb://");
-    prefix!(0x0C, b"nfs://");
-    prefix!(0x0D, b"ftp://");
-    prefix!(0x0E, b"dav://");
-    prefix!(0x0F, b"news:");
-    prefix!(0x10, b"telnet://");
-    prefix!(0x11, b"imap:");
-    prefix!(0x12, b"rtsp://");
-    prefix!(0x13, b"urn:");
-    prefix!(0x14, b"pop:");
-    prefix!(0x15, b"sip:");
-    prefix!(0x16, b"sips:");
-    prefix!(0x17, b"tftp:");
-    prefix!(0x18, b"btspp://");
-    prefix!(0x19, b"btl2cap://");
-    prefix!(0x1A, b"btgoep://");
-    prefix!(0x1B, b"tcpobex://");
-    prefix!(0x1C, b"irdaobex://");
-    prefix!(0x1D, b"file://");
-    prefix!(0x1E, b"urn:epc:id:");
-    prefix!(0x1F, b"urn:epc:tag:");
-    prefix!(0x20, b"urn:epc:pat:");
-    prefix!(0x21, b"urn:epc:raw:");
-    prefix!(0x22, b"urn:epc:");
-    prefix!(0x23, b"urn:nfc:");
+    let size = ((ndef_bytes[0] as usize) << 8) | (ndef_bytes[1] as usize);
+    if size + 2 != ndef_bytes.len() {
+        return None;
+    }
+    let payload_len = ndef_bytes[4];
+    let prefix_code = ndef_bytes[6];
+    let prefix = if prefix_code == 0x00 {
+        b"".as_slice()
+    } else if let Some((_, prefix)) = NDEF_URI_PREFIXES
+        .iter()
+        .find(|(code, _)| *code == prefix_code)
+    {
+        prefix
+    } else {
+        return None;
+    };
+
+    if ndef_bytes.len() != 2 + 4 + payload_len as usize {
+        return None;
+    }
+
+    let mut url = String::with_capacity(prefix.len() + payload_len as usize - 1);
+    url.push_str(core::str::from_utf8(prefix).ok()?);
+    url.push_str(core::str::from_utf8(&ndef_bytes[7..]).ok()?);
+    Some(url)
+}
+
+const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
+    let mut i = 0;
+    while i < NDEF_URI_PREFIXES.len() {
+        let (code, prefix) = NDEF_URI_PREFIXES[i];
+        if bytes_eq_at(url, 0, prefix) {
+            return (code, prefix.len());
+        }
+        i += 1;
+    }
     (0x00, 0)
 }
 
@@ -1416,5 +1457,117 @@ mod tests {
         let url = alloc::format!("https://example.com/{long_path}?p={{picc}}&m={{mac}}");
         let err = sdm_url_config(&url, CryptoMode::Aes, key0_opts()).unwrap_err();
         assert!(matches!(err, SdmUrlError::FileTooLong { .. }));
+    }
+
+    // ---------------------------------------------------------------------------
+    // parse_ndef_uri
+    // ---------------------------------------------------------------------------
+
+    fn make_ndef_uri(prefix_code: u8, uri_content: &[u8]) -> alloc::vec::Vec<u8> {
+        let payload_len = 1 + uri_content.len();
+        let ndef_msg_len = 4 + payload_len;
+        let mut bytes = alloc::vec![
+            (ndef_msg_len >> 8) as u8,
+            ndef_msg_len as u8,
+            0xD1,
+            0x01,
+            payload_len as u8,
+            0x55,
+            prefix_code,
+        ];
+        bytes.extend_from_slice(uri_content);
+        bytes
+    }
+
+    #[test]
+    fn parse_ndef_uri_no_prefix() {
+        let bytes = make_ndef_uri(0x00, b"example.com");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "example.com");
+    }
+
+    #[test]
+    fn parse_ndef_uri_https_prefix() {
+        let bytes = make_ndef_uri(0x04, b"example.com/path");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://example.com/path");
+    }
+
+    #[test]
+    fn parse_ndef_uri_https_www_prefix() {
+        let bytes = make_ndef_uri(0x02, b"example.com");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://www.example.com");
+    }
+
+    #[test]
+    fn parse_ndef_uri_empty_content() {
+        // payload_len = 1 (prefix code only), no URI content
+        let bytes = make_ndef_uri(0x04, b"");
+        assert_eq!(parse_ndef_uri(&bytes).unwrap(), "https://");
+    }
+
+    #[test]
+    fn parse_ndef_uri_unknown_prefix_returns_none() {
+        let bytes = make_ndef_uri(0xFF, b"example.com");
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_too_short_returns_none() {
+        assert!(parse_ndef_uri(&[]).is_none());
+        assert!(parse_ndef_uri(&[0x00, 0x05, 0xD1, 0x01, 0x01, 0x55]).is_none()); // 6 bytes
+    }
+
+    #[test]
+    fn parse_ndef_uri_bad_record_header_returns_none() {
+        let mut bytes = make_ndef_uri(0x04, b"example.com");
+        bytes[2] = 0xC1; // not 0xD1
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_bad_type_length_returns_none() {
+        let mut bytes = make_ndef_uri(0x04, b"example.com");
+        bytes[3] = 0x02; // not 0x01
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_bad_type_returns_none() {
+        let mut bytes = make_ndef_uri(0x04, b"example.com");
+        bytes[5] = 0x54; // 'T', not 'U'
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_nlen_mismatch_returns_none() {
+        let mut bytes = make_ndef_uri(0x04, b"example.com");
+        bytes[0] = 0x01; // inflate high byte so size + 2 != len
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_payload_len_mismatch_returns_none() {
+        let mut bytes = make_ndef_uri(0x04, b"example.com");
+        // Claim payload is 1 byte longer than it is (but keep NLEN correct)
+        bytes[4] = bytes[4].wrapping_add(1);
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_invalid_utf8_returns_none() {
+        let bytes = make_ndef_uri(0x04, b"\xFF\xFE");
+        assert!(parse_ndef_uri(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_ndef_uri_round_trip_with_sdm_url_config() {
+        let plan = sdm_url_config(
+            "https://example.com/?p={picc}&m={mac}",
+            CryptoMode::Aes,
+            key0_opts(),
+        )
+        .unwrap();
+        let url = parse_ndef_uri(&plan.ndef_bytes).unwrap();
+        assert!(url.starts_with("https://example.com/?p="));
+        assert!(url.contains("&m="));
     }
 }
