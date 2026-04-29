@@ -10,8 +10,8 @@ use core::ops::Range;
 use arrayvec::ArrayVec;
 use thiserror::Error;
 
-use crate::types::file_settings::{Offset, PiccData, Sdm};
-use crate::types::{KeyNumber, TagTamperStatusReadout};
+use crate::types::file_settings::{EncryptedContent, Offset, PiccData, ReadCtrMirror, Sdm};
+use crate::types::{FileSettingsError, KeyNumber, TagTamperStatusReadout};
 
 use super::hex::{decode_hex_array, decode_hex_into, ensure_len};
 use super::keys::{SdmKeys, aes_ecb_encrypt_block, derive_sdm_keys_aes, derive_sdm_keys_lrp};
@@ -187,6 +187,102 @@ impl Verifier {
             tamper_status_offset,
             enc_data,
         })
+    }
+
+    /// Validate that the verifier's configuration is internally consistent.
+    ///
+    /// This should be called after deserializing a verifier to ensure that the
+    /// contained offsets and flags are valid and consistent with each other.
+    pub fn validate(&self) -> Result<(), FileSettingsError> {
+        use crate::types::file_settings::{
+            CtrRetAccess, EncFileData, EncLength, FileRead, MacWindow, PiccData, PlainMirror,
+            ReadCtrFeatures,
+        };
+
+        if !matches!(self.picc_source, PiccSource::Encrypted { .. }) && self.meta_read_key.is_some()
+        {
+            return Err(FileSettingsError::InvalidSdmFlags);
+        }
+
+        let picc_data = match self.picc_source {
+            PiccSource::Encrypted { offset } => PiccData::Encrypted {
+                offset: Offset::new(offset)?,
+                key: self
+                    .meta_read_key
+                    .ok_or(FileSettingsError::InvalidSdmFlags)?,
+                // Following are not relevant for verification
+                content: EncryptedContent::Both(ReadCtrFeatures {
+                    limit: None,
+                    ret_access: CtrRetAccess::Free,
+                }),
+            },
+            PiccSource::Plain {
+                uid_offset: Some(off),
+                read_ctr_offset: None,
+            } => PiccData::Plain(PlainMirror::Uid {
+                uid: Offset::new(off)?,
+            }),
+            PiccSource::Plain {
+                uid_offset: None,
+                read_ctr_offset: Some(off),
+            } => PiccData::Plain(PlainMirror::RCtr {
+                read_ctr: ReadCtrMirror {
+                    offset: Offset::new(off)?,
+                    features: ReadCtrFeatures {
+                        limit: None,
+                        ret_access: CtrRetAccess::Free,
+                    },
+                },
+            }),
+            PiccSource::Plain {
+                uid_offset: Some(uid_off),
+                read_ctr_offset: Some(rctr_off),
+            } => PiccData::Plain(PlainMirror::Both {
+                uid: Offset::new(uid_off)?,
+                read_ctr: ReadCtrMirror {
+                    offset: Offset::new(rctr_off)?,
+                    features: ReadCtrFeatures {
+                        limit: None,
+                        ret_access: CtrRetAccess::Free,
+                    },
+                },
+            }),
+            PiccSource::Plain {
+                uid_offset: None,
+                read_ctr_offset: None,
+            } => PiccData::None,
+            PiccSource::None => PiccData::None,
+        };
+
+        let mac_window = MacWindow {
+            input: Offset::new(self.mac_input_offset)?,
+            mac: Offset::new(self.mac_offset)?,
+        };
+        let file_read = match &self.enc_data {
+            Some(range) => FileRead::MacAndEnc {
+                key: self.file_read_key,
+                window: mac_window,
+                enc: EncFileData {
+                    start: Offset::new(range.start)?,
+                    length: EncLength::new(
+                        range
+                            .end
+                            .checked_sub(range.start)
+                            .ok_or(FileSettingsError::EncLengthInvalid(0))?,
+                    )?,
+                },
+            },
+            None => FileRead::MacOnly {
+                key: self.file_read_key,
+                window: mac_window,
+            },
+        };
+
+        let tamper_status = self.tamper_status_offset.map(Offset::new).transpose()?;
+
+        Sdm::try_new(picc_data, Some(file_read), tamper_status, self.mode)?;
+
+        Ok(())
     }
 
     /// Return a new verifier with all range offsets increased by `inc`.
@@ -503,5 +599,147 @@ impl Verifier {
             ndef_data[offset],
             ndef_data[offset + 1],
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::file_settings::{
+        CtrRetAccess, EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, PlainMirror,
+        ReadCtrFeatures,
+    };
+
+    #[test]
+    fn validate_accepts_encrypted_picc_with_enc_data() {
+        let settings = Sdm::try_new(
+            PiccData::Encrypted {
+                key: KeyNumber::Key1,
+                offset: Offset::new(0).unwrap(),
+                content: EncryptedContent::Both(ReadCtrFeatures {
+                    limit: None,
+                    ret_access: CtrRetAccess::NoAccess,
+                }),
+            },
+            Some(FileRead::MacAndEnc {
+                key: KeyNumber::Key2,
+                window: MacWindow {
+                    input: Offset::new(32).unwrap(),
+                    mac: Offset::new(64).unwrap(),
+                },
+                enc: EncFileData {
+                    start: Offset::new(32).unwrap(),
+                    length: EncLength::new(32).unwrap(),
+                },
+            }),
+            None,
+            CryptoMode::Aes,
+        )
+        .unwrap();
+
+        let verifier = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+
+        assert_eq!(verifier.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validate_accepts_plain_uid_and_read_ctr() {
+        let settings = Sdm::try_new(
+            PiccData::Plain(PlainMirror::Both {
+                uid: Offset::new(0).unwrap(),
+                read_ctr: ReadCtrMirror {
+                    offset: Offset::new(14).unwrap(),
+                    features: ReadCtrFeatures {
+                        limit: None,
+                        ret_access: CtrRetAccess::NoAccess,
+                    },
+                },
+            }),
+            Some(FileRead::MacOnly {
+                key: KeyNumber::Key2,
+                window: MacWindow {
+                    input: Offset::new(0).unwrap(),
+                    mac: Offset::new(20).unwrap(),
+                },
+            }),
+            None,
+            CryptoMode::Aes,
+        )
+        .unwrap();
+
+        let verifier = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
+
+        assert_eq!(verifier.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validate_rejects_encrypted_picc_without_meta_key() {
+        let verifier = Verifier {
+            mode: CryptoMode::Aes,
+            picc_source: PiccSource::Encrypted { offset: 0 },
+            meta_read_key: None,
+            file_read_key: KeyNumber::Key0,
+            mac_input_offset: 32,
+            mac_offset: 32,
+            tamper_status_offset: None,
+            enc_data: None,
+        };
+
+        assert_eq!(verifier.validate(), Err(FileSettingsError::InvalidSdmFlags));
+    }
+
+    #[test]
+    fn validate_rejects_meta_key_without_encrypted_picc() {
+        let verifier = Verifier {
+            mode: CryptoMode::Aes,
+            picc_source: PiccSource::None,
+            meta_read_key: Some(KeyNumber::Key0),
+            file_read_key: KeyNumber::Key0,
+            mac_input_offset: 0,
+            mac_offset: 0,
+            tamper_status_offset: None,
+            enc_data: None,
+        };
+
+        assert_eq!(verifier.validate(), Err(FileSettingsError::InvalidSdmFlags));
+    }
+
+    #[test]
+    fn validate_rejects_inverted_enc_data_range_without_panicking() {
+        let verifier = Verifier {
+            mode: CryptoMode::Aes,
+            picc_source: PiccSource::Encrypted { offset: 0 },
+            meta_read_key: Some(KeyNumber::Key0),
+            file_read_key: KeyNumber::Key0,
+            mac_input_offset: 32,
+            mac_offset: 96,
+            tamper_status_offset: None,
+            #[allow(clippy::reversed_empty_ranges)]
+            enc_data: Some(80..48),
+        };
+
+        assert_eq!(
+            verifier.validate(),
+            Err(FileSettingsError::EncLengthInvalid(0))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mac_input_after_mac() {
+        let verifier = Verifier {
+            mode: CryptoMode::Aes,
+            picc_source: PiccSource::None,
+            meta_read_key: None,
+            file_read_key: KeyNumber::Key0,
+            mac_input_offset: 1,
+            mac_offset: 0,
+            tamper_status_offset: None,
+            enc_data: None,
+        };
+
+        assert_eq!(
+            verifier.validate(),
+            Err(FileSettingsError::MacInputAfterMac)
+        );
     }
 }
