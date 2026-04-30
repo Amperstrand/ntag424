@@ -7,8 +7,14 @@ use serde::{Deserialize, Serialize};
 use crate::{key_diversification::diversify_aes128, sdm::Verifier};
 
 mod provision;
+mod verification;
 
-pub use provision::{ProvisioningError, provision, provision_with_fn, provision_with_keys};
+pub use provision::{
+    ProvisioningError, derive_keys_for_uid, provision, provision_with_fn, provision_with_keys,
+};
+pub use verification::{
+    ApplicationVerifier, ReadCounterStorage, VerificationError, VerifiedTagReadout,
+};
 
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
