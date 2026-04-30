@@ -133,17 +133,13 @@ impl ApplicationVerifier {
         input: &[u8],
         read_counter: &mut S,
     ) -> Result<VerifiedTagReadout, VerificationError<S::Error>> {
-        // If a prefix is configured, check that the input starts with it and strip it off.
-        let input = self
-            .prefix
-            .as_ref()
-            .map(|p| {
-                input
-                    .strip_prefix(p.as_slice())
-                    .ok_or(VerificationError::PrefixMismatch)
-            })
-            .transpose()?
-            .unwrap_or(input);
+        // If a prefix is configured, check that the input starts with it, but do not strip it,
+        // verifier ranges are computed over the full input (including the prefix)
+        if let Some(prefix) = &self.prefix
+            && !input.starts_with(prefix.as_slice())
+        {
+            return Err(VerificationError::PrefixMismatch);
+        }
 
         // Check verifier consistency
         self.verifier.validate()?;
