@@ -127,6 +127,15 @@ CI is used for
 
 _No tags were harmed during development of this crate._
 
+## Related work
+
+- [barnettlynn/nfctools](https://github.com/barnettlynn/nfctools). A Go library and CLI tool.
+- [nikeee/node-ntag424](https://github.com/nikeee/node-ntag424). A Node.js library.
+- [luu176/NTAG424-SDM](https://github.com/luu176/NTAG424-SDM). A Python script.
+- [Obsttube/MFRC522_NTAG424DNA](https://github.com/Obsttube/MFRC522_NTAG424DNA). A C++ library for Arduino.
+- [BTCPayServer.NTag424](https://www.nuget.org/packages/BTCPayServer.NTag424). A .NET library.
+- [johnnyb/ntag424-java](https://github.com/johnnyb/ntag424-java). A Java library.
+
 ## License
 
 Licensed under either of
