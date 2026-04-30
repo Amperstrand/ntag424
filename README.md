@@ -11,6 +11,9 @@ targets both embedded readers and host-side provisioning and verification.
 
 ## Features
 
+- **High- and low-level APIs**: Use the high-level API for opinionated flows like
+  provisioning and SDM verification, or the low-level API for direct command
+  control and custom flows.
 - **Full application protocol**: Authentication (AES and LRP), file read/write,
   file settings, key changes, configuration, originality verification.
 - **Secure Dynamic Messaging (SDM)** server-side verification, plus a
@@ -19,13 +22,40 @@ targets both embedded readers and host-side provisioning and verification.
   master key.
 - **Transport-agnostic**: Bring your own NFC reader by implementing the
   `Transport` trait. The crate ships no transport itself.
-- **`no_std`** with optional `alloc`. Designed so the linker can drop unused
-  features under LTO.
+- **`no_std`** with optional `alloc`.
 
 ## Usage
 
-```sh
-cargo add ntag424
+Provision a tag and verify SDM-signed reads using the high-level API:
+
+```rust
+use ntag424::high_level::{provision, ApplicationVerifier, VerifiedTagReadout};
+
+// --- Provisioning a tag ---
+
+let tag_info = provision(
+        &mut transport,  // a Transport implementation
+        "https://example.com/v1/?p={picc}&m={mac}",
+        &master_key,     // securely stored master key for diversification
+        &mut OsRng
+    )
+    .await?;
+let app_verifier: ApplicationVerifier = tag_info.into();
+// store `app_verifier` for verification, can be stored once per application
+
+// --- Verifying a tag read ---
+
+let input = b"https://example.com/v1/?p=...&m=...";
+let mut counter_storage = /* a ReadCounterStorage implementation */;
+let result = app_verifier.verify(&master_key, input, &mut counter_storage).await;
+match result {
+    Ok(VerifiedTagReadout { uid, read_ctr, tamper_status }) => {
+        // Tag verified successfully
+    }
+    Err(e) => {
+        // Verification failed
+    }
+}
 ```
 
 See [docs.rs/ntag424](https://docs.rs/ntag424) for the full API documentation.
