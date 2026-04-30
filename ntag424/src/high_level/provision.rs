@@ -6,6 +6,8 @@ use rand::CryptoRng;
 
 use super::{TagInformation, picc_key};
 use crate::TagTamperStatusReadout;
+use crate::sdm::SdmUrlConfig;
+use crate::types::file_settings::Sdm;
 use crate::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
     FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, SessionError, Transport, Version,
@@ -15,6 +17,7 @@ use crate::{
 };
 
 const SYSTEM_IDENTIFIER: &[u8] = b"NTAG424DNA";
+const MODE: CryptoMode = CryptoMode::Lrp;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
@@ -184,12 +187,7 @@ where
     Fut: core::future::Future<Output = Result<[[u8; 16]; 5], K>>,
 {
     // Create SDM config early so we can fail before provisioning
-    let opts = SdmUrlOptions {
-        picc_key: KeyNumber::Key1,
-        mac_key: KeyNumber::Key2,
-        ..Default::default()
-    };
-    let sdm_conf = sdm_url_config(url_template, CryptoMode::Lrp, opts)?;
+    let (sdm_conf, verifier) = create_sdm_url_config(url_template, MODE)?;
     if !sdm_conf.mirrors_uid() {
         return Err(ProvisioningError::NoUidMirroring);
     }
@@ -202,12 +200,13 @@ where
         .await
         .map_err(ProvisioningError::KeyGenerationError)?;
 
-    let session = configure(transport, session, &version).await?;
-    let verifier = Verifier::try_new(&sdm_conf.sdm_settings, session.mode())?
-        // Shift all NDEF byte offsets so the verifier operates on the full URL string
-        // (prefix prepended) rather than raw NDEF bytes.
-        .with_offset(sdm_conf.prefix_len as i32 - sdm_conf.offset as i32)
-        .ok_or_else(|| ProvisioningError::Offset)?;
+    let session = configure(
+        transport,
+        session,
+        &version,
+        sdm_conf.sdm_settings.tamper_status().is_some(),
+    )
+    .await?;
     let session = configure_ndef(transport, session, sdm_conf).await?;
 
     // Update keys
@@ -220,6 +219,28 @@ where
         prefix: prefix.map(|p| p.to_owned()),
         system_identifier: SYSTEM_IDENTIFIER.to_vec(),
     })
+}
+
+fn create_sdm_url_config<E, K>(
+    url_template: &str,
+    mode: CryptoMode,
+) -> Result<(SdmUrlConfig, Verifier), ProvisioningError<E, K>>
+where
+    E: Error + Debug,
+    K: Error + Debug,
+{
+    let opts = SdmUrlOptions {
+        picc_key: KeyNumber::Key1,
+        mac_key: KeyNumber::Key2,
+        ..Default::default()
+    };
+    let sdm_conf = sdm_url_config(url_template, mode, opts)?;
+    let verifier = Verifier::try_new(&sdm_conf.sdm_settings, mode)?
+        // Shift all NDEF byte offsets so the verifier operates on the full URL string
+        // (prefix prepended) rather than raw NDEF bytes.
+        .with_offset(sdm_conf.prefix_len as i32 - sdm_conf.offset as i32)
+        .ok_or_else(|| ProvisioningError::Offset)?;
+    Ok((sdm_conf, verifier))
 }
 
 async fn configure_ndef<T: Transport>(
@@ -237,27 +258,31 @@ async fn configure_ndef<T: Transport>(
         .change_file_settings(
             transport,
             File::Ndef,
-            &FileSettingsUpdate::new(
-                // Plain CommMode is required for unauthenticated reads by standard NFC readers.
-                CommMode::Plain,
-                AccessRights {
-                    // Free read is required so standard readers can fetch the SDM URL without
-                    // authenticating.
-                    read: Access::Free,
-                    // Write-only access disabled; authenticated read-write via Key0 is used
-                    // instead. Key0 (master) is intentionally required here — use the lower-level
-                    // API and assign a less-privileged key if field NDEF updates must avoid
-                    // exposing the root secret.
-                    write: Access::NoAccess,
-                    read_write: Access::Key(KeyNumber::Key0),
-                    change: Access::Key(KeyNumber::Key0),
-                },
-            )
-            .with_sdm(sdm),
+            &get_file_settings_update_for_sdm(sdm),
         )
         .await?;
 
     Ok(session)
+}
+
+fn get_file_settings_update_for_sdm(sdm: Sdm) -> FileSettingsUpdate {
+    FileSettingsUpdate::new(
+        // Plain CommMode is required for unauthenticated reads by standard NFC readers.
+        CommMode::Plain,
+        AccessRights {
+            // Free read is required so standard readers can fetch the SDM URL without
+            // authenticating.
+            read: Access::Free,
+            // Write-only access disabled; authenticated read-write via Key0 is used
+            // instead. Key0 (master) is intentionally required here — use the lower-level
+            // API and assign a less-privileged key if field NDEF updates must avoid
+            // exposing the root secret.
+            write: Access::NoAccess,
+            read_write: Access::Key(KeyNumber::Key0),
+            change: Access::Key(KeyNumber::Key0),
+        },
+    )
+    .with_sdm(sdm)
 }
 
 async fn provision_keys<T: Transport>(
@@ -284,9 +309,10 @@ async fn configure<T: Transport, K: Error + Debug>(
     transport: &mut T,
     session: EncryptedSession,
     version: &Version,
+    enable_tag_tamper: bool,
 ) -> Result<EncryptedSession, ProvisioningError<T::Error, K>> {
     let mut config = Configuration::new().with_random_uid_enabled();
-    let tag_tamper_enabled = if version.has_tag_tamper_support() {
+    let tag_tamper_enabled = if version.has_tag_tamper_support() && enable_tag_tamper {
         // Free access lets the tag mirror tamper status into the SDM URL without
         // requiring authentication, suitable for "package seal" use cases where any
         // reader should be able to check integrity. Use the lower-level API if you
@@ -344,7 +370,11 @@ async fn authenticate_using_factory_defaults<T: Transport>(
         .authenticate_aes(transport, KeyNumber::Key0, &[0; 16], rng.random())
         .await
     {
-        s.enable_lrp(transport).await?;
+        if MODE == CryptoMode::Lrp {
+            s.enable_lrp(transport).await?;
+        } else {
+            return Ok(s.into());
+        }
     }
     Session::new()
         .authenticate_lrp(transport, KeyNumber::Key0, &[0; 16], rng.random())

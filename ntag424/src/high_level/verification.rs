@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use core::{error::Error, fmt::Debug};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,7 @@ pub enum VerificationError<E: Error + Debug> {
 /// This is usually derived from [`TagInformation`] obtained during provisioning,
 /// which implements `Into<ApplicationVerifier>`.
 pub struct ApplicationVerifier {
+    pub url_template: String,
     pub verifier: Verifier,
     pub prefix: Option<Vec<u8>>,
     pub system_identifier: Vec<u8>,
@@ -45,6 +46,7 @@ pub struct ApplicationVerifier {
 impl From<TagInformation> for ApplicationVerifier {
     fn from(info: super::TagInformation) -> Self {
         Self {
+            url_template: info.url_template,
             verifier: info.verifier,
             prefix: info.prefix,
             system_identifier: info.system_identifier,
