@@ -341,6 +341,25 @@ impl Verifier {
         Some(new)
     }
 
+    /// Return the lowest byte offset among all configured SDM data sources.
+    pub fn start(&self) -> u32 {
+        let picc_offset = match self.picc_source {
+            PiccSource::Encrypted { offset } => offset,
+            PiccSource::Plain {
+                uid_offset,
+                read_ctr_offset,
+            } => uid_offset
+                .unwrap_or(u32::MAX)
+                .min(read_ctr_offset.unwrap_or(u32::MAX)),
+            PiccSource::None => u32::MAX,
+        };
+        picc_offset
+            .min(self.mac_input_offset)
+            .min(self.mac_offset)
+            .min(self.tamper_status_offset.unwrap_or(u32::MAX))
+            .min(self.enc_data.as_ref().map(|r| r.start).unwrap_or(u32::MAX))
+    }
+
     /// Decrypt or read the tag identity data from an NDEF buffer without verifying the MAC.
     ///
     /// Returns `(uid, read_ctr)`. Each field is `None` when the corresponding
@@ -745,5 +764,137 @@ mod tests {
             verifier.validate(),
             Err(FileSettingsError::MacInputAfterMac)
         );
+    }
+
+    fn base_verifier() -> Verifier {
+        Verifier {
+            mode: CryptoMode::Aes,
+            picc_source: PiccSource::None,
+            meta_read_key: None,
+            file_read_key: KeyNumber::Key0,
+            mac_input_offset: 50,
+            mac_offset: 80,
+            tamper_status_offset: None,
+            enc_data: None,
+        }
+    }
+
+    #[test]
+    fn start_encrypted_picc_is_earliest() {
+        let v = Verifier {
+            picc_source: PiccSource::Encrypted { offset: 10 },
+            meta_read_key: Some(KeyNumber::Key1),
+            mac_input_offset: 50,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 10);
+    }
+
+    #[test]
+    fn start_mac_input_is_earliest() {
+        let v = Verifier {
+            picc_source: PiccSource::Encrypted { offset: 20 },
+            meta_read_key: Some(KeyNumber::Key1),
+            mac_input_offset: 15,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 15);
+    }
+
+    #[test]
+    fn start_mac_offset_is_earliest() {
+        let v = Verifier {
+            mac_input_offset: 50,
+            mac_offset: 5,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 5);
+    }
+
+    #[test]
+    fn start_tamper_status_is_earliest() {
+        let v = Verifier {
+            mac_input_offset: 50,
+            mac_offset: 80,
+            tamper_status_offset: Some(3),
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 3);
+    }
+
+    #[test]
+    fn start_enc_data_is_earliest() {
+        let v = Verifier {
+            mac_input_offset: 50,
+            mac_offset: 80,
+            enc_data: Some(8..40),
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 8);
+    }
+
+    #[test]
+    fn start_plain_uid_offset_is_earliest() {
+        let v = Verifier {
+            picc_source: PiccSource::Plain {
+                uid_offset: Some(5),
+                read_ctr_offset: Some(20),
+            },
+            mac_input_offset: 50,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 5);
+    }
+
+    #[test]
+    fn start_plain_read_ctr_offset_is_earliest() {
+        let v = Verifier {
+            picc_source: PiccSource::Plain {
+                uid_offset: Some(30),
+                read_ctr_offset: Some(7),
+            },
+            mac_input_offset: 50,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 7);
+    }
+
+    #[test]
+    fn start_plain_only_uid_offset_present() {
+        let v = Verifier {
+            picc_source: PiccSource::Plain {
+                uid_offset: Some(12),
+                read_ctr_offset: None,
+            },
+            mac_input_offset: 50,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 12);
+    }
+
+    #[test]
+    fn start_picc_none_falls_back_to_mac_input() {
+        let v = base_verifier();
+        // PiccSource::None, no tamper, no enc_data → min(mac_input=50, mac=80)
+        assert_eq!(v.start(), 50);
+    }
+
+    #[test]
+    fn start_plain_both_none_falls_back_to_mac_input() {
+        let v = Verifier {
+            picc_source: PiccSource::Plain {
+                uid_offset: None,
+                read_ctr_offset: None,
+            },
+            mac_input_offset: 50,
+            mac_offset: 80,
+            ..base_verifier()
+        };
+        assert_eq!(v.start(), 50);
     }
 }
