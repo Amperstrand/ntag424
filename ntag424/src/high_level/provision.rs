@@ -54,7 +54,7 @@ pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
 ///
 /// Returns a [`TagInformation`] value that the server can use for subsequent SDM verification.
 ///
-/// The URL pattern `url` must satisfy the requirements of
+/// The URL pattern `url_template` must satisfy the requirements of
 /// [`sdm_url_config`](`crate::sdm::sdm_url_config`). Additionally:
 ///
 /// - The URL must include the UID, either via `{picc}` (encrypted) or `{uid}` (plain).
@@ -120,7 +120,7 @@ pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
 /// `change_key` calls manually. There is no automatic rollback.
 pub async fn provision<T: Transport>(
     transport: &mut T,
-    url: &str,
+    url_template: &str,
     master_key: &[u8; 16],
     rng: &mut impl CryptoRng,
 ) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
@@ -128,7 +128,7 @@ pub async fn provision<T: Transport>(
         let new_keys = derive_keys_for_uid(master_key, &uid);
         core::future::ready(Ok(new_keys))
     };
-    provision_with_fn(transport, url, key_fn, rng).await
+    provision_with_fn(transport, url_template, key_fn, rng).await
 }
 
 /// Derives the five AES keys for a tag from the master key and UID.
@@ -153,11 +153,17 @@ pub fn derive_keys_for_uid(master_key: &[u8; 16], uid: &[u8; 7]) -> [[u8; 16]; 5
 /// provisioning environment.
 pub async fn provision_with_keys<T: Transport>(
     transport: &mut T,
-    url: &str,
+    url_template: &str,
     keys: &[[u8; 16]; 5],
     rng: &mut impl CryptoRng,
 ) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
-    provision_with_fn(transport, url, |_| core::future::ready(Ok(*keys)), rng).await
+    provision_with_fn(
+        transport,
+        url_template,
+        |_| core::future::ready(Ok(*keys)),
+        rng,
+    )
+    .await
 }
 
 /// Core provisioning function that takes a user-supplied async function to derive the new keys from the UID.
@@ -167,7 +173,7 @@ pub async fn provision_with_keys<T: Transport>(
 /// and returns the new keys.
 pub async fn provision_with_fn<T: Transport, F, Fut, K>(
     transport: &mut T,
-    url: &str,
+    url_template: &str,
     keys: F,
     rng: &mut impl CryptoRng,
 ) -> Result<TagInformation, ProvisioningError<T::Error, K>>
@@ -182,7 +188,7 @@ where
         mac_key: KeyNumber::Key2,
         ..Default::default()
     };
-    let sdm_conf = sdm_url_config(url, CryptoMode::Lrp, opts)?;
+    let sdm_conf = sdm_url_config(url_template, CryptoMode::Lrp, opts)?;
     if !sdm_conf.mirrors_uid() {
         return Err(ProvisioningError::NoUidMirroring);
     }
@@ -209,6 +215,7 @@ where
     Ok(TagInformation {
         uid,
         verifier,
+        url_template: url_template.to_owned(),
         prefix: prefix.map(|p| p.to_owned()),
         system_identifier: SYSTEM_IDENTIFIER.to_vec(),
     })
