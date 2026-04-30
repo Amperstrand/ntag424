@@ -356,8 +356,8 @@ impl Verifier {
     /// [`Sdm`]: crate::types::file_settings::Sdm
     pub fn decrypt_picc_data(
         &self,
-        ndef_data: &[u8],
         meta_key: &[u8; 16],
+        ndef_data: &[u8],
     ) -> Result<(Option<[u8; 7]>, Option<u32>), SdmError> {
         let (uid, ctr_bytes) = self.extract_picc_data(ndef_data, meta_key)?;
         Ok((

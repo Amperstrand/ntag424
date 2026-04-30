@@ -1,6 +1,6 @@
 //! This module contains a high level, opinionated API
 //! for provisioning and using the NTAG 424 DNA.
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ pub use provision::{ProvisioningError, provision, provision_with_fn, provision_w
 pub struct TagInformation {
     pub uid: [u8; 7],
     pub verifier: Verifier,
-    prefix: Option<String>,
+    prefix: Option<Vec<u8>>,
     system_identifier: Vec<u8>,
 }
 

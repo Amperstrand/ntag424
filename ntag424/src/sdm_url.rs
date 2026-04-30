@@ -137,15 +137,14 @@ pub struct SdmUrlConfig {
 
 impl SdmUrlConfig {
     /// Returns the URI prefix string corresponding to `prefix_code`, if any.
-    pub fn prefix(&self) -> Option<&'static str> {
+    pub fn prefix(&self) -> Option<&'static [u8]> {
         if self.prefix_code == 0 {
-            return Some("");
+            return Some(b"");
         }
         NDEF_URI_PREFIXES
             .iter()
             .find(|(code, _)| *code == self.prefix_code)
             .map(|(_, prefix)| *prefix)
-            .and_then(|b| core::str::from_utf8(b).ok())
     }
 
     /// Returns `true` if the configuration includes a mirror of the PICC UID.

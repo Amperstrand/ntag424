@@ -275,7 +275,7 @@ mod tests {
         let (settings, ndef) = table4_fixture();
         let v = Verifier::try_new(&settings, CryptoMode::Aes).unwrap();
 
-        let (uid, read_ctr) = v.decrypt_picc_data(&ndef[..42], &[0u8; 16]).unwrap();
+        let (uid, read_ctr) = v.decrypt_picc_data(&[0; 16], &ndef[..42]).unwrap();
 
         assert_eq!(uid, Some(hex_array("04DE5F1EACC040")));
         assert_eq!(read_ctr, Some(61));

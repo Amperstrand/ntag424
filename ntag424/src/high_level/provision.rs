@@ -209,7 +209,7 @@ where
     Ok(TagInformation {
         uid,
         verifier,
-        prefix: prefix.map(|s| s.to_owned()),
+        prefix: prefix.map(|p| p.to_owned()),
         system_identifier: SYSTEM_IDENTIFIER.to_vec(),
     })
 }
