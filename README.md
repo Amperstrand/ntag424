@@ -136,6 +136,18 @@ _No tags were harmed during development of this crate._
 - [BTCPayServer.NTag424](https://www.nuget.org/packages/BTCPayServer.NTag424). A .NET library.
 - [johnnyb/ntag424-java](https://github.com/johnnyb/ntag424-java). A Java library.
 
+## Usage of AI and LLMs
+
+This project used generative AI tools for:
+
+- Code and API design review
+- Spec and data sheet research and review
+- Documentation review and improvement
+- Test case generation
+- Precisely scoped code refactoring and implementation
+
+All AI-generated content was reviewed and edited by a human before inclusion in the project.
+
 ## License
 
 Licensed under either of
