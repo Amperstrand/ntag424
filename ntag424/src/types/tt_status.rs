@@ -57,10 +57,7 @@ impl TagTamperStatusReadout {
     pub fn is_tampered(&self) -> bool {
         matches!(
             (self.permanent, self.current),
-            (TagTamperStatus::Open, _)
-                | (_, TagTamperStatus::Open)
-                | (TagTamperStatus::Unknown(_), _)
-                | (_, TagTamperStatus::Unknown(_))
+            (TagTamperStatus::Open, _) | (_, TagTamperStatus::Open)
         )
     }
 }
