@@ -317,7 +317,54 @@ const fn ranges_overlap(a: u32, a_len: u32, b: u32, b_len: u32) -> bool {
 /// UID = 14, read counter = 6, tag tamper status = 2, authentication MAC = 16,
 /// encrypted identity data blob = 32 (AES) or 48 (LRP).
 ///
+/// ## Configuration
+///
+/// This struct stores SDM configuration information about:
+///
+/// **Tag identity mirroring ([`PiccData`])** — what the tag writes into the NDEF file on every read, and how:
+/// - [`Plain`] — UID (14 ASCII chars) and/or read counter (6 ASCII chars) are written as plain hex
+///   at fixed offsets. Simple to parse, but not authenticated on their own.
+/// - [`Encrypted`] — UID and/or read counter are packed into an encrypted identity blob (PICCData)
+///   at one offset, decryptable with one of the stored keys. Provides confidentiality for the identity
+///   data itself.
+/// - [`None`] — no identity data mirrored.
+///
+/// **Authentication MAC ([`FileRead`])** — a truncated CMAC over a configurable byte window of the file,
+/// placed as 16 ASCII chars at a fixed offset. Verifies integrity and authenticity. When the read
+/// counter is included in the MAC input and the server tracks its monotonic increase, this also
+/// prevents replay. Options on what the MAC covers and how it is computed:
+/// - [`MacOnly`] — MAC only; the [`MacWindow`] specifies where the MAC input starts and where the
+///   16-char placeholder sits.
+/// - [`MacAndEnc`] — MAC plus encrypted file data: a region of the NDEF file is replaced with its
+///   LRP/AES ciphertext. The [`EncFileData`] offset and length (multiple of 32) must lie within the MAC
+///   window, and `PiccData` must include both UID and read counter.
+///
+/// **Tag tamper status** — an optional 2-char ASCII placeholder at a configurable offset,
+/// populated with the tag's tamper loop state (requires tamper-detect version of hardware).
+///
+/// **Read counter limit** — when a read counter is mirrored, an optional `limit` can be set:
+/// unauthenticated SDM reads are refused once the counter reaches the limit.
+///
+/// **Counter retrieval access** ([`CtrRetAccess`]) — who may read back the raw counter value via
+/// [`AuthenticatedSession::get_file_counters`].
+///
+/// The [`crate::sdm_url_config!`] macro builds a `(NDEF bytes, Sdm)` pair from a URL template and handles
+/// offset arithmetic automatically — prefer it over constructing this struct directly if your NDEF
+/// is a URL.
+///
 /// NT4H2421Gx §9.3, §10.7.1 Table 69.
+///
+/// [`PiccData`]: PiccData
+/// [`Plain`]: PiccData::Plain
+/// [`Encrypted`]: PiccData::Encrypted
+/// [`None`]: PiccData::None
+/// [`FileRead`]: FileRead
+/// [`MacOnly`]: FileRead::MacOnly
+/// [`MacAndEnc`]: FileRead::MacAndEnc
+/// [`MacWindow`]: MacWindow
+/// [`EncFileData`]: EncFileData
+/// [`CtrRetAccess`]: CtrRetAccess
+/// [`AuthenticatedSession::get_file_counters`]: crate::AuthenticatedSession::get_file_counters
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sdm {
     picc_data: PiccData,

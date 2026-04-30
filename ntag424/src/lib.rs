@@ -44,13 +44,13 @@
 //!
 //! **Default keys out of the factory**: all keys are set to constant zero.
 //!
-//! <div class="warning">
+//! # High-level API
 //!
-//! _All_ keys should be replaced before deployment and
-//! the NDEF file should be locked down with appropriate permissions.
-//! Check the provisioning example in the repository.
+//! For most use cases, you can use the high-level API through the [`high_level`] module.
+//! This provides convenient abstractions for common operations like tag provisioning
+//! and SDM verification, without needing to work with low-level commands directly.
 //!
-//! </div>
+//! The high-level API is enabled with the `high-level-api` feature.
 //!
 //! ## _Secure Unique NFC_ (SUN) using _Secure Dynamic Messaging_ (SDM)
 //!
@@ -100,67 +100,20 @@
 //!
 //! When a standard NFC reader performs an unauthenticated read, the tag
 //! returns the same bytes but with the placeholders replaced by freshly
-//! computed values, e.g.:
+//! computed values[^sdm-crypto], e.g.:
 //!
 //! ```text
 //! https://example.com/?p=EF963FF7828658A599F3041510671E88&m=94EED9EE65337086
 //! ```
-//!
-//! The `p=` value is `AES-CBC-ENC(App.Key0, 0^16, PICCDataTag || UID ||
-//! SDMReadCtr || RandomPadding)` (16 bytes, mirrored as 32 ASCII hex chars),
-//! and `m=` is the truncated CMAC under the session MAC key derived from
-//! `(UID, SDMReadCtr)`. By default the [`sdm_url_config!`] macro makes the
-//! MAC window start at the beginning of the abbreviated URI body and end
-//! just before the `{mac}` placeholder — for this template that is the 50
-//! bytes `example.com/?p=<32-hex-PICCData>&m=`; use `[[` in the template to
-//! move the start elsewhere (see [`MacWindow`](`crate::types::file_settings::MacWindow`)).
-//! A server decrypts `p=`, re-derives the session key, and verifies the
-//! CMAC; see [`sdm::Verifier`].
-//!
-//!
-//! ### SDM configuration
-//!
-//! SDM is configured via the [`Sdm`](`crate::types::file_settings::Sdm`) struct. It stores
-//! information about:
-//!
-//! **Tag identity mirroring ([`PiccData`](`crate::types::file_settings::PiccData`))** — what the
-//! tag writes into the NDEF file on every read, and how:
-//! - [`Plain`](`crate::types::file_settings::PiccData::Plain`) — UID (14 ASCII chars) and/or
-//!   read counter (6 ASCII chars) are written as plain hex at fixed offsets. Simple to parse,
-//!   but not authenticated on their own.
-//! - [`Encrypted`](`crate::types::file_settings::PiccData::Encrypted`) — UID and/or read counter
-//!   are packed into an encrypted identity blob (PICCData) at one offset, decryptable with one of the
-//!   stored keys. Provides confidentiality for the identity data itself.
-//! - [`None`](`crate::types::file_settings::PiccData::None`) — no identity data mirrored.
-//!
-//! **Authentication MAC ([`FileRead`](`crate::types::file_settings::FileRead`))** — a truncated
-//! CMAC over a configurable byte window of the file, placed as 16 ASCII chars at a fixed offset.
-//! Verifies integrity and authenticity. When the read counter is included in the MAC input and
-//! the server tracks its monotonic increase, this also prevents replay. Options on what the
-//! MAC covers and how it is computed:
-//! - [`MacOnly`](`crate::types::file_settings::FileRead::MacOnly`) — MAC only; the
-//!   [`MacWindow`](`crate::types::file_settings::MacWindow`) specifies where the MAC input
-//!   starts and where the 16-char placeholder sits.
-//! - [`MacAndEnc`](`crate::types::file_settings::FileRead::MacAndEnc`) — MAC plus encrypted
-//!   file data: a region of the NDEF file is replaced with its LRP/AES ciphertext. The
-//!   [`EncFileData`](`crate::types::file_settings::EncFileData`) offset and length (multiple
-//!   of 32) must lie within the MAC window, and `PiccData` must include both UID and read counter.
-//!
-//! **Tag tamper status** — an optional 2-char ASCII placeholder at a configurable offset,
-//! populated with the tag's tamper loop state (requires tamper-detect version of hardware).
-//!
-//! **Read counter limit** — when a read counter is mirrored, an optional `limit` can be set:
-//! unauthenticated SDM reads are refused once the counter reaches the limit.
-//!
-//! **Counter retrieval access** ([`CtrRetAccess`](`crate::types::file_settings::CtrRetAccess`)) —
-//! who may read back the raw counter value via
-//! [`AuthenticatedSession::get_file_counters`](`crate::AuthenticatedSession::get_file_counters`).
-//!
-//! The [`sdm_url_config!`] macro builds a `(NDEF bytes, Sdm)` pair from a URL template and
-//! handles offset arithmetic automatically — prefer it over constructing
-//! [`Sdm`](`crate::types::file_settings::Sdm`) if your NDEF is a URL.
-//!
 //! # Provisioning
+//!
+//! <div class="warning">
+//!
+//! _All_ keys should be replaced before deployment and
+//! the NDEF file should be locked down with appropriate permissions.
+//! Check the provisioning example in the repository.
+//!
+//! </div>
 //!
 //! The implementation of the tag's initial setup should be carefully designed to match the
 //! application's needs. The following list contains steps that should be considered for a secure setup of the tag.
@@ -222,6 +175,8 @@
 //! _No tags were harmed during development of this crate._
 //!
 //! [^1]: There are also the NDA protected _originality keys_ used for originality verification.
+//! [^sdm-crypto]: The `p=` value contains the encrypted tag identity and `m=` is the truncated CMAC.
+//!   A server can decrypt and verify these values; see [`sdm::Verifier`].
 #![no_std]
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
