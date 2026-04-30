@@ -82,10 +82,9 @@ pub struct TagInformation {
 }
 
 /// Derives the cohort-fixed PICC encryption key (SDMMetaRead, Key 1).
-///
-/// Domain-separated from [`diversify_ntag424`] outputs: `b"PICC"` begins with byte
-/// `0x50`, whereas `diversify_ntag424` inputs always start with a key-number byte in
-/// `0x00..=0x04`, so the two derivation paths can never collide.
-fn picc_key(master: &[u8; 16]) -> [u8; 16] {
+pub fn picc_key(master: &[u8; 16]) -> [u8; 16] {
+    // Domain-separated from [`diversify_ntag424`] outputs: `b"PICC"` begins with byte
+    // `0x50`, whereas `diversify_ntag424` inputs always start with a key-number byte in
+    // `0x00..=0x04`, so the two derivation paths can never collide.
     diversify_aes128(master, b"PICC")
 }
