@@ -5,6 +5,7 @@ use alloc::borrow::ToOwned;
 use rand::CryptoRng;
 
 use super::{TagInformation, picc_key};
+use crate::TagTamperStatusReadout;
 use crate::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
     FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, SessionError, Transport, Version,
@@ -27,8 +28,8 @@ pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
     SessionError(#[from] SessionError<E>),
     #[error("tag version mismatch: expected NTAG 424 DNA, got hardware type {hw_type:#04x}")]
     VersionMismatch { hw_type: u8 },
-    #[error("tag is tampered")]
-    Tampered,
+    #[error("tag is tampered ({0:?})")]
+    Tampered(TagTamperStatusReadout),
     #[error("SDM verifier offset adjustment out of range; check URL length")]
     Offset,
     #[error("SDM URL must include UID mirroring (e.g. {{picc}} or {{uid}}) for provisioning")]
@@ -299,7 +300,7 @@ async fn configure<T: Transport, K: Error + Debug>(
     if tag_tamper_enabled {
         let (tt_status, new_session) = session.get_tt_status(transport).await?;
         if tt_status.is_tampered() {
-            return Err(ProvisioningError::Tampered);
+            return Err(ProvisioningError::Tampered(tt_status));
         }
         session = new_session;
     }
