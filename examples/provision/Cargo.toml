@@ -12,7 +12,7 @@ anyhow.workspace = true
 dialoguer.workspace = true
 example-utils.workspace = true
 ntag424 = { workspace = true, features = [
-  "key_diversification",
+  "key-diversification",
   "sdm",
   "alloc",
   "serde",

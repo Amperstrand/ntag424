@@ -27,7 +27,7 @@ steps:
     image: *rust_image
     environment: *cargo_env
     commands:
-      - cargo test -p ntag424 --locked --features key_diversification -- --test-threads=4
+      - cargo test -p ntag424 --locked --features key-diversification -- --test-threads=4
 
   test-sdm:
     image: *rust_image

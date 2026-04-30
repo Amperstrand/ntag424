@@ -19,7 +19,7 @@ fn get_file_read_key(server_side: &ServerSideData, ndef: &[u8]) -> Result<[u8; 1
     // because we need the UID to derive the per-tag file-read key before calling verify.
     let (uid, _) = server_side
         .verifier
-        .decrypt_picc_data(ndef, &server_side.picc_key)?;
+        .decrypt_picc_data(&server_side.picc_key, ndef)?;
     let Some(uid) = uid else {
         anyhow::bail!("PICC data does not contain a UID");
     };
