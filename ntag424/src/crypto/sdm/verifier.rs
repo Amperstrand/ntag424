@@ -189,6 +189,10 @@ impl Verifier {
         })
     }
 
+    pub fn mac_range(&self) -> Range<u32> {
+        self.mac_input_offset..self.mac_offset
+    }
+
     /// Validate that the verifier's configuration is internally consistent.
     ///
     /// This should be called after deserializing a verifier to ensure that the
