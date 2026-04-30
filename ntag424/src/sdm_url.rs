@@ -10,7 +10,6 @@ use alloc::string::String;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-#[cfg(feature = "alloc")]
 use thiserror::Error;
 
 use crate::types::KeyNumber;
@@ -936,19 +935,39 @@ type UriString = alloc::string::String;
 #[cfg(not(feature = "alloc"))]
 type UriString = arrayvec::ArrayString<256>;
 
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("missing {{mac}} placeholder")]
+    InvalidHeader,
+    #[error(
+        "NDEF message length field does not match actual length: expected {expected}, actual {actual}"
+    )]
+    SizeMismatch { expected: usize, actual: usize },
+    #[error("NDEF URI prefix code is not recognized")]
+    UnknownPrefixCode(u8),
+    #[error("NDEF record length does not match expected payload length")]
+    PayloadSizeMismatch { expected: usize, actual: usize },
+    #[error("NDEF payload is not valid UTF-8: {0}")]
+    Encoding(#[from] core::str::Utf8Error),
+}
+
 /// Parse NDEF bytes from the tag back into a full URL string.
-pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<impl AsRef<str>> {
+pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Result<impl AsRef<str>, ParseError> {
     if ndef_bytes.len() < 7
         || ndef_bytes[2] != 0xD1
         || ndef_bytes[3] != 0x01
         || ndef_bytes[5] != 0x55
     {
-        return None;
+        return Err(ParseError::InvalidHeader);
     }
     let size = ((ndef_bytes[0] as usize) << 8) | (ndef_bytes[1] as usize);
-    if size + 2 != ndef_bytes.len() {
-        return None;
+    if size + 2 > ndef_bytes.len() {
+        return Err(ParseError::SizeMismatch {
+            expected: size + 2,
+            actual: ndef_bytes.len(),
+        });
     }
+    let ndef_bytes = &ndef_bytes[..size + 2];
     let payload_len = ndef_bytes[4];
     let prefix_code = ndef_bytes[6];
     let prefix = if prefix_code == 0x00 {
@@ -959,11 +978,14 @@ pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<impl AsRef<str>> {
     {
         prefix
     } else {
-        return None;
+        return Err(ParseError::UnknownPrefixCode(prefix_code));
     };
 
     if ndef_bytes.len() != 2 + 4 + payload_len as usize {
-        return None;
+        return Err(ParseError::PayloadSizeMismatch {
+            expected: 2 + 4 + payload_len as usize,
+            actual: ndef_bytes.len(),
+        });
     }
 
     let mut url = {
@@ -976,9 +998,9 @@ pub fn parse_ndef_uri(ndef_bytes: &[u8]) -> Option<impl AsRef<str>> {
             UriString::new()
         }
     };
-    url.push_str(core::str::from_utf8(prefix).ok()?);
-    url.push_str(core::str::from_utf8(&ndef_bytes[7..]).ok()?);
-    Some(url)
+    url.push_str(core::str::from_utf8(prefix)?);
+    url.push_str(core::str::from_utf8(&ndef_bytes[7..])?);
+    Ok(url)
 }
 
 const fn detect_uri_prefix(url: &[u8]) -> (u8, usize) {
@@ -1580,41 +1602,41 @@ mod tests {
     #[test]
     fn parse_ndef_uri_unknown_prefix_returns_none() {
         let bytes = make_ndef_uri(0xFF, b"example.com");
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
     fn parse_ndef_uri_too_short_returns_none() {
-        assert!(parse_ndef_uri(&[]).is_none());
-        assert!(parse_ndef_uri(&[0x00, 0x05, 0xD1, 0x01, 0x01, 0x55]).is_none()); // 6 bytes
+        assert!(parse_ndef_uri(&[]).is_err());
+        assert!(parse_ndef_uri(&[0x00, 0x05, 0xD1, 0x01, 0x01, 0x55]).is_err()); // 6 bytes
     }
 
     #[test]
     fn parse_ndef_uri_bad_record_header_returns_none() {
         let mut bytes = make_ndef_uri(0x04, b"example.com");
         bytes[2] = 0xC1; // not 0xD1
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
     fn parse_ndef_uri_bad_type_length_returns_none() {
         let mut bytes = make_ndef_uri(0x04, b"example.com");
         bytes[3] = 0x02; // not 0x01
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
     fn parse_ndef_uri_bad_type_returns_none() {
         let mut bytes = make_ndef_uri(0x04, b"example.com");
         bytes[5] = 0x54; // 'T', not 'U'
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
     fn parse_ndef_uri_nlen_mismatch_returns_none() {
         let mut bytes = make_ndef_uri(0x04, b"example.com");
         bytes[0] = 0x01; // inflate high byte so size + 2 != len
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
@@ -1622,13 +1644,13 @@ mod tests {
         let mut bytes = make_ndef_uri(0x04, b"example.com");
         // Claim payload is 1 byte longer than it is (but keep NLEN correct)
         bytes[4] = bytes[4].wrapping_add(1);
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
     fn parse_ndef_uri_invalid_utf8_returns_none() {
         let bytes = make_ndef_uri(0x04, b"\xFF\xFE");
-        assert!(parse_ndef_uri(&bytes).is_none());
+        assert!(parse_ndef_uri(&bytes).is_err());
     }
 
     #[test]
