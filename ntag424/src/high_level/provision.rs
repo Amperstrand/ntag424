@@ -243,6 +243,21 @@ where
     Ok((sdm_conf, verifier))
 }
 
+/// Creates an SDM application verifier from the given URL template.
+///
+/// Returns the same verifier that is included in the returned `TagInformation` from `provision`.
+pub fn create_app_verifier(
+    url_template: &str,
+) -> Result<super::ApplicationVerifier, ProvisioningError<Infallible, Infallible>> {
+    let (sdm_conf, verifier) = create_sdm_url_config(url_template, MODE)?;
+    Ok(super::ApplicationVerifier {
+        verifier,
+        url_template: url_template.to_owned(),
+        prefix: sdm_conf.prefix().map(|p| p.to_owned()),
+        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+    })
+}
+
 async fn configure_ndef<T: Transport>(
     transport: &mut T,
     mut session: EncryptedSession,

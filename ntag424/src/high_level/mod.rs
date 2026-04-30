@@ -65,7 +65,8 @@ mod provision;
 mod verification;
 
 pub use provision::{
-    ProvisioningError, derive_keys_for_uid, provision, provision_with_fn, provision_with_keys,
+    ProvisioningError, create_app_verifier, derive_keys_for_uid, provision, provision_with_fn,
+    provision_with_keys,
 };
 pub use verification::{
     ApplicationVerifier, ReadCounterStorage, VerificationError, VerifiedTagReadout,
