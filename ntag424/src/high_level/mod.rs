@@ -1,5 +1,56 @@
-//! This module contains a high level, opinionated API
-//! for provisioning and using the NTAG 424 DNA.
+//! High-level, opinionated API for provisioning and using the NTAG 424 DNA.
+//!
+//! This module provides convenient abstractions for common operations:
+//!
+//! - **Provisioning**: Configure a tag with keys, NDEF content, and SDM settings
+//! - **Verification**: Verify SDM-signed tag reads using [`ApplicationVerifier::verify`]
+//!
+//! The high-level API handles low-level protocol details, enabling you to work with
+//! higher-level concepts like URL templates, key derivation, and tag information storage.
+//!
+//! # Example: Provisioning a tag
+//!
+//! ```no_run
+//! # use ntag424::Transport;
+//! use ntag424::high_level::{provision, TagInformation, ApplicationVerifier};
+//! # #[cfg(all(feature = "high-level-api", feature = "rand/sys_rng"))]
+//! # async fn provision_example(transport: &mut impl Transport) -> Result<(), Box<dyn std::error::Error>> {
+//! use rand::{make_rng, rngs::SysRng};
+//!
+//! # let master_key = [0u8; 16];
+//! // let master_key: [u8; 16] = ...;
+//! let url_template = "https://example.com/?p={picc}&m={mac}";
+//! let mut rng: SysRng = make_rng();
+//!
+//! let tag_info = provision(transport, url_template, &master_key, &mut rng)
+//!     .await
+//!     .expect("Provisioning failed");
+//!
+//! let app_verifier: ApplicationVerifier = tag_info.into();
+//! // Store app_verifier for later verification
+//! # Ok(())
+//! # }
+//! ```
+//! # Example: Verifying a tag read
+//!
+//! The high-level verification API uses an [`ApplicationVerifier`] to check
+//! SDM-signed NDEF data from tag reads. The replay protection mechanism
+//! requires to store a read counter per tag UID which must be provided using
+//! a [`ReadCounterStorage`] implementation.
+//!
+//! ```
+//! # use ntag424::high_level::{ApplicationVerifier, VerifiedTagReadout, ReadCounterStorage};
+//! # #[cfg(feature = "high-level-api")]
+//! # async fn verify_example(app_verifier: ApplicationVerifier, mut counter_storage: impl ReadCounterStorage) {
+//! # let master_key = &[0u8; 16];
+//! // let master_key: &[u8; 16] = ...;
+//! let input = b"https://example.com/v1/?p=...&m=...";  // the decoded NDEF read from the tag
+//! // let app_verifier: ApplicationVerifier = ...;  // obtained from storage, maybe using version/app identifier in input
+//! // let mut counter_storage = ...;  // your implementation of ReadCounterStorage
+//!
+//! let result = app_verifier.verify(master_key, input, &mut counter_storage).await;
+//! # }
+//! ```
 use alloc::{string::String, vec::Vec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
