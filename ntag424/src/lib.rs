@@ -5,6 +5,10 @@
 
 //! A transport-agnostic crate for communicating with NTAG 424 DNA NFC tags.
 //!
+//! An optionionated use case is provided through the [`high_level`] module.
+//! This provides a convenient abstraction for tag provisioning
+//! and SDM verification, without needing to work with low-level commands directly.
+//!
 //! # High level hardware overview
 //!
 //! The NTAG 424 DNA is a NFC chip that can generate cryptographically signed or encrypted
@@ -43,14 +47,6 @@
 //! | Proprietary | Key 2   | Key 3      | Key 3      | Master Key |
 //!
 //! **Default keys out of the factory**: all keys are set to constant zero.
-//!
-//! # High-level API
-//!
-//! For most use cases, you can use the high-level API through the [`high_level`] module.
-//! This provides convenient abstractions for common operations like tag provisioning
-//! and SDM verification, without needing to work with low-level commands directly.
-//!
-//! The high-level API is enabled with the `high-level-api` feature.
 //!
 //! ## _Secure Unique NFC_ (SUN) using _Secure Dynamic Messaging_ (SDM)
 //!

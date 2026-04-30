@@ -5,6 +5,10 @@
 //! - **Provisioning**: Configure a tag with keys, NDEF content, and SDM settings
 //! - **Verification**: Verify SDM-signed tag reads using [`ApplicationVerifier::verify`]
 //!
+//! The implementation is opinionated in the sense that it choses a secret key strategey,
+//! SDM settings, and general tag settings. The chosen approach puts focus on
+//! privacy and security. The details are documented in the respective functions.
+//!
 //! The high-level API handles low-level protocol details, enabling you to work with
 //! higher-level concepts like URL templates, key derivation, and tag information storage.
 //!
