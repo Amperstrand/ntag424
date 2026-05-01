@@ -7,7 +7,7 @@
 
 use super::verifier::SdmError;
 use crate::crypto::lrp::Lrp;
-use crate::crypto::suite::aes_cbc_decrypt;
+use crate::crypto::suite::aes_cbc_decrypt_n;
 
 /// Decrypted PICCData fields extracted from the NDEF file.
 pub(super) struct ParsedPiccData {
@@ -54,7 +54,7 @@ pub(super) fn decrypt_picc_data_aes(
     enc: &[u8; 16],
 ) -> Result<ParsedPiccData, SdmError> {
     let mut plain = *enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut plain).unwrap();
+    aes_cbc_decrypt_n(key, &[0u8; 16], &mut plain);
     parse_picc_data_tag(&plain)
 }
 

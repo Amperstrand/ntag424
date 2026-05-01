@@ -3,14 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::Transport;
 use crate::commands::authenticate::AuthResult;
 use crate::crypto::ct_eq_16;
-use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt, aes_cbc_encrypt};
+use crate::crypto::suite::{AesSuite, SessionSuite, aes_cbc_decrypt_n, aes_cbc_encrypt_n};
 use crate::session::SessionError;
 use crate::types::{KeyNumber, ResponseCode, ResponseStatus};
+
+/// Copy `enc` into a `Zeroizing` buffer and decrypt with a zero IV.
+fn aes_decrypt<const N: usize>(key: &[u8; 16], enc: &[u8; N]) -> Zeroizing<[u8; N]>
+where
+    [u8; N]: Zeroize,
+{
+    let mut buf = Zeroizing::new(*enc);
+    aes_cbc_decrypt_n(key, &[0u8; 16], &mut buf);
+    buf
+}
 
 /// `AuthenticateEV2NonFirst` for AES secure messaging (NT4H2421Gx §9.1.6,
 /// §10.4.2).
@@ -46,8 +56,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
             })?;
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
-    let mut rnd_b: Zeroizing<[u8; 16]> = Zeroizing::new(rnd_b_enc);
-    aes_cbc_decrypt(key, &[0u8; 16], &mut *rnd_b).unwrap();
+    let rnd_b = aes_decrypt(key, &rnd_b_enc);
 
     let part2_apdu = build_part2_apdu(key, &rnd_a, &rnd_b);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -103,8 +112,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
             })?;
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
-    let mut rnd_b: Zeroizing<[u8; 16]> = Zeroizing::new(rnd_b_enc);
-    aes_cbc_decrypt(key, &[0u8; 16], &mut *rnd_b).unwrap();
+    let rnd_b = aes_decrypt(key, &rnd_b_enc);
 
     let part2_apdu = build_part2_apdu(key, &rnd_a, &rnd_b);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -133,7 +141,7 @@ fn build_part2_apdu(key: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> [u8; 
     ct[..16].copy_from_slice(rnd_a);
     ct[16..31].copy_from_slice(&rnd_b[1..]);
     ct[31] = rnd_b[0];
-    aes_cbc_encrypt(key, &[0u8; 16], &mut ct).unwrap();
+    aes_cbc_encrypt_n(key, &[0u8; 16], &mut ct);
 
     let mut apdu = [0u8; 38];
     apdu[0] = 0x90;
@@ -154,8 +162,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     rnd_b: &[u8; 16],
     enc: &[u8; 32],
 ) -> Result<AuthResult<AesSuite>, SessionError<E>> {
-    let mut resp: Zeroizing<[u8; 32]> = Zeroizing::new(*enc);
-    aes_cbc_decrypt(key, &[0u8; 16], &mut *resp).unwrap();
+    let resp = aes_decrypt(key, enc);
 
     // Layout: TI (4) || RndA' (16) || PDcap2 (6) || PCDcap2 (6).
     let mut ti = [0u8; 4];
@@ -195,8 +202,7 @@ fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
     rnd_b: &[u8; 16],
     enc: &[u8; 16],
 ) -> Result<AesSuite, SessionError<E>> {
-    let mut plain: Zeroizing<[u8; 16]> = Zeroizing::new(*enc);
-    aes_cbc_decrypt(key, &[0u8; 16], &mut *plain).unwrap();
+    let plain = aes_decrypt(key, enc);
 
     // Rotate right by one to recover RndA; must equal what we sent.
     let mut rnd_a_received: Zeroizing<[u8; 16]> = Zeroizing::new([0u8; 16]);
@@ -212,6 +218,7 @@ fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::suite::aes_cbc_decrypt;
     use crate::testing::hex_array;
 
     #[derive(Debug)]

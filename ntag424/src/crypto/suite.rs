@@ -303,6 +303,32 @@ pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> 
     Some(())
 }
 
+/// Length-typed companion to [`aes_cbc_encrypt`].
+///
+/// Const-asserts that `N` is a positive multiple of 16, so calling with a
+/// wrong-sized buffer is a compile error rather than a runtime `None`.
+pub(crate) fn aes_cbc_encrypt_n<const N: usize>(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8; N]) {
+    const {
+        assert!(
+            N > 0 && N.is_multiple_of(16),
+            "AES-CBC buffer length must be a positive multiple of 16",
+        );
+    }
+    aes_cbc_encrypt(key, iv, buf).expect("const-asserted length");
+}
+
+/// Length-typed companion to [`aes_cbc_decrypt`]. Same compile-time
+/// length guarantee as [`aes_cbc_encrypt_n`].
+pub(crate) fn aes_cbc_decrypt_n<const N: usize>(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8; N]) {
+    const {
+        assert!(
+            N > 0 && N.is_multiple_of(16),
+            "AES-CBC buffer length must be a positive multiple of 16",
+        );
+    }
+    aes_cbc_decrypt(key, iv, buf).expect("const-asserted length");
+}
+
 // ---------------------------------------------------------------------------
 // LRP suite
 // ---------------------------------------------------------------------------
