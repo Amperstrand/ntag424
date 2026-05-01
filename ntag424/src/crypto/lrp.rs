@@ -16,6 +16,7 @@ use aes::{
         consts::{U1, U16},
     },
 };
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub(crate) type Block = Array<u8, <aes::Aes128 as BlockSizeUser>::BlockSize>;
 
@@ -218,6 +219,25 @@ impl Lrp {
         Some(())
     }
 }
+
+impl Zeroize for Lrp {
+    fn zeroize(&mut self) {
+        for p in self.plaintexts.iter_mut() {
+            let bytes: &mut [u8] = p.as_mut();
+            bytes.zeroize();
+        }
+        let k: &mut [u8] = self.k_prime.as_mut();
+        k.zeroize();
+    }
+}
+
+impl Drop for Lrp {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Lrp {}
 
 impl BlockSizeUser for Lrp {
     type BlockSize = U16;

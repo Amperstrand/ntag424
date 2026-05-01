@@ -25,6 +25,7 @@ use aes::{
     cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit},
 };
 use cmac::{Cmac, Mac, digest::InnerInit};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::types::file_settings::CryptoMode;
 
@@ -177,6 +178,7 @@ pub(crate) fn cmac_lrp(lrp: Lrp, data: &[u8]) -> [u8; 16] {
 
 /// AES-128 Secure Messaging suite (§9.1). Stateless between messages: the
 /// CBC IV is a deterministic function of `(dir, ti, cmd_ctr)`.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct AesSuite {
     mac_key: [u8; 16],
     enc_key: [u8; 16],
@@ -310,6 +312,7 @@ pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> 
 ///
 /// Holds the two session LRP instances and the persistent 32-bit `EncCtr`
 /// that advances by one per 16-byte block encrypted or decrypted (§9.2.4).
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct LrpSuite {
     mac_key: Lrp,
     enc_key: Lrp,

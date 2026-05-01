@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+use zeroize::Zeroizing;
+
 use crate::Transport;
 use crate::commands::authenticate::AuthResult;
 use crate::crypto::ct_eq_16;
@@ -59,17 +61,17 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);
     }
-    let rnd_b: [u8; 16] = data1[1..17].try_into().unwrap();
+    let rnd_b: Zeroizing<[u8; 16]> = Zeroizing::new(data1[1..17].try_into().unwrap());
 
     // Derive the new session suite; enc_ctr = 0 (§9.2.4, p. 30).
     let suite = LrpSuite::derive(key, &rnd_a, &rnd_b);
 
     // PCDResponse = MAC_LRP(SesAuthMACKey; RndA || RndB), untruncated
     // (Table 46, p. 54; §9.2.5: "MACs are not truncated during authentication").
-    let mut mac_input = [0u8; 32];
+    let mut mac_input: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
     mac_input[..16].copy_from_slice(&rnd_a);
-    mac_input[16..].copy_from_slice(&rnd_b);
-    let pcd_response = suite.mac_full(&mac_input);
+    mac_input[16..].copy_from_slice(&*rnd_b);
+    let pcd_response = suite.mac_full(&*mac_input);
 
     let part2_apdu = build_part2_apdu(&rnd_a, &pcd_response);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -90,10 +92,10 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
             })?;
 
     // Verify: MAC_LRP(SesAuthMACKey; RndB || RndA) == PICCResponse.
-    let mut verify_input = [0u8; 32];
-    verify_input[..16].copy_from_slice(&rnd_b);
+    let mut verify_input: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
+    verify_input[..16].copy_from_slice(&*rnd_b);
     verify_input[16..].copy_from_slice(&rnd_a);
-    if !ct_eq_16(&suite.mac_full(&verify_input), &picc_response) {
+    if !ct_eq_16(&suite.mac_full(&*verify_input), &picc_response) {
         return Err(SessionError::AuthenticationMismatch);
     }
 
@@ -152,7 +154,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     if data1[0] != AUTH_MODE_LRP {
         return Err(SessionError::AuthenticationMismatch);
     }
-    let rnd_b: [u8; 16] = data1[1..17].try_into().unwrap();
+    let rnd_b: Zeroizing<[u8; 16]> = Zeroizing::new(data1[1..17].try_into().unwrap());
 
     // Derive the session suite once; reused for the PCDResponse MAC,
     // the PICCResponse MAC check, and the PICCData decrypt.
@@ -160,10 +162,10 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
 
     // PCDResponse = MAC_LRP(SesAuthMACKey; RndA || RndB), untruncated
     // (§9.2.5: "MACs are not truncated during the authentication").
-    let mut mac_input = [0u8; 32];
+    let mut mac_input: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
     mac_input[..16].copy_from_slice(&rnd_a);
-    mac_input[16..].copy_from_slice(&rnd_b);
-    let pcd_response = suite.mac_full(&mac_input);
+    mac_input[16..].copy_from_slice(&*rnd_b);
+    let pcd_response = suite.mac_full(&*mac_input);
 
     let part2_apdu = build_part2_apdu(&rnd_a, &pcd_response);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -218,17 +220,17 @@ fn verify_and_extract_auth_result<E: core::error::Error + core::fmt::Debug>(
     picc_data: &[u8; 16],
     picc_response: &[u8; 16],
 ) -> Result<AuthResult<LrpSuite>, SessionError<E>> {
-    let mut verify_input = [0u8; 48];
+    let mut verify_input: Zeroizing<[u8; 48]> = Zeroizing::new([0u8; 48]);
     verify_input[..16].copy_from_slice(rnd_b);
     verify_input[16..32].copy_from_slice(rnd_a);
     verify_input[32..].copy_from_slice(picc_data);
-    if !ct_eq_16(&suite.mac_full(&verify_input), picc_response) {
+    if !ct_eq_16(&suite.mac_full(&*verify_input), picc_response) {
         return Err(SessionError::AuthenticationMismatch);
     }
 
     // Single-block decrypt at EncCtr=0; advances to 1 (§9.2.4).
-    let mut plain = *picc_data;
-    suite.decrypt(Direction::Response, &[0; 4], 0, &mut plain);
+    let mut plain: Zeroizing<[u8; 16]> = Zeroizing::new(*picc_data);
+    suite.decrypt(Direction::Response, &[0; 4], 0, &mut *plain);
 
     // plain = TI (4) || PDCap2 (6) || PCDCap2 (6). The PICC echoes the
     // PCDCap2 we sent; mismatch means the PICC didn't interpret Part 1
