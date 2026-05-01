@@ -16,6 +16,8 @@ targets both embedded readers and host-side provisioning and verification.
   control and custom flows.
 - **Full application protocol**: Authentication (AES and LRP), file read/write,
   file settings, key changes, configuration, originality verification.
+- **Comprehensive tests and documentation** using real tag data and
+  official test vectors.
 - **Secure Dynamic Messaging (SDM)** server-side verification, plus a
   `sdm_url_config!` macro for convenient config generation at compile time.
 - **Key diversification** for deriving per-tag keys from a backend
