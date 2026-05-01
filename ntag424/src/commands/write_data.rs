@@ -22,6 +22,20 @@
 //! In all variants the command header is `FileNo(1) || Offset(3 LE) ||
 //! Length(3 LE)`. Unlike `ReadData`, `Length = 0` is **not** valid
 //! (Table 81: `000001h .. (FileSize - Offset)`).
+//!
+//! ## Chunking
+//!
+//! The PICC only supports short-form APDUs and has no application-layer
+//! chaining for `WriteData` (§8.4 Table 16, §8.5), so writes whose
+//! command body would exceed `Lc = 255` are split across multiple APDUs
+//! at successive offsets by [`write_data_mac`] and [`write_data_full`].
+//! Each per-APDU command carries its own `MACt` and advances `CmdCtr`.
+//! The per-mode caps live on [`MAC_WRITE_CHUNK`] and [`FULL_WRITE_CHUNK`].
+//!
+//! The plain-mode chunk loop lives in the session layer instead (see
+//! [`crate::session::Session::write_file_plain`]) because
+//! [`write_data_plain`] is issued without a [`SecureChannel`] and the
+//! `CmdCtr` increment is the caller's responsibility.
 
 use crate::{
     Transport,
@@ -49,6 +63,19 @@ const WRITE_DATA_MAX_BODY: usize = 248;
 
 /// Maximum short-APDU body length.
 const MAX_APDU_BODY: usize = 255;
+
+/// Max plaintext bytes per single `CommMode.MAC` `WriteData` APDU.
+///
+/// Body = `header(7) || data || MACt(8) ≤ 255` ⇒ data ≤ 240 bytes.
+const MAC_WRITE_CHUNK: usize = 240;
+
+/// Max plaintext bytes per single `CommMode.FULL` `WriteData` APDU.
+///
+/// Body = `header(7) || ciphertext || MACt(8) ≤ 255` ⇒ ciphertext ≤ 240
+/// bytes (15 cipher blocks). M2 padding pushes plaintext of length `n`
+/// to `(n+1).next_multiple_of(16)` bytes of ciphertext, so 239 → 240 ✓
+/// but 240 → 256 ✗.
+const FULL_WRITE_CHUNK: usize = 239;
 
 fn validate_header<E: core::error::Error + core::fmt::Debug>(
     file_no: u8,
@@ -144,10 +171,12 @@ pub(crate) async fn write_data_plain<T: Transport>(
 
 /// `WriteData` in `CommMode.MAC` (§9.1.9).
 ///
-/// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) Data MACt(8) 00`.
-/// Response: `MACt(8)`, `91 00`. Verifies the trailing `MACt` and advances
-/// `CmdCtr` on success.
+/// Splits into multiple APDUs when the command body would exceed
+/// `Lc = 255` (see [`MAC_WRITE_CHUNK`]).
 ///
+/// Wire (per APDU): `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE)
+/// Data MACt(8) 00`. Response: `MACt(8)`, `91 00`. Each APDU is its own
+/// authenticated command: own `MACt`, own `CmdCtr` increment.
 pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -156,6 +185,36 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
     data: &[u8],
 ) -> Result<(), SessionError<T::Error>> {
     validate_header(file_no, offset, data.len())?;
+
+    let mut written: usize = 0;
+    let mut current_offset = offset;
+    while written < data.len() {
+        let end = (written + MAC_WRITE_CHUNK).min(data.len());
+        write_data_mac_one_apdu(
+            transport,
+            channel,
+            file_no,
+            current_offset,
+            &data[written..end],
+        )
+        .await?;
+        // `current_offset + (end - written)` cannot overflow `U24_MAX`
+        // because validate_header enforced both `offset ≤ U24_MAX` and
+        // `data.len() ≤ U24_MAX`, and `offset + data.len()` cannot
+        // exceed `2 * U24_MAX < u32::MAX`. wrapping_add is defensive.
+        current_offset = current_offset.wrapping_add((end - written) as u32);
+        written = end;
+    }
+    Ok(())
+}
+
+async fn write_data_mac_one_apdu<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Result<(), SessionError<T::Error>> {
     let header = build_header(file_no, offset, data.len() as u32);
 
     let body = channel
@@ -174,16 +233,20 @@ pub(crate) async fn write_data_mac<T: Transport, S: SessionSuite>(
 
 /// `WriteData` in `CommMode.FULL` (§9.1.10).
 ///
-/// Wire: `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE) E(Data||pad) MACt(8) 00`.
-/// Response: `MACt(8)`, `91 00` - no encrypted data in the response
-/// (§10.8.2 Table 82: "No response data").
+/// Splits into multiple APDUs when the command body would exceed
+/// `Lc = 255` (see [`FULL_WRITE_CHUNK`]). Each APDU is its own
+/// authenticated command: own padding, encryption, `MACt`, and `CmdCtr`
+/// increment.
+///
+/// Wire (per APDU): `90 8D 00 00 <Lc> FileNo Offset(3 LE) Length(3 LE)
+/// E(Data||pad) MACt(8) 00`. Response: `MACt(8)`, `91 00` - no encrypted
+/// data in the response (§10.8.2 Table 82: "No response data").
 ///
 /// Encryption is applied to `CmdData` only (§9.1.10 Figure 9): the
 /// header (`FileNo Offset Length`) is sent in the clear and included in
 /// the MAC input, while the `Data` portion is padded with ISO/IEC 9797-1
 /// Method 2, encrypted with `SesAuthENCKey`, and then MAC'd together
 /// with the header.
-///
 pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -193,6 +256,31 @@ pub(crate) async fn write_data_full<T: Transport, S: SessionSuite>(
 ) -> Result<(), SessionError<T::Error>> {
     validate_header(file_no, offset, data.len())?;
 
+    let mut written: usize = 0;
+    let mut current_offset = offset;
+    while written < data.len() {
+        let end = (written + FULL_WRITE_CHUNK).min(data.len());
+        write_data_full_one_apdu(
+            transport,
+            channel,
+            file_no,
+            current_offset,
+            &data[written..end],
+        )
+        .await?;
+        current_offset = current_offset.wrapping_add((end - written) as u32);
+        written = end;
+    }
+    Ok(())
+}
+
+async fn write_data_full_one_apdu<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    data: &[u8],
+) -> Result<(), SessionError<T::Error>> {
     let header = build_header(file_no, offset, data.len() as u32);
 
     // ISO/IEC 9797-1 Method 2 padding: data || 0x80 || 0x00..
@@ -247,6 +335,7 @@ mod tests {
         Exchange, TestTransport, aes_key3_mac_state_hw, aes_key3_state_hw, block_on, hex_array,
         hex_bytes, lrp_key3_mac_state_hw, lrp_key3_state_hw,
     };
+    use alloc::vec;
     use alloc::vec::Vec;
 
     fn authenticated_aes(
@@ -392,26 +481,6 @@ mod tests {
 
         assert_eq!(state.counter(), 1);
         assert_eq!(transport.remaining(), 0);
-    }
-
-    #[test]
-    fn write_data_mac_rejects_apdu_body_overflow_without_transmit() {
-        let mut state = authenticated_aes(
-            [0u8; 16],
-            hex_array("4C6626F5E72EA694202139295C7A7FC7"),
-            [0x9D, 0x00, 0xC4, 0xDF],
-            0,
-        );
-        let data = [0u8; 241];
-        let mut transport = TestTransport::new([]);
-        let mut channel = SecureChannel::new(&mut state);
-
-        match block_on(write_data_mac(&mut transport, &mut channel, 0x02, 0, &data)) {
-            Err(SessionError::ApduBodyTooLarge { got: 256, max: 255 }) => (),
-            other => panic!("expected ApduBodyTooLarge, got {other:?}"),
-        }
-        assert_eq!(transport.remaining(), 0);
-        assert_eq!(channel.cmd_ctr(), 0);
     }
 
     /// Reject a bad `WriteData` response MAC.
@@ -768,6 +837,134 @@ mod tests {
         .expect("hw LRP MAC write must succeed");
 
         assert_eq!(state.counter(), 1);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Writing 256 bytes in `CommMode.MAC` exceeds the 255-byte short-`Lc`
+    /// budget once the 7-byte header and 8-byte `MACt` are added, so it
+    /// must split into two independent `WriteData` APDUs at offsets 0
+    /// and 240. Verifies the chunk loop emits both APDUs in order and
+    /// advances `CmdCtr` once per APDU.
+    #[test]
+    fn write_data_mac_chunks_at_240_byte_boundary() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        let build_exchange = |ctr: u16, off: u32, data: &[u8]| -> (Vec<u8>, Vec<u8>) {
+            let header = build_header(0x02, off, data.len() as u32);
+            let cmd_mac = {
+                let mut input = Vec::new();
+                input.push(0x8D);
+                input.extend_from_slice(&ctr.to_le_bytes());
+                input.extend_from_slice(&ti);
+                input.extend_from_slice(&header);
+                input.extend_from_slice(data);
+                suite.mac(&input)
+            };
+            let resp_mac = {
+                let mut input = Vec::new();
+                input.push(0x00);
+                input.extend_from_slice(&(ctr + 1).to_le_bytes());
+                input.extend_from_slice(&ti);
+                suite.mac(&input)
+            };
+            let lc = (7 + data.len() + MAC_LEN) as u8;
+            let mut apdu = Vec::from([0x90u8, 0x8D, 0x00, 0x00, lc]);
+            apdu.extend_from_slice(&header);
+            apdu.extend_from_slice(data);
+            apdu.extend_from_slice(&cmd_mac);
+            apdu.push(0x00);
+            (apdu, resp_mac.to_vec())
+        };
+
+        let (apdu1, resp1) = build_exchange(0, 0, &payload[..240]);
+        let (apdu2, resp2) = build_exchange(1, 240, &payload[240..]);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&apdu1, &resp1, 0x91, 0x00),
+            Exchange::new(&apdu2, &resp2, 0x91, 0x00),
+        ]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_mac(&mut transport, &mut ch, 0x02, 0, &payload).await
+        })
+        .expect("chunked MAC write must succeed");
+
+        assert_eq!(state.counter(), 2, "two APDUs must each advance CmdCtr");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Writing 256 bytes in `CommMode.FULL` must split at the 239-byte
+    /// plaintext boundary (240-byte ciphertext after M2 padding). Each
+    /// chunk is a fully independent FULL-mode write with its own
+    /// padding, encryption, MAC, and `CmdCtr` increment.
+    #[test]
+    fn write_data_full_chunks_at_239_byte_boundary() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        let build_exchange =
+            |ctr: u16, off: u32, plain: &[u8], padded_len: usize| -> (Vec<u8>, Vec<u8>) {
+                let header = build_header(0x02, off, plain.len() as u32);
+                // ISO/IEC 9797-1 Method 2 padding then encrypt with command IV.
+                let mut padded = vec![0u8; padded_len];
+                padded[..plain.len()].copy_from_slice(plain);
+                padded[plain.len()] = 0x80;
+                let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+                enc_suite.encrypt(Direction::Command, &ti, ctr, &mut padded);
+                let cmd_mac = {
+                    let mut input = Vec::new();
+                    input.push(0x8D);
+                    input.extend_from_slice(&ctr.to_le_bytes());
+                    input.extend_from_slice(&ti);
+                    input.extend_from_slice(&header);
+                    input.extend_from_slice(&padded);
+                    suite.mac(&input)
+                };
+                let resp_mac = {
+                    let mut input = Vec::new();
+                    input.push(0x00);
+                    input.extend_from_slice(&(ctr + 1).to_le_bytes());
+                    input.extend_from_slice(&ti);
+                    suite.mac(&input)
+                };
+                let lc = (7 + padded.len() + MAC_LEN) as u8;
+                let mut apdu = Vec::from([0x90u8, 0x8D, 0x00, 0x00, lc]);
+                apdu.extend_from_slice(&header);
+                apdu.extend_from_slice(&padded);
+                apdu.extend_from_slice(&cmd_mac);
+                apdu.push(0x00);
+                (apdu, resp_mac.to_vec())
+            };
+
+        // 239 bytes of plaintext → 240-byte ciphertext.
+        let (apdu1, resp1) = build_exchange(0, 0, &payload[..239], 240);
+        // 17 bytes of plaintext → 32-byte ciphertext (sentinel forces 2nd block).
+        let (apdu2, resp2) = build_exchange(1, 239, &payload[239..], 32);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&apdu1, &resp1, 0x91, 0x00),
+            Exchange::new(&apdu2, &resp2, 0x91, 0x00),
+        ]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            write_data_full(&mut transport, &mut ch, 0x02, 0, &payload).await
+        })
+        .expect("chunked FULL write must succeed");
+
+        assert_eq!(state.counter(), 2);
         assert_eq!(transport.remaining(), 0);
     }
 }

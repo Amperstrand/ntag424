@@ -5,6 +5,20 @@
 
 use super::*;
 
+/// Max bytes per single `ISOReadBinary` APDU.
+///
+/// `Le` is one byte; `Le = 00h` requests the short-form maximum of 256
+/// bytes (NT4H2421Gx §10.9.2). Reads larger than the per-APDU cap are
+/// chunked across successive offsets.
+const ISO_READ_BINARY_CHUNK: usize = 256;
+
+/// Max bytes per single `ISOUpdateBinary` APDU.
+///
+/// `Lc` is one byte; the maximum body is 255 bytes (no secure-messaging
+/// overhead — `ISOUpdateBinary` is `CommMode.Plain` only). Writes larger
+/// than the per-APDU cap are chunked across successive offsets.
+const ISO_UPDATE_BINARY_CHUNK: usize = 255;
+
 pub struct Unauthenticated;
 
 impl Session<Unauthenticated> {
@@ -58,13 +72,12 @@ impl Session<Unauthenticated> {
     /// For files with other access conditions, authentication may be required and
     /// the caller should use [`AuthenticatedSession::read_file_with_mode`].
     ///
-    /// `file` selects the EF via its short ISO FileID (§8.2.2 Table 69).
-    /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
-    ///
-    /// The number of bytes requested is `min(buf.len(), 256)`; when that
-    /// hits the 256 cap the command asks for the entire file (`Le = 00h`)
-    /// and the PICC truncates at the file boundary. The returned `usize`
-    /// is the number of bytes actually copied into `buf`.
+    /// Buffers larger than the per-APDU cap of 256 bytes are split into
+    /// multiple `ISOReadBinary` APDUs at successive 15-bit offsets — the
+    /// EF stays selected across calls. The returned `usize` is the
+    /// number of bytes actually copied into `buf`; it can be smaller than
+    /// `buf.len()` if the PICC reports the end of the file with a short
+    /// payload, in which case no further APDUs are issued.
     pub async fn read_file_unauthenticated<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -77,7 +90,32 @@ impl Session<Unauthenticated> {
             iso_select_ef_by_fid(transport, file.file_id()).await?;
             self.ef_selected = Some(file.file_id());
         }
-        iso_read_binary(transport, None, offset, buf).await
+
+        if buf.is_empty() {
+            // Surface the empty-buffer error from `iso_read_binary`.
+            return iso_read_binary(transport, None, offset, buf).await;
+        }
+
+        let mut total: usize = 0;
+        while total < buf.len() {
+            let want = (buf.len() - total).min(ISO_READ_BINARY_CHUNK);
+            let abs = offset as usize + total;
+            if abs > 0x7FFF {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: abs,
+                    reason: "must be <= 0x7FFF",
+                });
+            }
+            let n =
+                iso_read_binary(transport, None, abs as u16, &mut buf[total..total + want]).await?;
+            total += n;
+            if n < want {
+                // PICC returned a short payload — file boundary reached.
+                break;
+            }
+        }
+        Ok(total)
     }
 
     /// Write bytes to a file.
@@ -86,7 +124,9 @@ impl Session<Unauthenticated> {
     /// Write access on the targeted file
     /// must be set to [free access](`crate::types::file_settings::Access::Free`) for the call to succeed.
     ///
-    /// `offset` is 8-bit (`≤ 0xFF`) when a short FileID is used.
+    /// Inputs larger than the per-APDU cap of 255 bytes are split into
+    /// multiple `ISOUpdateBinary` APDUs at successive 15-bit offsets —
+    /// the EF stays selected across calls.
     pub async fn write_file_unauthenticated<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -99,7 +139,33 @@ impl Session<Unauthenticated> {
             iso_select_ef_by_fid(transport, file.file_id()).await?;
             self.ef_selected = Some(file.file_id());
         }
-        iso_update_binary(transport, None, offset, data).await
+
+        if data.is_empty() {
+            // Surface the empty-data error from `iso_update_binary`.
+            return iso_update_binary(transport, None, offset, data).await;
+        }
+
+        let mut written: usize = 0;
+        while written < data.len() {
+            let chunk_len = (data.len() - written).min(ISO_UPDATE_BINARY_CHUNK);
+            let abs = offset as usize + written;
+            if abs > 0x7FFF {
+                return Err(SessionError::InvalidCommandParameter {
+                    parameter: "offset",
+                    value: abs,
+                    reason: "must be <= 0x7FFF",
+                });
+            }
+            iso_update_binary(
+                transport,
+                None,
+                abs as u16,
+                &data[written..written + chunk_len],
+            )
+            .await?;
+            written += chunk_len;
+        }
+        Ok(())
     }
 
     /// Retrieve a file's settings.
@@ -185,5 +251,110 @@ impl Session<Unauthenticated> {
     ) -> Result<(), SessionError<T::Error>> {
         let sig = read_sig(transport).await?;
         originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{Exchange, TestTransport, block_on};
+    use alloc::vec;
+
+    /// `D27600008501010000` — NDEF application DF name (§10.9.1).
+    const SELECT_NDEF_APP: [u8; 13] = [
+        0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+    ];
+
+    /// `00 A4 00 0C 02 E1 04` — select NDEF EF (`E1 04`), no FCI.
+    const SELECT_NDEF_EF: [u8; 7] = [0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04];
+
+    /// 256-byte write splits into a 255-byte and a 1-byte
+    /// `ISOUpdateBinary` at offset 0 and offset 255 — `Lc` is one byte so
+    /// a single APDU caps at 255.
+    #[test]
+    fn write_file_unauthenticated_chunks_at_255_byte_boundary() {
+        let payload = &crate::testing::TEST_PAYLOAD_256;
+
+        // Chunk 1: 00 D6 00 00 FF <data[0..255]>
+        let mut apdu1 = vec![0x00, 0xD6, 0x00, 0x00, 0xFF];
+        apdu1.extend_from_slice(&payload[..255]);
+        // Chunk 2: 00 D6 00 FF 01 <data[255]>  (offset = 0x00FF)
+        let apdu2 = [0x00, 0xD6, 0x00, 0xFF, 0x01, payload[255]];
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&SELECT_NDEF_APP, &[], 0x90, 0x00),
+            Exchange::new(&SELECT_NDEF_EF, &[], 0x90, 0x00),
+            Exchange::new(&apdu1, &[], 0x90, 0x00),
+            Exchange::new(&apdu2, &[], 0x90, 0x00),
+        ]);
+
+        block_on(Session::new().write_file_unauthenticated(&mut transport, File::Ndef, 0, payload))
+            .expect("chunked write ok");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// 512-byte read split into two 256-byte `ISOReadBinary` APDUs.
+    #[test]
+    fn read_file_unauthenticated_chunks_at_256_byte_boundary() {
+        let mut payload1 = [0u8; 256];
+        let mut payload2 = [0u8; 256];
+        for (i, b) in payload1.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        for (i, b) in payload2.iter_mut().enumerate() {
+            *b = (i ^ 0xAA) as u8;
+        }
+
+        // Chunk 1: 00 B0 00 00 00 (Le=00 → 256 bytes), offset 0.
+        let apdu1 = [0x00, 0xB0, 0x00, 0x00, 0x00];
+        // Chunk 2: 00 B0 01 00 00, offset 0x0100 = 256.
+        let apdu2 = [0x00, 0xB0, 0x01, 0x00, 0x00];
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&SELECT_NDEF_APP, &[], 0x90, 0x00),
+            Exchange::new(&SELECT_NDEF_EF, &[], 0x90, 0x00),
+            Exchange::new(&apdu1, &payload1, 0x90, 0x00),
+            Exchange::new(&apdu2, &payload2, 0x90, 0x00),
+        ]);
+
+        let mut buf = [0u8; 512];
+        let n = block_on(Session::new().read_file_unauthenticated(
+            &mut transport,
+            File::Ndef,
+            0,
+            &mut buf,
+        ))
+        .expect("chunked read ok");
+        assert_eq!(n, 512);
+        assert_eq!(&buf[..256], &payload1);
+        assert_eq!(&buf[256..], &payload2);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// A short payload from the PICC ends the read early — no further
+    /// APDUs are issued past the file boundary.
+    #[test]
+    fn read_file_unauthenticated_stops_on_short_payload() {
+        let payload = [0xABu8; 100];
+        // Buffer is 256 bytes; PICC returns only 100 → file boundary.
+        let apdu = [0x00, 0xB0, 0x00, 0x00, 0x00];
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&SELECT_NDEF_APP, &[], 0x90, 0x00),
+            Exchange::new(&SELECT_NDEF_EF, &[], 0x90, 0x00),
+            Exchange::new(&apdu, &payload, 0x90, 0x00),
+        ]);
+
+        let mut buf = [0u8; 256];
+        let n = block_on(Session::new().read_file_unauthenticated(
+            &mut transport,
+            File::Ndef,
+            0,
+            &mut buf,
+        ))
+        .expect("read ok");
+        assert_eq!(n, 100);
+        assert_eq!(&buf[..100], &payload);
+        assert_eq!(transport.remaining(), 0);
     }
 }

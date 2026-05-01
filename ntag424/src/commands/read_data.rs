@@ -23,6 +23,15 @@
 //! In all variants the command header is `FileNo(1) || Offset(3 LE) ||
 //! Length(3 LE)`; `length == 0` means "entire file from `offset`",
 //! capped at the 256-byte short-`Le` response limit (§10.8.1 Table 78).
+//!
+//! ## Chunking
+//!
+//! The PICC only supports short-form APDUs and has no application-layer
+//! chaining for `ReadData` (§8.4 Table 16, §8.5), so requests whose
+//! response would exceed `Le = 256` are split across multiple APDUs at
+//! successive offsets by [`read_data_mac`] and [`read_data_full`]. Each
+//! per-APDU response carries its own `MACt` and advances `CmdCtr`. The
+//! per-mode caps live on [`MAC_READ_CHUNK`] and [`FULL_READ_CHUNK`].
 
 use crate::{
     Transport,
@@ -47,6 +56,22 @@ const MAC_LEN: usize = 8;
 
 /// Max addressable file offset/length: 24-bit field per §10.8.1 Table 78.
 const U24_MAX: u32 = 0x00FF_FFFF;
+
+/// Max plaintext bytes per single `CommMode.MAC` `ReadData` APDU.
+///
+/// The response carries `data || MACt(8)`; the short-`Le` cap is 256 bytes
+/// (§8.4 Table 16), leaving 248 bytes for plaintext.
+const MAC_READ_CHUNK: u32 = 248;
+
+/// Max plaintext bytes per single `CommMode.FULL` `ReadData` APDU.
+///
+/// Response is `E(data || M2 pad) || MACt(8)`. With `MACt = 8` the
+/// ciphertext budget is `256 - 8 = 248`; rounding down to a 16-byte
+/// boundary gives 240 ciphertext bytes, i.e. 15 cipher blocks. Since the
+/// PICC always appends `0x80` and zero-pads to the next block, plaintext
+/// of length `n` produces `(n+1).next_multiple_of(16)` ciphertext bytes:
+/// 239 → 240 ✓, 240 → 256 ✗. So 239 is the per-APDU cap.
+const FULL_READ_CHUNK: u32 = 239;
 
 fn validate_request<E: core::error::Error + core::fmt::Debug>(
     file_no: u8,
@@ -159,9 +184,17 @@ pub(crate) async fn read_data_plain<T: Transport>(
 
 /// `ReadData` in `CommMode.MAC` (§9.1.9).
 ///
-/// Wire: `90 AD 00 00 0F FileNo Offset(3 LE) Length(3 LE) MACt(8) 00`;
-/// response `<plain data> <MACt(8)>`. Verifies the trailing `MACt` and
-/// advances `CmdCtr` on success.
+/// Splits into multiple APDUs when the response would exceed `Le = 256`
+/// (see [`MAC_READ_CHUNK`]). `length == 0` ("whole file") is emulated by
+/// issuing successive explicit-length APDUs sized off `buf.len()`,
+/// stopping when the PICC returns a short response (file boundary) or
+/// the buffer is full — the chunker never sends `Length = 0` itself,
+/// because the PICC rejects it with `91 7E LengthError` once the
+/// response would exceed the short-`Le` cap (observed on hardware).
+///
+/// Wire (per APDU): `90 AD 00 00 0F FileNo Offset(3 LE) Length(3 LE)
+/// MACt(8) 00`; response `<plain data> <MACt(8)>`. Each APDU is its own
+/// authenticated command: own `MACt`, own `CmdCtr` increment.
 pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
     transport: &mut T,
     channel: &mut SecureChannel<'_, S>,
@@ -171,6 +204,50 @@ pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
     buf: &mut [u8],
 ) -> Result<usize, SessionError<T::Error>> {
     validate_request(file_no, offset, length, buf.len())?;
+
+    // `length == 0` ("fill the buffer, stop on EOF") is driven off
+    // `buf.len()`; `length > 0` ("read exactly N bytes") off `length`.
+    let target = if length == 0 {
+        buf.len()
+    } else {
+        length as usize
+    };
+
+    let mut total: usize = 0;
+    let mut current_offset = offset;
+    while total < target {
+        let chunk_usize = (target - total).min(MAC_READ_CHUNK as usize);
+        let chunk = chunk_usize as u32;
+        let n = read_data_mac_one_apdu(
+            transport,
+            channel,
+            file_no,
+            current_offset,
+            chunk,
+            &mut buf[total..total + chunk_usize],
+        )
+        .await?;
+        total += n;
+        if n < chunk_usize {
+            // PICC returned a short response; treat as EOF and stop.
+            break;
+        }
+        // `current_offset + chunk` cannot overflow `U24_MAX` because the
+        // initial validate_request enforced `offset + length ≤ U24_MAX`
+        // (offset and length each fit 24 bits), but be defensive anyway.
+        current_offset = current_offset.wrapping_add(chunk);
+    }
+    Ok(total)
+}
+
+async fn read_data_mac_one_apdu<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf: &mut [u8],
+) -> Result<usize, SessionError<T::Error>> {
     let want = want_plain_bytes(length, buf.len());
 
     let header = build_header(file_no, offset, length);
@@ -200,8 +277,12 @@ pub(crate) async fn read_data_mac<T: Transport, S: SessionSuite>(
 
 /// `ReadData` in `CommMode.FULL` (§9.1.10).
 ///
-/// Wire: same request as MAC mode (no `CmdData`, so nothing to encrypt
-/// on the command side). Response is
+/// Splits into multiple APDUs when the response would exceed `Le = 256`
+/// (see [`FULL_READ_CHUNK`]). Each APDU is its own authenticated
+/// command: own `MACt`, own `CmdCtr` increment, own padding/decryption.
+///
+/// Wire (per APDU): same request as MAC mode (no `CmdData`, so nothing
+/// to encrypt on the command side). Response is
 /// `E(SesAuthENCKey; RespData || 80 00..00) || MACt(8)` with the
 /// response IV derived from `(TI, CmdCtr+1)` (§9.1.4). Verifies the
 /// `MACt`, advances `CmdCtr`, decrypts the ciphertext, strips the
@@ -221,6 +302,48 @@ pub(crate) async fn read_data_full<T: Transport, S: SessionSuite>(
 ) -> Result<usize, SessionError<T::Error>> {
     validate_request(file_no, offset, length, buf.len())?;
 
+    // `length == 0` ("fill the buffer") is driven off `buf.len()`. The
+    // chunker always emits explicit per-chunk lengths so each response
+    // fits `Le = 256`; the caller must size `buf` exactly (no EOF
+    // detection in FULL mode — the per-APDU helper pins each response
+    // length).
+    let target = if length == 0 {
+        buf.len()
+    } else {
+        length as usize
+    };
+
+    let mut total: usize = 0;
+    let mut current_offset = offset;
+    while total < target {
+        let chunk_usize = (target - total).min(FULL_READ_CHUNK as usize);
+        let chunk = chunk_usize as u32;
+        let n = read_data_full_one_apdu(
+            transport,
+            channel,
+            file_no,
+            current_offset,
+            chunk,
+            &mut buf[total..total + chunk_usize],
+        )
+        .await?;
+        total += n;
+        // FULL mode pins per-chunk `length` exactly, so a short
+        // response would already have surfaced as `UnexpectedLength`.
+        // No early-exit branch needed; just advance and continue.
+        current_offset = current_offset.wrapping_add(chunk);
+    }
+    Ok(total)
+}
+
+async fn read_data_full_one_apdu<T: Transport, S: SessionSuite>(
+    transport: &mut T,
+    channel: &mut SecureChannel<'_, S>,
+    file_no: u8,
+    offset: u32,
+    length: u32,
+    buf: &mut [u8],
+) -> Result<usize, SessionError<T::Error>> {
     let header = build_header(file_no, offset, length);
     let cmd_mac = channel.compute_cmd_mac(0xAD, &header, &[]);
 
@@ -295,6 +418,7 @@ mod tests {
         Exchange, TestTransport, aes_key3_mac_state_hw, aes_key3_state_hw, block_on, hex_array,
         hex_bytes, lrp_key3_mac_state_hw, lrp_key3_state_hw,
     };
+    use alloc::vec;
     use alloc::vec::Vec;
 
     fn authenticated_aes(
@@ -526,6 +650,68 @@ mod tests {
         assert_eq!(state.counter(), 0);
     }
 
+    /// `length = 0` with `buf.len() > MAC_READ_CHUNK` must emit
+    /// successive explicit-`Length` APDUs rather than one `Length = 0`
+    /// APDU (the PICC rejects the latter once the response would exceed
+    /// `Le = 256`).
+    #[test]
+    fn read_data_mac_chunks_when_length_zero_and_buf_exceeds_chunk() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        let build_exchange = |ctr: u16, off: u32, data: &[u8]| -> (Vec<u8>, Vec<u8>) {
+            let header = build_header(0x02, off, data.len() as u32);
+            let cmd_mac = {
+                let mut input = Vec::new();
+                input.push(0xAD);
+                input.extend_from_slice(&ctr.to_le_bytes());
+                input.extend_from_slice(&ti);
+                input.extend_from_slice(&header);
+                suite.mac(&input)
+            };
+            let resp_mac = {
+                let mut input = Vec::new();
+                input.push(0x00);
+                input.extend_from_slice(&(ctr + 1).to_le_bytes());
+                input.extend_from_slice(&ti);
+                input.extend_from_slice(data);
+                suite.mac(&input)
+            };
+            let mut apdu = Vec::from([0x90u8, 0xAD, 0x00, 0x00, 0x0F]);
+            apdu.extend_from_slice(&header);
+            apdu.extend_from_slice(&cmd_mac);
+            apdu.push(0x00);
+            let mut resp = data.to_vec();
+            resp.extend_from_slice(&resp_mac);
+            (apdu, resp)
+        };
+
+        let (apdu1, resp1) = build_exchange(0, 0, &payload[..MAC_READ_CHUNK as usize]);
+        let (apdu2, resp2) = build_exchange(1, MAC_READ_CHUNK, &payload[MAC_READ_CHUNK as usize..]);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&apdu1, &resp1, 0x91, 0x00),
+            Exchange::new(&apdu2, &resp2, 0x91, 0x00),
+        ]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 256];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x02, 0, 0, &mut buf).await
+        })
+        .expect("chunked MAC read with length=0 must succeed");
+
+        assert_eq!(n, 256);
+        assert_eq!(&buf[..], payload.as_slice());
+        assert_eq!(state.counter(), 2, "two APDUs must each advance CmdCtr");
+        assert_eq!(transport.remaining(), 0);
+    }
+
     /// Replay a FULL-mode `ReadData` round-trip.
     ///
     /// This covers a 20-byte plaintext becoming a 32-byte ciphertext
@@ -712,9 +898,10 @@ mod tests {
 
     /// Replay a hardware-captured Full-mode `ReadData` (AES Key3 session).
     ///
-    /// TI=085BC941, CmdCtr = 14 (Key3 nonfirst auth preserved the counter
-    /// from the Key0 session). Reads 128 bytes from the proprietary file 0x03.
-    /// Plaintext starts with `DEADBEEF01020304` followed by zero bytes.
+    /// TI=085BC941, CmdCtr = 14. Reads 128 bytes from file 0x03 using
+    /// `Length = 0`. Drives `read_data_full_one_apdu` directly because
+    /// the public `read_data_full` chunker always emits explicit
+    /// per-chunk lengths and would not reproduce this capture.
     #[test]
     fn read_data_full_hw_aes() {
         let mut state = aes_key3_state_hw(14);
@@ -731,7 +918,7 @@ mod tests {
         let mut buf = [0u8; 128];
         let n = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
-            read_data_full(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
+            read_data_full_one_apdu(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
         })
         .expect("hw AES full read must succeed");
 
@@ -772,8 +959,9 @@ mod tests {
 
     /// Replay a hardware-captured Full-mode `ReadData` (LRP Key3 session).
     ///
-    /// TI=AFF75859, CmdCtr = 0 (fresh Key3 session). Reads 128 bytes from
-    /// proprietary file 0x03. Plaintext starts with `DEADBEEF01020304`.
+    /// TI=AFF75859, CmdCtr = 0. LRP counterpart to
+    /// [`read_data_full_hw_aes`]; same rationale for targeting
+    /// `read_data_full_one_apdu` directly.
     #[test]
     fn read_data_full_hw_lrp() {
         let mut state = lrp_key3_state_hw(0, 0);
@@ -790,7 +978,7 @@ mod tests {
         let mut buf = [0u8; 128];
         let n = block_on(async {
             let mut ch = SecureChannel::new(&mut state);
-            read_data_full(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
+            read_data_full_one_apdu(&mut transport, &mut ch, 0x03, 0, 0, &mut buf).await
         })
         .expect("hw LRP full read must succeed");
 
@@ -881,6 +1069,143 @@ mod tests {
 
         assert_eq!(n, 8);
         assert_eq!(buf, [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(state.counter(), 2);
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Reading 256 bytes in `CommMode.MAC` exceeds the 256-byte short-`Le`
+    /// budget once the 8-byte `MACt` is added, so it must split into two
+    /// independent `ReadData` APDUs at offsets 0 and 248. Verifies the
+    /// chunk loop emits both APDUs in order, advances `CmdCtr` once per
+    /// APDU, and assembles the full payload back into the caller's buffer.
+    #[test]
+    fn read_data_mac_chunks_at_248_byte_boundary() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        // Distinctive 256-byte payload so a misordered reassembly would
+        // be caught by the buffer comparison.
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        let build_exchange = |ctr: u16, off: u32, len: u32, data: &[u8]| -> (Vec<u8>, Vec<u8>) {
+            let header = build_header(0x02, off, len);
+            let cmd_mac = {
+                let mut input = Vec::new();
+                input.push(0xAD);
+                input.extend_from_slice(&ctr.to_le_bytes());
+                input.extend_from_slice(&ti);
+                input.extend_from_slice(&header);
+                suite.mac(&input)
+            };
+            let resp_mac = {
+                let mut input = Vec::new();
+                input.push(0x00);
+                input.extend_from_slice(&(ctr + 1).to_le_bytes());
+                input.extend_from_slice(&ti);
+                input.extend_from_slice(data);
+                suite.mac(&input)
+            };
+            let mut apdu = Vec::from([0x90u8, 0xAD, 0x00, 0x00, 0x0F]);
+            apdu.extend_from_slice(&header);
+            apdu.extend_from_slice(&cmd_mac);
+            apdu.push(0x00);
+            let mut resp_body = data.to_vec();
+            resp_body.extend_from_slice(&resp_mac);
+            (apdu, resp_body)
+        };
+
+        let (apdu1, resp1) = build_exchange(0, 0, 248, &payload[..248]);
+        let (apdu2, resp2) = build_exchange(1, 248, 8, &payload[248..]);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&apdu1, &resp1, 0x91, 0x00),
+            Exchange::new(&apdu2, &resp2, 0x91, 0x00),
+        ]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 256];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_mac(&mut transport, &mut ch, 0x02, 0, 256, &mut buf).await
+        })
+        .expect("chunked MAC read must succeed");
+
+        assert_eq!(n, 256);
+        assert_eq!(buf.as_slice(), payload.as_slice());
+        assert_eq!(state.counter(), 2, "two APDUs must each advance CmdCtr");
+        assert_eq!(transport.remaining(), 0);
+    }
+
+    /// Reading 256 bytes in `CommMode.FULL` exceeds the response budget
+    /// once padding+MAC overhead is added, so it must split at the
+    /// 239-byte plaintext boundary (240-byte ciphertext). Each chunk is a
+    /// fully independent FULL-mode read with its own padding, MAC, and
+    /// `CmdCtr` increment.
+    #[test]
+    fn read_data_full_chunks_at_239_byte_boundary() {
+        let mac_key = hex_array("4C6626F5E72EA694202139295C7A7FC7");
+        let enc_key = hex_array("1309C877509E5A215007FF0ED19CA564");
+        let ti = [0x9D, 0x00, 0xC4, 0xDF];
+        let suite = AesSuite::from_keys(enc_key, mac_key);
+
+        let payload: Vec<u8> = (0..=255u8).collect();
+
+        let build_exchange =
+            |ctr: u16, off: u32, plain: &[u8], padded_len: usize| -> (Vec<u8>, Vec<u8>) {
+                let header = build_header(0x03, off, plain.len() as u32);
+                let cmd_mac = {
+                    let mut input = Vec::new();
+                    input.push(0xAD);
+                    input.extend_from_slice(&ctr.to_le_bytes());
+                    input.extend_from_slice(&ti);
+                    input.extend_from_slice(&header);
+                    suite.mac(&input)
+                };
+                // Build padded plaintext, encrypt with response IV at ctr+1.
+                let mut padded = vec![0u8; padded_len];
+                padded[..plain.len()].copy_from_slice(plain);
+                padded[plain.len()] = 0x80;
+                let mut enc_suite = AesSuite::from_keys(enc_key, mac_key);
+                enc_suite.encrypt(Direction::Response, &ti, ctr + 1, &mut padded);
+                let resp_mac = {
+                    let mut input = Vec::new();
+                    input.push(0x00);
+                    input.extend_from_slice(&(ctr + 1).to_le_bytes());
+                    input.extend_from_slice(&ti);
+                    input.extend_from_slice(&padded);
+                    suite.mac(&input)
+                };
+                let mut apdu = Vec::from([0x90u8, 0xAD, 0x00, 0x00, 0x0F]);
+                apdu.extend_from_slice(&header);
+                apdu.extend_from_slice(&cmd_mac);
+                apdu.push(0x00);
+                let mut resp_body = padded;
+                resp_body.extend_from_slice(&resp_mac);
+                (apdu, resp_body)
+            };
+
+        // 239 bytes of plaintext → 240-byte ciphertext (one M2 sentinel).
+        let (apdu1, resp1) = build_exchange(0, 0, &payload[..239], 240);
+        // 17 bytes of plaintext → 32-byte ciphertext (sentinel forces 2nd block).
+        let (apdu2, resp2) = build_exchange(1, 239, &payload[239..], 32);
+
+        let mut transport = TestTransport::new([
+            Exchange::new(&apdu1, &resp1, 0x91, 0x00),
+            Exchange::new(&apdu2, &resp2, 0x91, 0x00),
+        ]);
+        let mut state = authenticated_aes(enc_key, mac_key, ti, 0);
+
+        let mut buf = [0u8; 256];
+        let n = block_on(async {
+            let mut ch = SecureChannel::new(&mut state);
+            read_data_full(&mut transport, &mut ch, 0x03, 0, 256, &mut buf).await
+        })
+        .expect("chunked FULL read must succeed");
+
+        assert_eq!(n, 256);
+        assert_eq!(buf.as_slice(), payload.as_slice());
         assert_eq!(state.counter(), 2);
         assert_eq!(transport.remaining(), 0);
     }
