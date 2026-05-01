@@ -5,7 +5,7 @@
 
 //! A transport-agnostic crate for communicating with NTAG 424 DNA NFC tags.
 //!
-//! An optionionated use case is provided through the [`high_level`] module.
+//! An opinionated use case is provided through the [`high_level`] module.
 //! This provides a convenient abstraction for tag provisioning
 //! and SDM verification, without needing to work with low-level commands directly.
 //!
