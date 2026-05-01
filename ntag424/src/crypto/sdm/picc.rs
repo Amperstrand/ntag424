@@ -54,7 +54,7 @@ pub(super) fn decrypt_picc_data_aes(
     enc: &[u8; 16],
 ) -> Result<ParsedPiccData, SdmError> {
     let mut plain = *enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut plain);
+    aes_cbc_decrypt(key, &[0u8; 16], &mut plain).unwrap();
     parse_picc_data_tag(&plain)
 }
 

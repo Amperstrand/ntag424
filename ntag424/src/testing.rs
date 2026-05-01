@@ -169,7 +169,7 @@ pub(crate) fn aes_key0_suite_085bc941() -> (AesSuite, [u8; 4]) {
     let key = [0u8; 16];
     let rnd_a = hex_array::<16>("C4028B41E6F497099C7087768E78A191");
     let mut rnd_b = hex_array::<16>("7858A0B9DBC468F0FF1B2F773D6DF9FC");
-    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
     (
         AesSuite::derive(&key, &rnd_a, &rnd_b),
         hex_array("085BC941"),
@@ -194,7 +194,7 @@ pub(crate) fn aes_key3_state_hw(cmd_counter: u16) -> Authenticated<AesSuite> {
     let key = [0u8; 16];
     let rnd_a = hex_array::<16>("30288E8925277FAC5A6D6144341C238E");
     let mut rnd_b = hex_array::<16>("C8FC6F266D55CA43D3BBDE4CC8479AC2");
-    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
     let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
     Authenticated::non_first(suite, hex_array("085BC941"), cmd_counter, KeyNumber::Key3)
 }
@@ -217,7 +217,7 @@ pub(crate) fn aes_key3_mac_state_hw(cmd_counter: u16) -> Authenticated<AesSuite>
     let key = [0u8; 16];
     let rnd_a = hex_array::<16>("24BF204C43B6941047265242A23724F8");
     let mut rnd_b = hex_array::<16>("2FE216D6F86B1CBD8937C41D55073383");
-    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+    aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
     let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
     Authenticated::new(suite, hex_array("59237C63"), KeyNumber::Key3).tap_counter(cmd_counter)
 }

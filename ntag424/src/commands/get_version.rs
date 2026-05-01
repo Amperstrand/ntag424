@@ -292,7 +292,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("C4028B41E6F497099C7087768E78A191");
         let mut rnd_b = hex_array::<16>("7858A0B9DBC468F0FF1B2F773D6DF9FC");
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
         (
             AesSuite::derive(&key, &rnd_a, &rnd_b),
             hex_array("085BC941"),

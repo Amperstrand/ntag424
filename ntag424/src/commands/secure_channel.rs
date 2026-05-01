@@ -102,12 +102,19 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
     /// ciphertext. `buf.len()` must be a positive multiple of 16; the
     /// caller is responsible for applying ISO/IEC 9797-1 Method 2
     /// padding before calling this.
-    pub(crate) fn encrypt_command(&mut self, buf: &mut [u8]) {
+    ///
+    /// Returns `Err(SessionError::NotBlockAligned)` if `buf.len()` is
+    /// not a positive multiple of 16.
+    pub(crate) fn encrypt_command<E: Error + Debug>(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<(), SessionError<E>> {
         let ti = *self.state.ti_bytes();
         let cmd_ctr = self.state.counter();
         self.state
             .suite_mut()
-            .encrypt(Direction::Command, &ti, cmd_ctr, buf);
+            .encrypt(Direction::Command, &ti, cmd_ctr, buf)
+            .ok_or(SessionError::NotBlockAligned(buf.len()))
     }
 
     /// Decrypt `buf` in place as a `CommMode.FULL` response payload
@@ -117,12 +124,19 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
     /// response IV. `buf.len()` must be a positive multiple of 16; the
     /// caller is responsible for stripping any ISO/IEC 9797-1 Method 2
     /// padding from the plaintext.
-    pub(crate) fn decrypt_response(&mut self, buf: &mut [u8]) {
+    ///
+    /// Returns `Err(SessionError::NotBlockAligned)` if `buf.len()` is
+    /// not a positive multiple of 16.
+    pub(crate) fn decrypt_response<E: Error + Debug>(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<(), SessionError<E>> {
         let ti = *self.state.ti_bytes();
         let cmd_ctr = self.state.counter();
         self.state
             .suite_mut()
-            .decrypt(Direction::Response, &ti, cmd_ctr, buf);
+            .decrypt(Direction::Response, &ti, cmd_ctr, buf)
+            .ok_or(SessionError::NotBlockAligned(buf.len()))
     }
 
     /// Verify and decrypt a fixed-size FULL-mode response.
@@ -149,7 +163,7 @@ impl<'a, S: SessionSuite> SecureChannel<'a, S> {
         }
         let mut buf = [0u8; CT];
         buf.copy_from_slice(ciphertext);
-        self.decrypt_response(&mut buf);
+        self.decrypt_response::<E>(&mut buf)?;
         if strip_m2_padding(&buf) != Some(P) {
             return Err(SessionError::ResponseMacMismatch);
         }

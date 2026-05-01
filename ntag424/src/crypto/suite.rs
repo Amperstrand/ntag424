@@ -104,15 +104,20 @@ pub trait SessionSuite: Sized {
     /// ISO/IEC 9797-1 Method 2 padding - applying it is the caller's
     /// responsibility, since the padding rule is identical across suites.
     ///
+    /// Returns `None` if `buf.len()` is not a positive multiple of 16.
+    ///
     /// The AES suite rebuilds the CBC IV from `(dir, ti, cmd_ctr)` on
     /// every call (§9.1.4). The LRP suite ignores those three arguments
     /// and uses its internal `EncCtr`, advancing it by one per 16-byte
     /// block processed (§9.2.4).
-    fn encrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]);
+    fn encrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8])
+    -> Option<()>;
 
     /// In-place inverse of [`encrypt`](Self::encrypt). Same length and
-    /// state rules apply.
-    fn decrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]);
+    /// state rules apply. Returns `None` if `buf.len()` is not a
+    /// positive multiple of 16.
+    fn decrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8])
+    -> Option<()>;
 }
 
 /// Truncate a 16-byte CMAC output.
@@ -222,27 +227,39 @@ impl SessionSuite for AesSuite {
         truncate_mac(&cmac_aes(&self.mac_key, data))
     }
 
-    fn encrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]) {
-        aes_cbc_encrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf);
+    fn encrypt(
+        &mut self,
+        dir: Direction,
+        ti: &[u8; 4],
+        cmd_ctr: u16,
+        buf: &mut [u8],
+    ) -> Option<()> {
+        aes_cbc_encrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf)
     }
 
-    fn decrypt(&mut self, dir: Direction, ti: &[u8; 4], cmd_ctr: u16, buf: &mut [u8]) {
-        aes_cbc_decrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf);
+    fn decrypt(
+        &mut self,
+        dir: Direction,
+        ti: &[u8; 4],
+        cmd_ctr: u16,
+        buf: &mut [u8],
+    ) -> Option<()> {
+        aes_cbc_decrypt(&self.enc_key, &self.iv(dir, ti, cmd_ctr), buf)
     }
 }
 
 /// AES-128 CBC encryption in place. No padding is applied.
 ///
-/// Panics if `buf.len()` is not a positive multiple of 16.
+/// Returns `None` if `buf.len()` is not a positive multiple of 16.
 ///
 /// Shared between the §9.1.4 session-message path (IV derived from
 /// `TI || CmdCtr`) and the §9.1.5 authentication handshake (zero IV,
 /// no padding).
-pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
-    assert!(
-        !buf.is_empty() && buf.len().is_multiple_of(16),
-        "aes_cbc_encrypt: buffer length must be a positive multiple of 16",
-    );
+#[must_use]
+pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> Option<()> {
+    if buf.is_empty() || !buf.len().is_multiple_of(16) {
+        return None;
+    }
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     for chunk in buf.chunks_exact_mut(16) {
@@ -256,14 +273,16 @@ pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
         chunk.copy_from_slice(&out);
         prev.copy_from_slice(chunk);
     }
+    Some(())
 }
 
 /// In-place inverse of [`aes_cbc_encrypt`]. Same length preconditions.
-pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
-    assert!(
-        !buf.is_empty() && buf.len().is_multiple_of(16),
-        "aes_cbc_decrypt: buffer length must be a positive multiple of 16",
-    );
+/// Returns `None` if `buf.len()` is not a positive multiple of 16.
+#[must_use]
+pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> Option<()> {
+    if buf.is_empty() || !buf.len().is_multiple_of(16) {
+        return None;
+    }
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     let mut save = [0u8; 16];
@@ -279,6 +298,7 @@ pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) {
         }
         prev.copy_from_slice(&save);
     }
+    Some(())
 }
 
 // ---------------------------------------------------------------------------
@@ -351,22 +371,30 @@ impl SessionSuite for LrpSuite {
         truncate_mac(&cmac_lrp(self.mac_key.clone(), data))
     }
 
-    fn encrypt(&mut self, _dir: Direction, _ti: &[u8; 4], _cmd_ctr: u16, buf: &mut [u8]) {
-        debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    fn encrypt(
+        &mut self,
+        _dir: Direction,
+        _ti: &[u8; 4],
+        _cmd_ctr: u16,
+        buf: &mut [u8],
+    ) -> Option<()> {
         let mut ctr = self.enc_ctr.to_be_bytes();
-        self.enc_key
-            .lricb_encrypt_in_place(&mut ctr, buf)
-            .expect("LRP encrypt input must be non-empty and block-aligned");
+        self.enc_key.lricb_encrypt_in_place(&mut ctr, buf)?;
         self.enc_ctr = u32::from_be_bytes(ctr);
+        Some(())
     }
 
-    fn decrypt(&mut self, _dir: Direction, _ti: &[u8; 4], _cmd_ctr: u16, buf: &mut [u8]) {
-        debug_assert!(!buf.is_empty() && buf.len().is_multiple_of(16));
+    fn decrypt(
+        &mut self,
+        _dir: Direction,
+        _ti: &[u8; 4],
+        _cmd_ctr: u16,
+        buf: &mut [u8],
+    ) -> Option<()> {
         let mut ctr = self.enc_ctr.to_be_bytes();
-        self.enc_key
-            .lricb_decrypt_in_place(&mut ctr, buf)
-            .expect("LRP decrypt input must be non-empty and block-aligned");
+        self.enc_key.lricb_decrypt_in_place(&mut ctr, buf)?;
         self.enc_ctr = u32::from_be_bytes(ctr);
+        Some(())
     }
 }
 
@@ -377,16 +405,14 @@ mod tests {
     use alloc::vec::Vec;
 
     #[test]
-    #[should_panic(expected = "aes_cbc_encrypt: buffer length must be a positive multiple of 16")]
     fn aes_cbc_encrypt_rejects_empty_buffer() {
-        aes_cbc_encrypt(&[0u8; 16], &[0u8; 16], &mut []);
+        assert_eq!(aes_cbc_encrypt(&[0u8; 16], &[0u8; 16], &mut []), None);
     }
 
     #[test]
-    #[should_panic(expected = "aes_cbc_decrypt: buffer length must be a positive multiple of 16")]
     fn aes_cbc_decrypt_rejects_non_block_buffer() {
         let mut buf = [0u8; 15];
-        aes_cbc_decrypt(&[0u8; 16], &[0u8; 16], &mut buf);
+        assert_eq!(aes_cbc_decrypt(&[0u8; 16], &[0u8; 16], &mut buf), None);
     }
 
     // AN12196 §5.10 "AuthenticateEV2First with key 0x03". Worked example
@@ -458,7 +484,9 @@ mod tests {
         assert_eq!(iv, hex_array("4C651A64261A90307B6C293F611C7F7B"));
 
         let mut enc = hex_bytes("0102030405060708090A800000000000");
-        suite.encrypt(Direction::Command, &ti, cmd_ctr, &mut enc);
+        suite
+            .encrypt(Direction::Command, &ti, cmd_ctr, &mut enc)
+            .unwrap();
         assert_eq!(enc, hex_bytes("6B5E6804909962FC4E3FF5522CF0F843"));
 
         let mac_input = hex_bytes("8D00007614281A030000000A00006B5E6804909962FC4E3FF5522CF0F843");
@@ -517,11 +545,15 @@ mod tests {
         );
 
         let mut pt = expected_pt.clone();
-        suite.encrypt(Direction::Command, &ti, cmd_ctr, &mut pt);
+        suite
+            .encrypt(Direction::Command, &ti, cmd_ctr, &mut pt)
+            .unwrap();
         assert_eq!(pt, expected_ct);
 
         let mut ct = expected_ct;
-        suite.decrypt(Direction::Command, &ti, cmd_ctr, &mut ct);
+        suite
+            .decrypt(Direction::Command, &ti, cmd_ctr, &mut ct)
+            .unwrap();
         assert_eq!(ct, expected_pt);
     }
 
@@ -550,7 +582,9 @@ mod tests {
         assert_eq!(iv, hex_array("7F6BB0B278EA054CBD238C5D9E9E342B"));
 
         let mut plaintext = response_ciphertext;
-        suite.decrypt(Direction::Response, &ti, 1, &mut plaintext);
+        suite
+            .decrypt(Direction::Response, &ti, 1, &mut plaintext)
+            .unwrap();
         assert_eq!(plaintext, hex_array("04958CAA5C5E80800000000000000000"));
         assert_eq!(&plaintext[..7], &hex_bytes("04958CAA5C5E80"));
 
@@ -607,7 +641,9 @@ mod tests {
         );
 
         let mut picc_data = hex_bytes("F4FC209D9D60623588B299FA5D6B2D71");
-        suite.decrypt(Direction::Response, &[0; 4], 0, &mut picc_data);
+        suite
+            .decrypt(Direction::Response, &[0; 4], 0, &mut picc_data)
+            .unwrap();
         assert_eq!(picc_data, hex_bytes("58EE9424020000000000020000000000"));
         assert_eq!(suite.enc_ctr(), 1);
 
@@ -685,7 +721,9 @@ mod tests {
             );
 
             let mut pt = resp_ciphertext;
-            suite.decrypt(Direction::Response, &ti, cmd_ctr + 1, &mut pt);
+            suite
+                .decrypt(Direction::Response, &ti, cmd_ctr + 1, &mut pt)
+                .unwrap();
             assert_eq!(
                 pt,
                 hex_bytes("04940D2A2F7080800000000000000000"),
@@ -720,7 +758,9 @@ mod tests {
 
         let padded_cmd = hex_bytes("01020380000000000000000000000000");
         let mut ct = padded_cmd.clone();
-        suite.encrypt(Direction::Command, &[0x20, 0x4F, 0x22, 0x76], 0, &mut ct);
+        suite
+            .encrypt(Direction::Command, &[0x20, 0x4F, 0x22, 0x76], 0, &mut ct)
+            .unwrap();
         assert_eq!(ct, hex_bytes("EAF0FAD0430ECDC947A822E12EC8D5F3"));
         assert_eq!(suite.enc_ctr(), 2);
 
@@ -730,7 +770,9 @@ mod tests {
             enc_ctr: 1,
         };
         let mut pt = hex_bytes("EAF0FAD0430ECDC947A822E12EC8D5F3");
-        fresh_suite.decrypt(Direction::Command, &[0, 0, 0, 0], 999, &mut pt);
+        fresh_suite
+            .decrypt(Direction::Command, &[0, 0, 0, 0], 999, &mut pt)
+            .unwrap();
         assert_eq!(pt, padded_cmd);
         assert_eq!(fresh_suite.enc_ctr(), 2);
     }

@@ -107,7 +107,7 @@ async fn transmit<T: Transport, S: SessionSuite>(
     mut plaintext: [u8; 32],
     expect_mact: bool,
 ) -> Result<(), SessionError<T::Error>> {
-    channel.encrypt_command(&mut plaintext);
+    channel.encrypt_command(&mut plaintext)?;
 
     // MAC: Cmd || CmdCtr(LE) || TI || KeyNo (header) || ciphertext (data).
     let key_no_byte = key_no.as_byte();

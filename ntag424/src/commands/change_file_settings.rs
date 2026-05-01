@@ -55,7 +55,7 @@ pub(crate) async fn change_file_settings<T: Transport, S: SessionSuite>(
     padded[raw_len] = 0x80;
 
     let ct = &mut padded[..padded_len];
-    channel.encrypt_command(ct);
+    channel.encrypt_command(ct)?;
 
     let header = [file_no];
     let mac = channel.compute_cmd_mac(CMD, &header, ct);

@@ -370,7 +370,7 @@ async fn read_data_full_one_apdu<T: Transport, S: SessionSuite>(
     let mut scratch = [0u8; READ_DATA_RESP_CAP];
     let ct_len = ciphertext.len();
     scratch[..ct_len].copy_from_slice(ciphertext);
-    channel.decrypt_response(&mut scratch[..ct_len]);
+    channel.decrypt_response(&mut scratch[..ct_len])?;
 
     // Strip ISO/IEC 9797-1 Method 2 padding: find the last 0x80 preceded
     // only by 0x00 bytes. The PICC always appends exactly one 0x80 and

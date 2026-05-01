@@ -77,6 +77,15 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     /// can all cause this.
     #[error("response MAC mismatch")]
     ResponseMacMismatch,
+    /// A cipher buffer was not a positive multiple of 16 bytes.
+    ///
+    /// All AES-CBC and LRP encrypted payloads must be padded to a 16-byte
+    /// boundary before encryption (ISO/IEC 9797-1 Method 2). This error
+    /// indicates a library bug: callers of [`SecureChannel::encrypt_command`]
+    /// and [`SecureChannel::decrypt_response`] must guarantee alignment before
+    /// calling.
+    #[error("cipher buffer length {0} is not a positive multiple of 16")]
+    NotBlockAligned(usize),
 }
 
 /// An NTAG 424 DNA session.

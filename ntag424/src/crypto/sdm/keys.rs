@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(iv, hex_array("7B3F3CFC39D3B7FF5868636E38AF7C3A"));
 
         let mut ct = hex_array::<16>("94592FDE69FA06E8E3B6CA686A22842B");
-        aes_cbc_decrypt(&enc_key, &iv, &mut ct);
+        aes_cbc_decrypt(&enc_key, &iv, &mut ct).unwrap();
         // 16 bytes of ASCII 'x' (0x78)
         assert_eq!(&ct, b"xxxxxxxxxxxxxxxx");
     }

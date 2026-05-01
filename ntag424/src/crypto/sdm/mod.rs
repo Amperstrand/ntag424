@@ -619,7 +619,7 @@ mod tests {
         let iv = aes_ecb_encrypt_block(&enc_key, &iv_in);
 
         let mut pt = *b"xxCOxxxxxxxxxxxx";
-        aes_cbc_encrypt(&enc_key, &iv, &mut pt);
+        aes_cbc_encrypt(&enc_key, &iv, &mut pt).unwrap();
         let enc_hex: alloc::string::String = pt.iter().map(|b| alloc::format!("{b:02X}")).collect();
 
         let mac = truncate_mac(&cmac_aes(&mac_key, enc_hex.as_bytes()));

@@ -45,7 +45,7 @@ pub(crate) async fn authenticate_ev2_non_first<T: Transport>(
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
     let mut rnd_b = rnd_b_enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut rnd_b);
+    aes_cbc_decrypt(key, &[0u8; 16], &mut rnd_b).unwrap();
 
     let part2_apdu = build_part2_apdu(key, &rnd_a, &rnd_b);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -102,7 +102,7 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
 
     // Decrypt RndB (§9.1.4: IV is all zero during authentication).
     let mut rnd_b = rnd_b_enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut rnd_b);
+    aes_cbc_decrypt(key, &[0u8; 16], &mut rnd_b).unwrap();
 
     let part2_apdu = build_part2_apdu(key, &rnd_a, &rnd_b);
     let r2 = transport.transmit(&part2_apdu).await?;
@@ -131,7 +131,7 @@ fn build_part2_apdu(key: &[u8; 16], rnd_a: &[u8; 16], rnd_b: &[u8; 16]) -> [u8; 
     ct[..16].copy_from_slice(rnd_a);
     ct[16..31].copy_from_slice(&rnd_b[1..]);
     ct[31] = rnd_b[0];
-    aes_cbc_encrypt(key, &[0u8; 16], &mut ct);
+    aes_cbc_encrypt(key, &[0u8; 16], &mut ct).unwrap();
 
     let mut apdu = [0u8; 38];
     apdu[0] = 0x90;
@@ -153,7 +153,7 @@ fn finish_auth<E: core::error::Error + core::fmt::Debug>(
     enc: &[u8; 32],
 ) -> Result<AuthResult<AesSuite>, SessionError<E>> {
     let mut resp = *enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut resp);
+    aes_cbc_decrypt(key, &[0u8; 16], &mut resp).unwrap();
 
     // Layout: TI (4) || RndA' (16) || PDcap2 (6) || PCDcap2 (6).
     let mut ti = [0u8; 4];
@@ -194,7 +194,7 @@ fn finish_auth_non_first<E: core::error::Error + core::fmt::Debug>(
     enc: &[u8; 16],
 ) -> Result<AesSuite, SessionError<E>> {
     let mut plain = *enc;
-    aes_cbc_decrypt(key, &[0u8; 16], &mut plain);
+    aes_cbc_decrypt(key, &[0u8; 16], &mut plain).unwrap();
 
     // Rotate right by one to recover RndA; must equal what we sent.
     let mut rnd_a_received = [0u8; 16];
@@ -229,7 +229,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("B98F4C50CF1C2E084FD150E33992B048");
         let rnd_b_enc: [u8; 16] = hex_array("B875CEB0E66A6C5CD00898DC371F92D1");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
@@ -258,7 +258,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
         let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
@@ -286,7 +286,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("13C5DB8A5930439FC3DEF9A4C675360F");
         let rnd_b_enc: [u8; 16] = hex_array("A04C124213C186F22399D33AC2A30215");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         // Flip one byte - any single-bit change propagates to the recovered RndA.
         let mut resp_enc: [u8; 32] =
@@ -308,7 +308,7 @@ mod tests {
         // From Table 23: RndB decrypted from R-APDU1.
         let rnd_b_enc: [u8; 16] = hex_array("A6A2B3C572D06C097BB8DB70463E22DC");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
         assert_eq!(rnd_b, hex_array("6924E8D09722659A2E7DEC68E66312B8"));
 
         let rnd_a: [u8; 16] = hex_array("60BE759EDA560250AC57CDDC11743CF6");
@@ -342,7 +342,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("A5F7C97067CC7C6B0C373F15028021EE");
         let rnd_b_enc: [u8; 16] = hex_array("457B8458856FA7D114513E5A65A37405");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         let part2 = build_part2_apdu(&key, &rnd_a, &rnd_b);
         assert_eq!(
@@ -372,7 +372,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_b_enc: [u8; 16] = hex_array("01E9CB96C9EE3873B4135A6E08DED325");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         let rnd_a: [u8; 16] = hex_array("1AC618A15F5CB19BF10E5F649DC98764");
 

@@ -296,7 +296,7 @@ async fn write_data_full_one_apdu<T: Transport, S: SessionSuite>(
     // Rest is already 0x00.
 
     let ct = &mut padded[..padded_len];
-    channel.encrypt_command(ct);
+    channel.encrypt_command(ct)?;
 
     // MAC over Cmd || CmdCtr || TI || CmdHeader || E(CmdData).
     let mac = channel.compute_cmd_mac(0x8D, &header, ct);

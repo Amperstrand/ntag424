@@ -177,7 +177,7 @@ mod tests {
         let rnd_a: [u8; 16] = hex_array("A5F7C97067CC7C6B0C373F15028021EE");
         let rnd_b_enc: [u8; 16] = hex_array("457B8458856FA7D114513E5A65A37405");
         let mut rnd_b = rnd_b_enc;
-        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b);
+        aes_cbc_decrypt(&key, &[0u8; 16], &mut rnd_b).unwrap();
 
         let suite = AesSuite::derive(&key, &rnd_a, &rnd_b);
         let ti = hex_array::<4>("704B5F99");

@@ -572,7 +572,11 @@ impl Verifier {
                 let mut iv_input = [0u8; 16];
                 iv_input[..3].copy_from_slice(&ctr);
                 let iv = aes_ecb_encrypt_block(enc_key, &iv_input);
-                aes_cbc_decrypt(enc_key, &iv, ct.as_mut_slice());
+                aes_cbc_decrypt(enc_key, &iv, ct.as_mut_slice()).ok_or(
+                    SdmError::InvalidConfiguration(
+                        "AES decryption failed: cipher buffer is not block-aligned",
+                    ),
+                )?;
             }
             SdmKeys::Lrp { enc, .. } => {
                 // Counter = SDMReadCtr || 000000 (6 bytes, §9.3.6.2).

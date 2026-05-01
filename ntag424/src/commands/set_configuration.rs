@@ -57,7 +57,7 @@ async fn set_configuration_one<T: Transport, S: SessionSuite>(
     plaintext[..data.len()].copy_from_slice(data);
     plaintext[data.len()] = 0x80;
 
-    channel.encrypt_command(&mut plaintext);
+    channel.encrypt_command(&mut plaintext)?;
 
     let mac = channel.compute_cmd_mac(CMD, &[option_id], &plaintext);
 
