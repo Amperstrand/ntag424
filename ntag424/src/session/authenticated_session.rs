@@ -153,6 +153,11 @@ pub trait AuthenticatedSession: Sized {
     ///
     /// Authentication with the key indicated by the file's `Change` access
     /// condition must be established before calling this.
+    ///
+    /// When changing the NDEF file's access conditions, also update the
+    /// Capability Container ([`File::CapabilityContainer`]) so that NFC Forum
+    /// readers see an accurate T4T mapping. The high-level
+    /// [`provision`](`crate::high_level::provision`) functions do this automatically.
     fn change_file_settings<T: Transport>(
         self,
         transport: &mut T,

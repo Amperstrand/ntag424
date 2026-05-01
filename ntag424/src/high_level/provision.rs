@@ -53,7 +53,9 @@ pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
 ///   supports it.
 /// - Derives new AES keys for keys 1 to 4 from the master key. Key 1 is a cohort-fixed PICC
 ///   meta-read key; keys 2–4 are per-tag UID-diversified.
-/// - Writes the NDEF URL template and configures SDM, file permissions, and all five keys.
+/// - Writes the NDEF URL template, configures SDM, file permissions, and all five keys.
+/// - Updates the **Capability Container** (File No. `01h`) to reflect the new NDEF access
+///   conditions so NFC Forum readers see an accurate T4T mapping.
 /// - Changes the master key (Key 0) to a per-tag diversified value last, terminating the session.
 ///
 /// Returns a [`TagInformation`] value that the server can use for subsequent SDM verification.
@@ -274,6 +276,24 @@ async fn configure_ndef<T: Transport>(
             transport,
             File::Ndef,
             &get_file_settings_update_for_sdm(sdm),
+        )
+        .await?;
+
+    // Synchronise the Capability Container with the new NDEF access conditions.
+    // Standard NFC readers consult the CC to determine whether they may read or
+    // write the NDEF file; leaving it at factory defaults (write = open) after
+    // provisioning would mislead them about the actual tag policy.
+    // Read stays Open; write becomes Denied to reflect write = NoAccess.
+    let cc_bytes = crate::types::cc::CapabilityContainer::default()
+        .with_ndef_write_access(crate::types::cc::AccessCondition::Denied)
+        .to_bytes();
+    session = session
+        .write_file_with_mode(
+            transport,
+            File::CapabilityContainer,
+            0,
+            &cc_bytes,
+            CommMode::Plain,
         )
         .await?;
 
