@@ -23,6 +23,12 @@ steps:
     commands:
       - cargo test -p ntag424 --locked --all-features -- --test-threads=4
 
+  test-alloc-only:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --no-default-features --features alloc -- --test-threads=4
+
   test-key-diversification:
     image: *rust_image
     environment: *cargo_env
@@ -41,9 +47,21 @@ steps:
     commands:
       - cargo test -p ntag424 --locked --features serde -- --test-threads=4
 
+  test-sdm-serde:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo test -p ntag424 --locked --no-default-features --features "alloc,sdm,serde" -- --test-threads=4
+
   verify-no-std:
     image: *rust_image
     environment: *cargo_env
     commands:
       - rustup target add thumbv7em-none-eabihf
       - cargo build -p ntag424 --locked --no-default-features --target thumbv7em-none-eabihf
+
+  verify-publish:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo publish -p ntag424 --locked --dry-run
