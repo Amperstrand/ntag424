@@ -32,10 +32,10 @@
 //! | [`keys`] | Session key derivation and MAC verification (`derive_sdm_keys_aes/lrp`, §9.3.9) |
 //! | [`hex`] | NDEF ASCII-hex decoding helpers |
 
-pub mod hex;
-pub mod keys;
-pub mod picc;
-pub mod verifier;
+pub(crate) mod hex;
+pub(crate) mod keys;
+pub(crate) mod picc;
+pub(crate) mod verifier;
 
 pub use verifier::{SdmError, SdmVerification, Verifier};
 
