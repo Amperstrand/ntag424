@@ -2,7 +2,7 @@
 name = "ntag424-pcsc"
 version = "0.1.0"
 edition = "2024"
-authors = ["Jannik Schürg <jannik.schuerg+crates@posteo.de"]
+authors = ["Jannik Schürg <jannik.schuerg+crates@posteo.de>"]
 description = "PC/SC transport implementation for NTAG 424 DNA chips."
 repository.workspace = true
 license.workspace = true
