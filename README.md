@@ -36,7 +36,7 @@ use ntag424::high_level::{provision, ApplicationVerifier, VerifiedTagReadout};
 // Provisioning a tag
 
 let mut rng: SysRng = rand::make_rng();
-let tag_info = provision(
+let (app_verifier, uid): (ApplicationVerifier, [u8; 7]) = provision(
         // a `Transport` implementation
         &mut transport,
         "https://example.com/v1/?p={picc}&m={mac}",
@@ -45,7 +45,6 @@ let tag_info = provision(
         &mut rng,
     )
     .await?;
-let app_verifier: ApplicationVerifier = tag_info.into();
 // store `app_verifier` for verification, can be stored once per application
 
 // Verifying a tag read

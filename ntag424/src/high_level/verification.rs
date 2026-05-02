@@ -4,7 +4,6 @@ use core::{error::Error, fmt::Debug};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::TagInformation;
 use crate::{
     KeyNumber, TagTamperStatusReadout, key_diversification::diversify_ntag424, sdm::Verifier,
     types::FileSettingsError,
@@ -34,24 +33,13 @@ pub enum VerificationError<E: Error + Debug> {
 /// be achieved either by adding a small version or application identifier
 /// to the URL.
 ///
-/// This is usually derived from [`TagInformation`] obtained during provisioning,
-/// which implements `Into<ApplicationVerifier>`.
+/// This is returned alongside the tag's UID by the
+/// [`provision`](super::provision) family of functions.
 pub struct ApplicationVerifier {
     pub url_template: String,
     pub verifier: Verifier,
     pub prefix: Option<Vec<u8>>,
     pub system_identifier: Vec<u8>,
-}
-
-impl From<TagInformation> for ApplicationVerifier {
-    fn from(info: super::TagInformation) -> Self {
-        Self {
-            url_template: info.url_template,
-            verifier: info.verifier,
-            prefix: info.prefix,
-            system_identifier: info.system_identifier,
-        }
-    }
 }
 
 /// A store for read counters.

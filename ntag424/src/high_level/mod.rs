@@ -16,7 +16,7 @@
 //!
 //! ```no_run
 //! # use ntag424::Transport;
-//! use ntag424::high_level::{provision, TagInformation, ApplicationVerifier};
+//! use ntag424::high_level::{provision, ApplicationVerifier};
 //! # #[cfg(all(feature = "high-level-api", feature = "rand/sys_rng"))]
 //! # async fn provision_example(transport: &mut impl Transport) -> Result<(), Box<dyn std::error::Error>> {
 //! use rand::{make_rng, rngs::SysRng};
@@ -26,12 +26,12 @@
 //! let url_template = "https://example.com/?p={picc}&m={mac}";
 //! let mut rng: SysRng = make_rng();
 //!
-//! let tag_info = provision(transport, url_template, &master_key, &mut rng)
-//!     .await
-//!     .expect("Provisioning failed");
+//! let (app_verifier, uid): (ApplicationVerifier, [u8; 7]) =
+//!     provision(transport, url_template, &master_key, &mut rng)
+//!         .await
+//!         .expect("Provisioning failed");
 //!
-//! let app_verifier: ApplicationVerifier = tag_info.into();
-//! // Store app_verifier for later verification
+//! // Store app_verifier (and optionally uid) for later verification
 //! # Ok(())
 //! # }
 //! ```
@@ -55,11 +55,7 @@
 //! let result = app_verifier.verify(master_key, input, &mut counter_storage).await;
 //! # }
 //! ```
-use alloc::{string::String, vec::Vec};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-use crate::{key_diversification::diversify_aes128, sdm::Verifier};
+use crate::key_diversification::diversify_aes128;
 
 mod provision;
 mod verification;
@@ -71,16 +67,6 @@ pub use provision::{
 pub use verification::{
     ApplicationVerifier, ReadCounterStorage, VerificationError, VerifiedTagReadout,
 };
-
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct TagInformation {
-    pub uid: [u8; 7],
-    pub verifier: Verifier,
-    pub url_template: String,
-    prefix: Option<Vec<u8>>,
-    system_identifier: Vec<u8>,
-}
 
 /// Derives the cohort-fixed PICC encryption key (SDMMetaRead, Key 1).
 pub fn picc_key(master: &[u8; 16]) -> [u8; 16] {

@@ -4,7 +4,7 @@ use core::{convert::Infallible, error::Error};
 use alloc::borrow::ToOwned;
 use rand::CryptoRng;
 
-use super::{TagInformation, picc_key};
+use super::{ApplicationVerifier, picc_key};
 use crate::TagTamperStatusReadout;
 use crate::sdm::SdmUrlConfig;
 use crate::types::file_settings::Sdm;
@@ -58,7 +58,8 @@ pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
 ///   conditions so NFC Forum readers see an accurate T4T mapping.
 /// - Changes the master key (Key 0) to a per-tag diversified value last, terminating the session.
 ///
-/// Returns a [`TagInformation`] value that the server can use for subsequent SDM verification.
+/// Returns an [`ApplicationVerifier`] (which the server can use for subsequent SDM
+/// verification) together with the tag's UID.
 ///
 /// The URL pattern `url_template` must satisfy the requirements of
 /// [`sdm_url_config`](`crate::sdm::sdm_url_config`). Additionally:
@@ -129,7 +130,7 @@ pub async fn provision<T: Transport>(
     url_template: &str,
     master_key: &[u8; 16],
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
+) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, Infallible>> {
     let key_fn = |uid| {
         let new_keys = derive_keys_for_uid(master_key, &uid);
         core::future::ready(Ok(new_keys))
@@ -162,7 +163,7 @@ pub async fn provision_with_keys<T: Transport>(
     url_template: &str,
     keys: &[[u8; 16]; 5],
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, ProvisioningError<T::Error, Infallible>> {
+) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, Infallible>> {
     provision_with_fn(
         transport,
         url_template,
@@ -182,7 +183,7 @@ pub async fn provision_with_fn<T: Transport, F, Fut, K>(
     url_template: &str,
     keys: F,
     rng: &mut impl CryptoRng,
-) -> Result<TagInformation, ProvisioningError<T::Error, K>>
+) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, K>>
 where
     K: Error + Debug,
     F: FnOnce([u8; 7]) -> Fut,
@@ -214,13 +215,15 @@ where
     // Update keys
     provision_keys(transport, session, &new_keys).await?;
 
-    Ok(TagInformation {
+    Ok((
+        ApplicationVerifier {
+            verifier,
+            url_template: url_template.to_owned(),
+            prefix: prefix.map(|p| p.to_owned()),
+            system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+        },
         uid,
-        verifier,
-        url_template: url_template.to_owned(),
-        prefix: prefix.map(|p| p.to_owned()),
-        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
-    })
+    ))
 }
 
 fn create_sdm_url_config<E, K>(
@@ -247,7 +250,7 @@ where
 
 /// Creates an SDM application verifier from the given URL template.
 ///
-/// Returns the same verifier that is included in the returned `TagInformation` from `provision`.
+/// Returns the same verifier that `provision` produces alongside the UID.
 pub fn create_app_verifier(
     url_template: &str,
 ) -> Result<super::ApplicationVerifier, ProvisioningError<Infallible, Infallible>> {
