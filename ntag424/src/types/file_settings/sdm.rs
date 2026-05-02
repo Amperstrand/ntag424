@@ -3,6 +3,42 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+//! SDM (Secure Dynamic Messaging) configuration types for the NDEF file.
+//!
+//! The top-level type is [`Sdm`], constructed via [`Sdm::try_new`].  All byte
+//! offsets stored here are indices into the **raw NDEF file** on the tag (the
+//! 256-byte file, not the URL string); [`crate::sdm_url_config!`] handles the
+//! URL-to-NDEF offset arithmetic automatically.
+//!
+//! # Type ownership of byte ranges
+//!
+//! | Type | Byte range owned |
+//! |------|-----------------|
+//! | [`PiccData::Plain`] | UID placeholder (14 bytes) and/or read-counter placeholder (6 bytes) |
+//! | [`PiccData::Encrypted`] | PICCData blob: 32 bytes (AES) or 48 bytes (LRP) |
+//! | [`MacWindow::mac`] | 16-byte authentication MAC placeholder |
+//! | [`EncFileData`] | `length` bytes (multiple of 32); first half is plaintext input, second half is ciphertext output |
+//! | `tamper_status` | 2-byte tag tamper status placeholder |
+//!
+//! `try_new` enforces that all placeholder ranges are non-overlapping, with
+//! one exception: the tamper-status placeholder (2 bytes) may lie inside
+//! `EncFileData`, but only within its **first (plaintext) half** — see below.
+//!
+//! # `MacWindow` and `EncFileData` relationship
+//!
+//! `MacWindow` defines *what is authenticated*: bytes `[input, mac)` are fed
+//! into the CMAC, and the 16-byte result is written at `mac`.  `EncFileData`
+//! is a sub-range that must lie entirely within `[input, mac)`: the tag
+//! encrypts those bytes in place, so the MAC covers the ciphertext, not the
+//! original plaintext.
+//!
+//! The `EncFileData` range is split into two equal halves: the first half
+//! holds the plaintext data that will be encrypted (readable/writable before
+//! the tap), and the tag overwrites the second half with the ciphertext on
+//! each read.  The tamper-status placeholder may overlap with `EncFileData`
+//! only if it fits entirely inside the first (plaintext) half; placing it in
+//! the ciphertext half is rejected by `try_new`.
+
 use crate::types::KeyNumber;
 
 use super::access::CtrRetAccess;
