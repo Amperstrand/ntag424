@@ -163,6 +163,10 @@ pub struct AccessRights {
     /// Equivalent to assigning the same access right to both `read` and `write`.
     /// There is no command that requires both read and write access at the same time.
     pub read_write: Access,
+    /// File settings change rights.
+    ///
+    /// This controls who may change the file settings (e.g. access rights, communication mode),
+    /// which also includes changing the access rights themselves.
     pub change: Access,
 }
 

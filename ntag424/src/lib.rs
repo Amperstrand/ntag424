@@ -291,6 +291,9 @@ pub mod sdm {
 ///
 /// See [`sdm_url_config`](`crate::sdm::sdm_url_config`) function for details.
 ///
+/// This panics at compile time in case of an error, whereas the function
+/// variant returns a `Result`.
+///
 /// Two forms are supported:
 ///
 /// ```rust
