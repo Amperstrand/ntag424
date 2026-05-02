@@ -33,19 +33,22 @@ Provision a tag and verify SDM-signed reads using the high-level API:
 ```rust
 use ntag424::high_level::{provision, ApplicationVerifier, VerifiedTagReadout};
 
-// --- Provisioning a tag ---
+// Provisioning a tag
 
+let mut rng: SysRng = rand::make_rng();
 let tag_info = provision(
-        &mut transport,  // a Transport implementation
+        // a `Transport` implementation
+        &mut transport,
         "https://example.com/v1/?p={picc}&m={mac}",
-        &master_key,     // securely stored master key for diversification
-        &mut OsRng
+        // securely stored master key for diversification
+        &master_key,
+        &mut rng,
     )
     .await?;
 let app_verifier: ApplicationVerifier = tag_info.into();
 // store `app_verifier` for verification, can be stored once per application
 
-// --- Verifying a tag read ---
+// Verifying a tag read
 
 let input = b"https://example.com/v1/?p=...&m=...";
 let mut counter_storage = /* a ReadCounterStorage implementation */;
