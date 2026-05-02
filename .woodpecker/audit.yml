@@ -1,0 +1,46 @@
+when:
+  - event: cron
+  - event: manual
+
+variables:
+  - &rust_image "rust:1.88.0"
+  - &nightly_image "rustlang/rust:nightly"
+  - &cargo_env
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+
+steps:
+  # Audits the pinned versions in the committed Cargo.lock.
+  audit-pinned:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo install --locked cargo-deny cargo-audit
+      - cargo deny --workspace --all-features check
+      - cargo audit --deny warnings
+
+  # What a fresh `cargo build` would resolve into today (newest compatibles).
+  # Catches advisories in newer compatible versions that consumers will pick
+  # up but that our pinned lock would otherwise hide.
+  audit-latest:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - cargo install --locked cargo-deny cargo-audit
+      - cargo update
+      - cargo deny --workspace --all-features check
+      - cargo audit --deny warnings
+
+  # The version floor advertised in Cargo.toml (oldest compatibles).
+  # `direct-minimal-versions` only minimizes our direct deps; transitive
+  # deps still resolve normally, so we don't fail on common transitive
+  # floor bugs. Catches the "we said we support X but X has a known CVE"
+  # case.
+  audit-minimal:
+    image: *nightly_image
+    environment: *cargo_env
+    commands:
+      - cargo install --locked cargo-deny cargo-audit
+      - cargo update -Z direct-minimal-versions
+      - cargo deny --workspace --all-features check advisories
+      - cargo audit --deny warnings
