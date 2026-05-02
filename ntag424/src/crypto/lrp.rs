@@ -326,6 +326,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "50 LRP vectors; native CI already covers correctness")]
     fn eval_an12304_vectors() {
         struct V {
             key: &'static str,
@@ -402,6 +403,10 @@ mod tests {
 
     // Test vectors from NXP AN12304, section 3.3. k' is always k_0.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "AN12304 LRICB vectors; native CI already covers correctness"
+    )]
     fn lricb_an12304_vectors() {
         struct V {
             key: &'static str,
@@ -547,6 +552,10 @@ mod tests {
     // and k' = UK[0]); Kx is the CMAC subkey (K1 if message is a positive multiple
     // of 16 bytes, else K2). Both paths are exercised.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "AN12304 LRP-CMAC vectors; native CI already covers correctness"
+    )]
     fn cmac_an12304_vectors() {
         use cmac::{Cmac, Mac, digest::InnerInit};
 

@@ -1,0 +1,20 @@
+when:
+  - event: cron
+  - event: manual
+
+variables:
+  - &rust_image "rustlang/rust:nightly"
+  - &cargo_env
+      CARGO_BUILD_JOBS: "4"
+      CARGO_TERM_COLOR: "always"
+
+steps:
+  miri-crypto:
+    image: *rust_image
+    environment: *cargo_env
+    commands:
+      - rustup component add miri
+      - curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "${CARGO_HOME:-/usr/local/cargo}/bin"
+      # Each test runs in its own miri process; nextest parallelizes across CPUs.
+      # Cap test threads to keep memory in check (miri uses ~1-2 GB per process).
+      - 'cargo miri nextest run -p ntag424 --locked --features "sdm,key-diversification" --lib crypto:: --test-threads=4'

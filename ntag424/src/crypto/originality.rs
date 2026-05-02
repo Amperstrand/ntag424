@@ -93,6 +93,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "P-224 ECDSA verify; covered by an12196_table30_vector under miri"
+    )]
     fn rejects_flipped_signature() {
         let mut sig = TABLE30_SIG;
         sig[0] ^= 0x01;
@@ -103,6 +107,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "P-224 ECDSA verify; covered by an12196_table30_vector under miri"
+    )]
     fn rejects_wrong_uid() {
         let mut uid = TABLE30_UID;
         uid[6] ^= 0x01;
