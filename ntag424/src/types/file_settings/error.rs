@@ -93,6 +93,7 @@ impl fmt::Display for ReservedByte {
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileSettingsError {
     #[error("buffer too short: need {needed} bytes, have {have}")]
     BufferTooShort { needed: usize, have: usize },

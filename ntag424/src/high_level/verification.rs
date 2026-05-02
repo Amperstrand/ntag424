@@ -10,6 +10,7 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum VerificationError<E: Error + Debug> {
     #[error("tag validation failed: {0}")]
     TagValidationFailed(#[from] FileSettingsError),

@@ -25,6 +25,7 @@ use crate::types::file_settings::CryptoMode;
 
 /// Errors from SDM verification.
 #[derive(Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SdmError {
     /// The computed authentication MAC does not match the value in the NDEF file.
     #[error("MAC verification failed")]

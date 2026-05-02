@@ -34,6 +34,7 @@ pub const SIGNATURE_LEN: usize = 56;
 const FIELD_BYTES: usize = 28;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OriginalityError {
     /// UID is longer than the P-224 scalar-field width (28 bytes).
     UidTooLong,

@@ -38,6 +38,7 @@ pub type UnauthenticatedSession = Session<Unauthenticated>;
 mod tests;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SessionError<E: Error + core::fmt::Debug> {
     #[error(transparent)]
     Transport(#[from] E),

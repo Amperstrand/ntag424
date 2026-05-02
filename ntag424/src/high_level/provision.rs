@@ -20,6 +20,7 @@ const SYSTEM_IDENTIFIER: &[u8] = b"NTAG424DNA";
 const MODE: CryptoMode = CryptoMode::Lrp;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProvisioningError<E: Error + Debug, K: Error + Debug> {
     #[error("PICC data does not contain a UID")]
     NoUid,
