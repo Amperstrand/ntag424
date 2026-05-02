@@ -100,7 +100,7 @@ impl Transport for TestTransport {
     }
 
     async fn get_uid(&mut self) -> Result<Self::Data, Self::Error> {
-        todo!("not implemented")
+        panic!("test fixture, not implemented")
     }
 }
 

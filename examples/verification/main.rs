@@ -1,29 +1,21 @@
 use std::collections::HashMap;
 
 use anyhow::{Context as _, Result};
-use ntag424::{File, KeyNumber, Session, key_diversification::diversify_ntag424, sdm::Verifier};
-use serde::Deserialize;
+use ntag424::{File, KeyNumber, Session, key_diversification::diversify_ntag424};
 
-use example_utils as utils;
-
-#[derive(Deserialize)]
-struct ServerSideData {
-    verifier: Verifier,
-    master_key: [u8; 16],
-    picc_key: [u8; 16],
-    system_identifier: Vec<u8>,
-}
+use example_utils::{self as utils, ServerSideData};
 
 fn get_file_read_key(server_side: &ServerSideData, ndef: &[u8]) -> Result<[u8; 16]> {
     // decrypt_picc_data is called here (and again internally by verify_with_meta_key)
     // because we need the UID to derive the per-tag file-read key before calling verify.
     let (uid, _) = server_side
+        .application_verifier
         .verifier
         .decrypt_picc_data(&server_side.picc_key, ndef)?;
     let Some(uid) = uid else {
         anyhow::bail!("PICC data does not contain a UID");
     };
-    let file_read_key = match server_side.verifier.file_read_key() {
+    let file_read_key = match server_side.application_verifier.verifier.file_read_key() {
         KeyNumber::Key0 => server_side.master_key,
         // Key1 is the undiversified PICC meta-read key in this example's setup.
         KeyNumber::Key1 => server_side.picc_key,
@@ -31,7 +23,7 @@ fn get_file_read_key(server_side: &ServerSideData, ndef: &[u8]) -> Result<[u8; 1
             &server_side.master_key,
             &uid,
             key,
-            &server_side.system_identifier,
+            &server_side.application_verifier.system_identifier,
         ),
     };
     Ok(file_read_key)
@@ -68,18 +60,18 @@ fn main() -> Result<()> {
 
         let file_read_key = get_file_read_key(&server_side_data, &ndef)
             .context("failed to derive file read key")?;
-        let result = server_side_data.verifier.verify_with_meta_key(
-            &ndef,
-            &file_read_key,
-            &server_side_data.picc_key,
-        );
+        let result = server_side_data
+            .application_verifier
+            .verifier
+            .verify_with_meta_key(&ndef, &file_read_key, &server_side_data.picc_key);
 
         match result {
             Ok(result) => {
                 println!("Parsed NDEF message!");
-                let uid_hex: String = result
-                    .uid
-                    .map_or_else(|| "N/A".to_string(), |u| u.iter().map(|b| format!("{b:02x}")).collect());
+                let uid_hex: String = result.uid.map_or_else(
+                    || "N/A".to_string(),
+                    |u| u.iter().map(|b| format!("{b:02x}")).collect(),
+                );
                 println!("UID: {uid_hex}");
                 if let (Some(uid), Some(read_ctr_ndef)) = (result.uid, result.read_ctr) {
                     let prev = read_counters.get(&uid).copied().unwrap_or(0);

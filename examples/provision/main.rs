@@ -18,13 +18,13 @@ use anyhow::{Context as _, Result, bail};
 use ntag424::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
     FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, Transport, Uid, Version,
+    high_level::ApplicationVerifier,
     key_diversification::diversify_ntag424,
     sdm::{SdmUrlOptions, Verifier, sdm_url_config},
 };
 use rand::{RngExt as _, rngs::StdRng};
-use serde::Serialize;
 
-use example_utils as utils;
+use example_utils::{self as utils, ServerSideData};
 
 /// A system identifier is used as additional input to the
 /// key diversification function to derive the session keys
@@ -160,7 +160,7 @@ async fn configure_ndef<T: Transport>(
     mut session: EncryptedSession,
     master_key: &[u8; 16],
     tag_tamper_enabled: bool,
-) -> Result<Verifier>
+) -> Result<ApplicationVerifier>
 where
     T::Error: Send + Sync + 'static,
 {
@@ -217,14 +217,20 @@ where
         .change_master_key(transport, master_key, 0x01)
         .await
         .context("failed to change master key")?;
-    Ok(verifier)
+
+    Ok(ApplicationVerifier {
+        url_template: template,
+        verifier,
+        prefix: sdm_url_config.prefix().map(|p| p.to_vec()),
+        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+    })
 }
 
 async fn provision<T: Transport>(
     mut transport: T,
     master_key: &[u8; 16],
     picc_key: &[u8; 16],
-) -> Result<Verifier>
+) -> Result<ApplicationVerifier>
 where
     T::Error: Send + Sync + 'static,
 {
@@ -236,14 +242,6 @@ where
         configure_tag(&mut transport, session, &version, &selected_uid).await?;
     let session = provision_keys(&mut transport, session, master_key, picc_key, &uid).await?;
     configure_ndef(&mut transport, session, master_key, tag_tamper_enabled).await
-}
-
-#[derive(Serialize)]
-struct ServerSideData {
-    verifier: Verifier,
-    master_key: [u8; 16],
-    picc_key: [u8; 16],
-    system_identifier: Vec<u8>,
 }
 
 fn main() -> Result<()> {
@@ -258,7 +256,7 @@ fn main() -> Result<()> {
     println!("New master key: {}", utils::hex(&master_key));
     println!("New PICC key:   {}", utils::hex(&picc_key));
 
-    let verifier = utils::block_on(provision(transport, &master_key, &picc_key))?;
+    let application_verifier = utils::block_on(provision(transport, &master_key, &picc_key))?;
 
     println!("Provisioning successful.");
 
@@ -269,11 +267,10 @@ fn main() -> Result<()> {
         // It contains information about the placeholders and keys used for encryption and MAC.
         // The server must load this information from a trusted source (e.g. a database or vault)
         // or have it hardcoded.
-        verifier,
+        application_verifier,
         // WARN: In a real application, you do not print or serialize keys
         master_key,
         picc_key,
-        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
     };
 
     println!(

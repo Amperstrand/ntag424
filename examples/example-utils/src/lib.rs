@@ -1,8 +1,16 @@
 use anyhow::{Context as _, Result, bail};
-use ntag424::{EncryptedSession, Session, Transport};
+use ntag424::{EncryptedSession, Session, Transport, high_level::ApplicationVerifier};
 use ntag424_pcsc::CardTransport;
 use pcsc::{Context, Protocols, Scope};
 use rand::{RngExt as _, rngs::StdRng};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct ServerSideData {
+    pub master_key: [u8; 16],
+    pub picc_key: [u8; 16],
+    pub application_verifier: ApplicationVerifier,
+}
 
 /// List available PC/SC readers and let the user select one.
 pub fn get_pcsc_transport() -> Result<CardTransport> {
@@ -71,9 +79,10 @@ where
         .into())
 }
 
-/// A simple executor that runs a future to completion.
+/// A simple single-poll executor.
 ///
-/// This only supports futures that are immediately ready.
+/// This only supports futures that are immediately ready,
+/// use a proper async runtime in real code.
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     use core::pin::pin;
     use core::task::{Context, Poll, Waker};

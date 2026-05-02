@@ -10,3 +10,4 @@ ntag424 = { workspace = true, features = ["alloc"] }
 ntag424-pcsc.workspace = true
 pcsc.workspace = true
 rand.workspace = true
+serde.workspace = true
