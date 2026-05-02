@@ -461,6 +461,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntag424-provision"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dialoguer",
+ "example-utils",
+ "ntag424",
+ "ntag424-pcsc",
+ "pcsc",
+ "rand",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ntag424-verification"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dialoguer",
+ "example-utils",
+ "ntag424",
+ "ntag424-pcsc",
+ "pcsc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "p224"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -523,21 +552,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "provision"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dialoguer",
- "example-utils",
- "ntag424",
- "ntag424-pcsc",
- "pcsc",
- "rand",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -737,20 +751,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "verify"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dialoguer",
- "example-utils",
- "ntag424",
- "ntag424-pcsc",
- "pcsc",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "version_check"

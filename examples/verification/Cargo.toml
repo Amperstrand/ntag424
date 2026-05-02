@@ -1,5 +1,5 @@
 [package]
-name = "verify"
+name = "ntag424-verification"
 version = "0.1.0"
 edition = "2024"
 

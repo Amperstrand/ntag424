@@ -1,5 +1,5 @@
 [package]
-name = "provision"
+name = "ntag424-provision"
 version = "0.1.0"
 edition = "2024"
 
