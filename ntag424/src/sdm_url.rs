@@ -121,10 +121,48 @@ pub struct SdmUrlConfig {
     ///
     /// Use together with [`offset`](`SdmUrlConfig::offset`) to convert an NDEF
     /// byte offset (as found in [`sdm_settings`](`SdmUrlConfig::sdm_settings`))
-    /// to a character index in the original URL:
+    /// to a character index in the original URL. This adjustment can be applied to a
+    /// [`Verifier`](`crate::sdm::Verifier`) so
+    /// that [`verify`](`crate::sdm::Verifier::verify`) can be called against
+    /// the full URL bytes instead of raw NDEF bytes:
     ///
-    /// ```text
-    /// url_char_index = ndef_byte_offset - offset + prefix_len
+    /// ```
+    /// # #[cfg(feature = "sdm")]
+    /// # fn main() {
+    /// use ntag424::sdm::{Verifier, parse_ndef_uri, sdm_url_config, SdmUrlOptions};
+    /// use ntag424::types::file_settings::CryptoMode;
+    /// use ntag424::types::KeyNumber;
+    ///
+    /// let opts = SdmUrlOptions {
+    ///     picc_key: KeyNumber::Key1,
+    ///     mac_key: KeyNumber::Key2,
+    ///     ..SdmUrlOptions::default()
+    /// };
+    /// let config = sdm_url_config(
+    ///     "https://example.com/?p={picc}&m={mac}",
+    ///     CryptoMode::Lrp,
+    ///     opts,
+    /// )
+    /// .unwrap();
+    ///
+    /// // "https://" is 8 bytes; prefix_len records how many characters of the
+    /// // original URL were compressed into the single NDEF prefix-code byte.
+    /// assert_eq!(config.prefix_len, 8);
+    ///
+    /// // parse_ndef_uri reconstructs the full URL from the NDEF bytes.
+    /// let url = parse_ndef_uri(&config.ndef_bytes).unwrap();
+    /// assert!(url.as_ref().starts_with("https://example.com/"));
+    ///
+    /// // Shift all internal NDEF byte offsets to URL character indices so that
+    /// // Verifier::verify can be called directly against the full URL string.
+    /// let raw_verifier = Verifier::try_new(&config.sdm_settings, CryptoMode::Lrp).unwrap();
+    /// let url_verifier = raw_verifier
+    ///     .with_offset(config.prefix_len as i32 - config.offset as i32)
+    ///     .unwrap();
+    /// assert_eq!(url_verifier.start(), raw_verifier.start() + 1);
+    /// # }
+    /// # #[cfg(not(feature = "sdm"))]
+    /// # fn main() {}
     /// ```
     pub prefix_len: usize,
     /// NFC Forum URI Record prefix code stored at `ndef_bytes[offset - 1]`.
