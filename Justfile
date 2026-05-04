@@ -97,7 +97,7 @@ release value:
   fi
 
   restore_release_files() {
-    jj restore "$changelog" "**/Cargo.toml"
+    jj restore "$changelog" "**/Cargo.toml" "**/Cargo.lock"
   }
 
   extract_release_notes() {
@@ -127,6 +127,9 @@ release value:
     echo "error: failed to update crate version" >&2
     exit 1
   fi
+
+  cargo update --manifest-path examples/Cargo.toml
+  cargo check --manifest-path examples/Cargo.toml --locked
 
   uvx git-cliff --tag "$tag" --output "$changelog"
   mtime_before_edit="$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$changelog")"
