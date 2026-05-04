@@ -2,6 +2,81 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.0] - 2026-05-04
+
+### Added
+
+- Expose SDM URL prefix length and offset in `SdmUrlConfig`
+- Add `parse_ndef_uri` to convert NDEF bytes back into a URL string
+- Alloc feature enables serde/alloc now
+- Store prefix code in SdmUrlConfig
+- Implement high level provisioning API
+- Add validation function to SDM verifier
+- Expose high level key derivation function
+- Store the URL template in the TagInformation struct
+- Add high-level verification API
+- Add mac_range method to Verifier
+- Expose PICC key derivation function in high level API
+- NDEF uri parser accepts trailing data and provides detailed error information
+- The is_tampered method now only checks for the Open status
+- The Tampered error variant of ProvisioningError now includes the TagTamperStatusReadout
+- Add create_app_verifier function to high level API
+- Add start() method to Verifier to get lowest byte offset among all SDM data sources
+- Read and write commands split larger files automatically
+- High level provisioning now updates the capability container
+- Add runtime alignment check for AES-CBC buffers
+- Add zeroize to securely erase sensitive data from memory
+- Add `#[non_exhaustive]` to error enums
+
+### Changed
+
+- Rename "key_diversification" feature to "key-diversification"
+- Split high-lvel provisioning API into a separate modules
+- Swap parameter order of `decrypt_picc_data` and change `prefix` type to `Option<Vec<u8>>`
+- Move SDM configuration details
+- Split sdm calculation into seprate functions in high level API
+- Restrict SDM sub module visibility
+- Remove TagInformation, use ApplicationVerifier and UID tuple
+
+### Continuous Integration
+
+- Fix git tag body format and release notes formatting
+- Run more feature combinations in CI and a publication dry-run
+- Add cargo-deny and cargo-audit checks to the CI pipeline
+- Add miri test job for crypto module
+- Run ci on push only if the branch is main
+
+### Documentation
+
+- Remove the small SDM provisioning example
+- Extend documentation for high-level verification API
+- Use high-level API in README.md example
+- Clarify high level API and its opinionated nature
+- Add links to related work
+- Describe usage of AI and LLMs in the project
+- Mention comprehensive docs and tests as a feature
+- Fix typo
+- Use ApplicationVerifier in example code
+- Use SysRng in README example
+- Add missing documentation for file settings change access right
+- Add doc example for SdmUrlConfig prefix length and offset
+- Add module level documentation for SDM configuration types
+- Remove reference to private function
+- Mention doc tests in doc pipeline
+- Fix metadata in pcsc helper crate and clarify release notes formatting
+- Add documentation for the `Transport` trait
+
+### Fixed
+
+- The verification logic was incorrectly stripping the prefix
+- Increase version requirements to actual lowest supported versions
+
+### Maintenance
+
+- Update examples to compile again
+- Add length-typed AES-CBC encrypt/decrypt helpers
+- Align example package names with their binary names
+
 ## [v0.1.0-beta2] - 2026-04-28
 
 ### Added
