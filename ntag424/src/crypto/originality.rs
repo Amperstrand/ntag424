@@ -44,6 +44,79 @@ pub enum OriginalityError {
     VerificationFailed,
 }
 
+/// A 56-byte P-224 ECDSA originality signature read from an NTAG 424 DNA tag.
+///
+/// Wraps the raw `r ‖ s` bytes and exposes methods to verify them against a UID.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OriginalitySignature([u8; SIGNATURE_LEN]);
+
+impl OriginalitySignature {
+    /// Wrap raw signature bytes (e.g. from deserialization or testing).
+    pub fn from_bytes(bytes: [u8; SIGNATURE_LEN]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the raw 56-byte signature (`r ‖ s`, 28 bytes each, big-endian).
+    pub fn as_bytes(&self) -> &[u8; SIGNATURE_LEN] {
+        &self.0
+    }
+
+    /// Verify against the NXP NTAG 424 DNA master public key (AN12196 §7.2).
+    pub fn verify(&self, uid: &[u8]) -> Result<(), OriginalityError> {
+        verify_with_key(&NXP_ORIGINALITY_PUBLIC_KEY_SEC1, uid, &self.0)
+    }
+
+    /// Verify against a caller-supplied SEC1-encoded public key.
+    ///
+    /// `public_key_sec1` may be in compressed (`0x02`/`0x03`) or
+    /// uncompressed (`0x04`) form.
+    pub fn verify_with_key(
+        &self,
+        public_key_sec1: &[u8],
+        uid: &[u8],
+    ) -> Result<(), OriginalityError> {
+        verify_with_key(public_key_sec1, uid, &self.0)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for OriginalitySignature {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_bytes(&self.0)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for OriginalitySignature {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct SigVisitor;
+        impl<'de> serde::de::Visitor<'de> for SigVisitor {
+            type Value = OriginalitySignature;
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{SIGNATURE_LEN} bytes")
+            }
+            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                <[u8; SIGNATURE_LEN]>::try_from(v)
+                    .map(OriginalitySignature)
+                    .map_err(|_| E::invalid_length(v.len(), &self))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut buf = [0u8; SIGNATURE_LEN];
+                for (i, slot) in buf.iter_mut().enumerate() {
+                    *slot = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(i, &self))?;
+                }
+                Ok(OriginalitySignature(buf))
+            }
+        }
+        d.deserialize_bytes(SigVisitor)
+    }
+}
+
 /// Verify a signature with a caller-supplied public key.
 ///
 /// `public_key_sec1` may be SEC1-encoded in compressed (`0x02`/`0x03`)
@@ -69,11 +142,6 @@ fn verify_with_key(
         .map_err(|_| OriginalityError::VerificationFailed)
 }
 
-/// Verify `signature` against `uid` using the NXP master public key.
-pub fn verify(uid: &[u8], signature: &[u8; SIGNATURE_LEN]) -> Result<(), OriginalityError> {
-    verify_with_key(&NXP_ORIGINALITY_PUBLIC_KEY_SEC1, uid, signature)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,9 +155,40 @@ mod tests {
         0xE4, 0x71, 0x13, 0x99, 0x33, 0x24, 0x47, 0x3B, 0x78, 0x5D, 0x21,
     ];
 
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+        use serde::Deserialize as _;
+        use serde::de::value::{BorrowedBytesDeserializer, Error as DeError};
+
+        #[test]
+        fn json_roundtrip() {
+            let sig = OriginalitySignature::from_bytes(TABLE30_SIG);
+            let json = serde_json::to_string(&sig).expect("serialize");
+            let got: OriginalitySignature = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(sig, got);
+        }
+
+        #[test]
+        fn deserialize_from_bytes_visitor() {
+            let sig = OriginalitySignature::from_bytes(TABLE30_SIG);
+            let de = BorrowedBytesDeserializer::<DeError>::new(&TABLE30_SIG);
+            let got = OriginalitySignature::deserialize(de).expect("deserialize from bytes");
+            assert_eq!(sig, got);
+        }
+
+        #[test]
+        fn deserialize_wrong_length_is_error() {
+            let de = BorrowedBytesDeserializer::<DeError>::new(&TABLE30_SIG[..10]);
+            assert!(OriginalitySignature::deserialize(de).is_err());
+        }
+    }
+
     #[test]
     fn an12196_table30_vector() {
-        verify(&TABLE30_UID, &TABLE30_SIG).expect("AN12196 Table 30 signature must verify");
+        OriginalitySignature::from_bytes(TABLE30_SIG)
+            .verify(&TABLE30_UID)
+            .expect("AN12196 Table 30 signature must verify");
     }
 
     #[test]
@@ -101,7 +200,7 @@ mod tests {
         let mut sig = TABLE30_SIG;
         sig[0] ^= 0x01;
         assert_eq!(
-            verify(&TABLE30_UID, &sig),
+            OriginalitySignature::from_bytes(sig).verify(&TABLE30_UID),
             Err(OriginalityError::VerificationFailed)
         );
     }
@@ -115,7 +214,7 @@ mod tests {
         let mut uid = TABLE30_UID;
         uid[6] ^= 0x01;
         assert_eq!(
-            verify(&uid, &TABLE30_SIG),
+            OriginalitySignature::from_bytes(TABLE30_SIG).verify(&uid),
             Err(OriginalityError::VerificationFailed)
         );
     }

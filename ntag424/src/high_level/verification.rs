@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    KeyNumber, TagTamperStatusReadout, key_diversification::diversify_ntag424, sdm::Verifier,
-    types::FileSettingsError,
+    KeyNumber, TagTamperStatusReadout, crypto::originality::OriginalitySignature,
+    key_diversification::diversify_ntag424, sdm::Verifier, types::FileSettingsError,
 };
 
 #[derive(Debug, Error)]
@@ -27,20 +27,25 @@ pub enum VerificationError<E: Error + Debug> {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-/// Information for verifying an application.
+/// Record produced by the [`provision`](super::provision) family of functions.
 ///
-/// The verification environment needs to be able to determine this
-/// _without_ access to the UID, since the UID is encrypted. This can
-/// be achieved either by adding a small version or application identifier
-/// to the URL.
+/// Bundles everything needed to verify future SDM-signed reads from the tag,
+/// along with the tag's permanent UID and its NXP originality signature as
+/// proof of authenticity.
 ///
-/// This is returned alongside the tag's UID by the
-/// [`provision`](super::provision) family of functions.
+/// The verification environment needs to be able to identify the correct
+/// `ApplicationVerifier` without access to the UID (which is encrypted in
+/// the URL). Add a small version or application identifier to the URL to
+/// enable routing.
 pub struct ApplicationVerifier {
     pub url_template: String,
     pub verifier: Verifier,
     pub prefix: Option<Vec<u8>>,
     pub system_identifier: Vec<u8>,
+    /// The tag's permanent 7-byte UID, if known (set by the `provision` family of functions).
+    pub uid: Option<[u8; 7]>,
+    /// The NXP originality signature verified during provisioning, if available.
+    pub originality_signature: Option<OriginalitySignature>,
 }
 
 /// A store for read counters.

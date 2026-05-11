@@ -319,12 +319,13 @@ macro_rules! impl_authenticated_session {
                 mut self,
                 transport: &mut T,
                 uid: &[u8; 7],
-            ) -> Result<Self, SessionError<T::Error>> {
+            ) -> Result<(Self, originality::OriginalitySignature), SessionError<T::Error>> {
                 let mut channel = SecureChannel::new(&mut self.state);
                 let sig = read_sig_mac(transport, &mut channel).await?;
-                originality::verify(uid, &sig)
+                let sig = originality::OriginalitySignature::from_bytes(sig);
+                sig.verify(uid)
                     .map_err(SessionError::OriginalityVerificationFailed)?;
-                Ok(self)
+                Ok((self, sig))
             }
 
             async fn read_file_plain<T: Transport>(
@@ -820,15 +821,15 @@ impl AuthenticatedSession for EncryptedSession {
         self,
         transport: &mut T,
         uid: &[u8; 7],
-    ) -> Result<Self, SessionError<T::Error>> {
+    ) -> Result<(Self, originality::OriginalitySignature), SessionError<T::Error>> {
         match self {
             EncryptedSession::Aes(session) => {
-                let session = session.verify_originality(transport, uid).await?;
-                Ok(EncryptedSession::Aes(session))
+                let (session, sig) = session.verify_originality(transport, uid).await?;
+                Ok((EncryptedSession::Aes(session), sig))
             }
             EncryptedSession::Lrp(session) => {
-                let session = session.verify_originality(transport, uid).await?;
-                Ok(EncryptedSession::Lrp(session))
+                let (session, sig) = session.verify_originality(transport, uid).await?;
+                Ok((EncryptedSession::Lrp(session), sig))
             }
         }
     }

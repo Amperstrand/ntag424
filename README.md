@@ -36,7 +36,7 @@ use ntag424::high_level::{provision, ApplicationVerifier, VerifiedTagReadout};
 // Provisioning a tag
 
 let mut rng: SysRng = rand::make_rng();
-let (app_verifier, uid): (ApplicationVerifier, [u8; 7]) = provision(
+let app_verifier: ApplicationVerifier = provision(
         // a `Transport` implementation
         &mut transport,
         "https://example.com/v1/?p={picc}&m={mac}",
@@ -45,13 +45,13 @@ let (app_verifier, uid): (ApplicationVerifier, [u8; 7]) = provision(
         &mut rng,
     )
     .await?;
-// store `app_verifier` for verification, can be stored once per application
+// store `app_verifier` for verification
 
 // Verifying a tag read
 
 let input = b"https://example.com/v1/?p=...&m=...";
-let mut counter_storage = /* a ReadCounterStorage implementation */;
-let result = app_verifier.verify(&master_key, input, &mut counter_storage).await;
+let mut read_counter = 0u32;
+let result = app_verifier.verify(&master_key, input, &mut read_counter).await;
 match result {
     Ok(VerifiedTagReadout { uid, read_ctr, tamper_status }) => {
         // Tag verified successfully

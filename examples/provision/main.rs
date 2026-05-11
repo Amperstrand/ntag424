@@ -17,7 +17,8 @@
 use anyhow::{Context as _, Result, bail};
 use ntag424::{
     Access, AccessRights, AuthenticatedSession, CommMode, Configuration, EncryptedSession, File,
-    FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, Session, Transport, Uid, Version,
+    FileSettingsUpdate, KeyNumber, NonMasterKeyNumber, OriginalitySignature, Session, Transport,
+    Uid, Version,
     high_level::ApplicationVerifier,
     key_diversification::diversify_ntag424,
     sdm::{SdmUrlOptions, Verifier, sdm_url_config},
@@ -61,7 +62,7 @@ where
 async fn authenticate_and_verify_originality<T: Transport>(
     transport: &mut T,
     selected_uid: &Uid,
-) -> Result<(EncryptedSession, [u8; 7])>
+) -> Result<(EncryptedSession, [u8; 7], OriginalitySignature)>
 where
     T::Error: Send + Sync + 'static,
 {
@@ -73,11 +74,15 @@ where
     if selected_uid.is_random() {
         println!("UID: {}", utils::hex(&uid));
     }
-    let session = session
+    let (session, originality_sig) = session
         .verify_originality(transport, &uid)
         .await
         .context("originality verification failed")?;
-    Ok((session, uid))
+    println!(
+        "Originality signature: {}",
+        utils::hex(originality_sig.as_bytes())
+    );
+    Ok((session, uid, originality_sig))
 }
 
 async fn configure_tag<T: Transport>(
@@ -160,6 +165,8 @@ async fn configure_ndef<T: Transport>(
     mut session: EncryptedSession,
     master_key: &[u8; 16],
     tag_tamper_enabled: bool,
+    uid: [u8; 7],
+    originality_signature: OriginalitySignature,
 ) -> Result<ApplicationVerifier>
 where
     T::Error: Send + Sync + 'static,
@@ -223,6 +230,8 @@ where
         verifier,
         prefix: sdm_url_config.prefix().map(|p| p.to_vec()),
         system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+        uid: Some(uid),
+        originality_signature: Some(originality_signature),
     })
 }
 
@@ -237,11 +246,20 @@ where
     // WARN: Printing is for demo purposes only,
     //       never print or log sensitive data such as keys in a real application.
     let (version, selected_uid) = check_tag(&mut transport).await?;
-    let (session, uid) = authenticate_and_verify_originality(&mut transport, &selected_uid).await?;
+    let (session, uid, originality_sig) =
+        authenticate_and_verify_originality(&mut transport, &selected_uid).await?;
     let (session, tag_tamper_enabled) =
         configure_tag(&mut transport, session, &version, &selected_uid).await?;
     let session = provision_keys(&mut transport, session, master_key, picc_key, &uid).await?;
-    configure_ndef(&mut transport, session, master_key, tag_tamper_enabled).await
+    configure_ndef(
+        &mut transport,
+        session,
+        master_key,
+        tag_tamper_enabled,
+        uid,
+        originality_sig,
+    )
+    .await
 }
 
 fn main() -> Result<()> {

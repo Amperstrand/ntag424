@@ -26,12 +26,12 @@
 //! let url_template = "https://example.com/?p={picc}&m={mac}";
 //! let mut rng: SysRng = make_rng();
 //!
-//! let (app_verifier, uid): (ApplicationVerifier, [u8; 7]) =
+//! let app_verifier: ApplicationVerifier =
 //!     provision(transport, url_template, &master_key, &mut rng)
 //!         .await
 //!         .expect("Provisioning failed");
 //!
-//! // Store app_verifier (and optionally uid) for later verification
+//! // Store app_verifier for later verification; it contains the UID and originality signature
 //! # Ok(())
 //! # }
 //! ```

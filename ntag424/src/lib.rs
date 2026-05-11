@@ -331,6 +331,7 @@ macro_rules! sdm_url_config {
 
 pub use transport::{Response, Transport};
 
+pub use crypto::originality::OriginalitySignature;
 pub use crypto::suite::SessionSuite;
 pub use session::{
     AuthenticatedSession, EncryptedSession, Session, SessionError, UnauthenticatedSession,

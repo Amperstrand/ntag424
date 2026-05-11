@@ -242,15 +242,20 @@ impl Session<Unauthenticated> {
     ///
     /// Reads the 56-byte ECDSA originality signature from the
     /// PICC and verifies it using the NXP master public key.
+    /// On success the verified [`OriginalitySignature`] is returned so the
+    /// caller can inspect or store the raw signature bytes.
     ///
     /// The provided UID must not be a randomized ID - use [`AuthenticatedSession::get_uid`] if needed.
     pub async fn verify_originality<T: Transport>(
         &self,
         transport: &mut T,
         uid: &[u8; 7],
-    ) -> Result<(), SessionError<T::Error>> {
+    ) -> Result<originality::OriginalitySignature, SessionError<T::Error>> {
         let sig = read_sig(transport).await?;
-        originality::verify(uid, &sig).map_err(SessionError::OriginalityVerificationFailed)
+        let sig = originality::OriginalitySignature::from_bytes(sig);
+        sig.verify(uid)
+            .map_err(SessionError::OriginalityVerificationFailed)?;
+        Ok(sig)
     }
 }
 

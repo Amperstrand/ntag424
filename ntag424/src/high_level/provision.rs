@@ -6,6 +6,7 @@ use rand::CryptoRng;
 
 use super::{ApplicationVerifier, picc_key};
 use crate::TagTamperStatusReadout;
+use crate::crypto::originality::OriginalitySignature;
 use crate::sdm::SdmUrlConfig;
 use crate::types::file_settings::Sdm;
 use crate::{
@@ -131,7 +132,7 @@ pub async fn provision<T: Transport>(
     url_template: &str,
     master_key: &[u8; 16],
     rng: &mut impl CryptoRng,
-) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, Infallible>> {
+) -> Result<ApplicationVerifier, ProvisioningError<T::Error, Infallible>> {
     let key_fn = |uid| {
         let new_keys = derive_keys_for_uid(master_key, &uid);
         core::future::ready(Ok(new_keys))
@@ -164,7 +165,7 @@ pub async fn provision_with_keys<T: Transport>(
     url_template: &str,
     keys: &[[u8; 16]; 5],
     rng: &mut impl CryptoRng,
-) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, Infallible>> {
+) -> Result<ApplicationVerifier, ProvisioningError<T::Error, Infallible>> {
     provision_with_fn(
         transport,
         url_template,
@@ -184,7 +185,7 @@ pub async fn provision_with_fn<T: Transport, F, Fut, K>(
     url_template: &str,
     keys: F,
     rng: &mut impl CryptoRng,
-) -> Result<(ApplicationVerifier, [u8; 7]), ProvisioningError<T::Error, K>>
+) -> Result<ApplicationVerifier, ProvisioningError<T::Error, K>>
 where
     K: Error + Debug,
     F: FnOnce([u8; 7]) -> Fut,
@@ -199,7 +200,7 @@ where
 
     let version = check_version(transport).await?;
     let session = authenticate_using_factory_defaults(transport, rng).await?;
-    let (uid, session) = verify_originality(transport, session).await?;
+    let (uid, session, originality_signature) = verify_originality(transport, session).await?;
     let new_keys = keys(uid)
         .await
         .map_err(ProvisioningError::KeyGenerationError)?;
@@ -216,15 +217,14 @@ where
     // Update keys
     provision_keys(transport, session, &new_keys).await?;
 
-    Ok((
-        ApplicationVerifier {
-            verifier,
-            url_template: url_template.to_owned(),
-            prefix: prefix.map(|p| p.to_owned()),
-            system_identifier: SYSTEM_IDENTIFIER.to_vec(),
-        },
-        uid,
-    ))
+    Ok(ApplicationVerifier {
+        verifier,
+        url_template: url_template.to_owned(),
+        prefix: prefix.map(|p| p.to_owned()),
+        system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+        uid: Some(uid),
+        originality_signature: Some(originality_signature),
+    })
 }
 
 fn create_sdm_url_config<E, K>(
@@ -261,6 +261,8 @@ pub fn create_app_verifier(
         url_template: url_template.to_owned(),
         prefix: sdm_conf.prefix().map(|p| p.to_owned()),
         system_identifier: SYSTEM_IDENTIFIER.to_vec(),
+        uid: None,
+        originality_signature: None,
     })
 }
 
@@ -375,9 +377,10 @@ async fn configure<T: Transport, K: Error + Debug>(
 async fn verify_originality<T: Transport>(
     transport: &mut T,
     session: EncryptedSession,
-) -> Result<([u8; 7], EncryptedSession), SessionError<T::Error>> {
+) -> Result<([u8; 7], EncryptedSession, OriginalitySignature), SessionError<T::Error>> {
     let (uid, session) = session.get_uid(transport).await?;
-    Ok((uid, session.verify_originality(transport, &uid).await?))
+    let (session, sig) = session.verify_originality(transport, &uid).await?;
+    Ok((uid, session, sig))
 }
 
 async fn check_version<T: Transport, K: Error + Debug>(

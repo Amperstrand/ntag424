@@ -4,7 +4,7 @@ use super::Unauthenticated;
 use crate::{
     CommMode, Configuration, File, FileSettingsUpdate, FileSettingsView, KeyNumber,
     NonMasterKeyNumber, Session, SessionError, TagTamperStatusReadout, Transport, Version,
-    types::file_settings::CryptoMode,
+    crypto::originality::OriginalitySignature, types::file_settings::CryptoMode,
 };
 
 /// # Value semantics and command-counter safety
@@ -169,12 +169,14 @@ pub trait AuthenticatedSession: Sized {
     ///
     /// Reads the ECDSA signature stored on the tag and verifies it against
     /// the NXP master public key (AN12196 §7.2), confirming the tag was
-    /// manufactured by NXP.
+    /// manufactured by NXP. On success returns the session and the verified
+    /// [`OriginalitySignature`] so the caller can inspect or store the raw
+    /// signature bytes.
     fn verify_originality<T: Transport>(
         self,
         transport: &mut T,
         uid: &[u8; 7],
-    ) -> impl Future<Output = Result<Self, SessionError<T::Error>>>;
+    ) -> impl Future<Output = Result<(Self, OriginalitySignature), SessionError<T::Error>>>;
 
     /// Read file bytes in plain mode.
     ///
