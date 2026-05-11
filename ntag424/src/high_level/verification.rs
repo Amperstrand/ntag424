@@ -58,6 +58,19 @@ pub trait ReadCounterStorage {
     ) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
+impl ReadCounterStorage for u32 {
+    type Error = core::convert::Infallible;
+
+    async fn get(&mut self, _uid: &[u8; 7]) -> Result<u32, Self::Error> {
+        Ok(*self)
+    }
+
+    async fn set(&mut self, _uid: &[u8; 7], read_counter: u32) -> Result<(), Self::Error> {
+        *self = read_counter;
+        Ok(())
+    }
+}
+
 /// The data recovered from a successfully verified tag readout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedTagReadout {
