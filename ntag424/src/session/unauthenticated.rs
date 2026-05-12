@@ -242,7 +242,7 @@ impl Session<Unauthenticated> {
     ///
     /// Reads the 56-byte ECDSA originality signature from the
     /// PICC and verifies it using the NXP master public key.
-    /// On success the verified [`OriginalitySignature`] is returned so the
+    /// On success the verified [`crate::OriginalitySignature`] is returned so the
     /// caller can inspect or store the raw signature bytes.
     ///
     /// The provided UID must not be a randomized ID - use [`AuthenticatedSession::get_uid`] if needed.
