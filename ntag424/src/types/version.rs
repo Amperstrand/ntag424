@@ -145,6 +145,41 @@ impl Version {
     pub fn calendar_year_of_production(&self) -> u8 {
         bcd_decode(self.part3[13])
     }
+
+    pub fn is_ntag_424(&self) -> bool {
+        if !(self.hw_vendor_id() == 0x04 && self.hw_type() == 0x04) {
+            return false;
+        }
+        let sub_type = self.hw_sub_type();
+        if !matches!(sub_type & 0x0F, 0x08 | 0x02) {
+            return false;
+        }
+        if !matches!(sub_type & 0xF0, 0x00 | 0x80) {
+            return false;
+        }
+        if self.hw_major_version() != 0x30 || self.hw_minor_version() != 0x00 {
+            return false;
+        }
+        if self.hw_storage_size() != 0x11 {
+            return false;
+        }
+        if self.hw_protocol_type() != 0x05 {
+            return false;
+        }
+        if self.sw_vendor_id() != 0x04 || self.sw_type() != 0x04 || self.sw_sub_type() != 0x02 {
+            return false;
+        }
+        if self.sw_major_version() != 0x01 || self.sw_minor_version() != 0x02 {
+            return false;
+        }
+        if self.sw_storage_size() != 0x11 {
+            return false;
+        }
+        if self.sw_protocol_type() != 0x05 {
+            return false;
+        }
+        true
+    }
 }
 
 /// Decode a BCD-encoded byte into its decimal value (e.g. `0x26` → `26`).

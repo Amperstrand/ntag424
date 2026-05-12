@@ -30,7 +30,7 @@ mod unauthenticated;
 
 pub use authenticated::{Authenticated, EncryptedSession};
 pub use authenticated_session::AuthenticatedSession;
-pub use unauthenticated::Unauthenticated;
+pub use unauthenticated::{FactoryStateCheckResult, Unauthenticated};
 
 pub type UnauthenticatedSession = Session<Unauthenticated>;
 
@@ -87,6 +87,8 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     /// calling.
     #[error("cipher buffer length {0} is not a positive multiple of 16")]
     NotBlockAligned(usize),
+    #[error("tag is not in factory state: {0}")]
+    NotFactoryState(&'static str),
 }
 
 /// An NTAG 424 DNA session.
