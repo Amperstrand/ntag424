@@ -45,6 +45,17 @@ impl File {
         }
     }
 
+    /// Return the factory file size in bytes.
+    ///
+    /// NT4H2421Gx §8.2.3: CC = 32 B, NDEF = 256 B, Proprietary = 128 B.
+    pub fn size(self) -> u32 {
+        match self {
+            Self::CapabilityContainer => 32,
+            Self::Ndef => 256,
+            Self::Proprietary => 128,
+        }
+    }
+
     /// Return the native DESFire file number.
     ///
     /// This is the `01h`–`03h` value used in the `CmdHeader` of native

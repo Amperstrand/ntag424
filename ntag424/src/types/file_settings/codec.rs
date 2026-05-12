@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use crate::types::KeyNumber;
+use crate::types::{KeyNumber, file::File};
 
-use super::access::{AccessRights, CommMode, CtrRetAccess, FileType};
+use super::access::{Access, AccessRights, CommMode, CtrRetAccess, FileType};
 use super::error::{FileSettingsError, NibbleSlot, ReservedByte};
 use super::sdm::{
     EncFileData, EncLength, EncryptedContent, FileRead, MacWindow, Offset, PiccData, PlainMirror,
@@ -253,6 +253,51 @@ impl FileSettingsView {
             access_rights,
             sdm,
         })
+    }
+
+    /// Return the factory (delivery) file settings for the given file.
+    ///
+    /// NT4H2421Gx §8.2.3, Table 8 (access rights) and Table 13 (communication
+    /// mode). SDM is disabled on all files at delivery.
+    pub fn factory(file: File) -> Self {
+        match file {
+            File::CapabilityContainer => Self {
+                file_type: FileType::StandardData,
+                comm_mode: CommMode::Plain,
+                file_size: file.size(),
+                access_rights: AccessRights {
+                    read: Access::Free,
+                    write: Access::Key(KeyNumber::Key0),
+                    read_write: Access::Key(KeyNumber::Key0),
+                    change: Access::Key(KeyNumber::Key0),
+                },
+                sdm: None,
+            },
+            File::Ndef => Self {
+                file_type: FileType::StandardData,
+                comm_mode: CommMode::Plain,
+                file_size: file.size(),
+                access_rights: AccessRights {
+                    read: Access::Free,
+                    write: Access::Free,
+                    read_write: Access::Free,
+                    change: Access::Key(KeyNumber::Key0),
+                },
+                sdm: None,
+            },
+            File::Proprietary => Self {
+                file_type: FileType::StandardData,
+                comm_mode: CommMode::Full,
+                file_size: file.size(),
+                access_rights: AccessRights {
+                    read: Access::Key(KeyNumber::Key2),
+                    write: Access::Key(KeyNumber::Key3),
+                    read_write: Access::Key(KeyNumber::Key3),
+                    change: Access::Key(KeyNumber::Key0),
+                },
+                sdm: None,
+            },
+        }
     }
 
     /// Convert to a [`FileSettingsUpdate`] suitable for

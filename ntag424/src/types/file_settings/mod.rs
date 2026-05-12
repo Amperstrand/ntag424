@@ -52,7 +52,7 @@ pub use sdm::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::KeyNumber;
+    use crate::types::{File, KeyNumber};
 
     fn free_access_rights() -> AccessRights {
         AccessRights {
@@ -739,5 +739,32 @@ mod tests {
         assert_eq!(fs.access_rights.read_write, Access::Key(KeyNumber::Key3));
         assert_eq!(fs.access_rights.change, Access::Key(KeyNumber::Key0));
         assert!(fs.sdm.is_none());
+    }
+
+    #[test]
+    fn factory_matches_decoded_cc() {
+        let payload = [0x00, 0x00, 0x00, 0xE0, 0x20, 0x00, 0x00];
+        assert_eq!(
+            FileSettingsView::factory(File::CapabilityContainer),
+            FileSettingsView::decode(&payload).unwrap()
+        );
+    }
+
+    #[test]
+    fn factory_matches_decoded_ndef() {
+        let payload = [0x00, 0x00, 0xE0, 0xEE, 0x00, 0x01, 0x00];
+        assert_eq!(
+            FileSettingsView::factory(File::Ndef),
+            FileSettingsView::decode(&payload).unwrap()
+        );
+    }
+
+    #[test]
+    fn factory_matches_decoded_proprietary() {
+        let payload = [0x00, 0x03, 0x30, 0x23, 0x80, 0x00, 0x00];
+        assert_eq!(
+            FileSettingsView::factory(File::Proprietary),
+            FileSettingsView::decode(&payload).unwrap()
+        );
     }
 }
