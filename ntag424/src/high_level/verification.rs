@@ -96,9 +96,9 @@ impl ApplicationVerifier {
     ///
     /// Performs, in order:
     ///
-    /// 1. **Prefix strip** — if this `ApplicationVerifier` carries a `prefix`,
-    ///    `input` must begin with it; the prefix is stripped and the remainder
-    ///    is treated as the NDEF URL.
+    /// 1. **Prefix check** — if this `ApplicationVerifier` carries a `prefix`,
+    ///    `input` must begin with it; the prefix is **not** stripped, since
+    ///    verifier byte ranges are computed over the full input.
     /// 2. **Verifier consistency check** — guards against an
     ///    `ApplicationVerifier` that was deserialized from an inconsistent
     ///    source.
