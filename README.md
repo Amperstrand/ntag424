@@ -12,8 +12,8 @@ targets both embedded readers and host-side provisioning and verification.
 ## Features
 
 - **High- and low-level APIs**: Use the high-level API for opinionated flows like
-  provisioning and SDM verification, or the low-level API for direct command
-  control and custom flows.
+  provisioning, reset, and SDM verification, or the low-level API for direct
+  command control and custom flows.
 - **Full application protocol**: Authentication (AES and LRP), file read/write,
   file settings, key changes, configuration, originality verification.
 - **Comprehensive tests and documentation** using real tag data and

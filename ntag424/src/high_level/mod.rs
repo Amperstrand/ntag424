@@ -4,6 +4,7 @@
 //!
 //! - **Provisioning**: Configure a tag with keys, NDEF content, and SDM settings
 //! - **Verification**: Verify SDM-signed tag reads using [`ApplicationVerifier::verify`]
+//! - **Reset**: Restore a provisioned tag toward factory-default state using [`reset`]
 //!
 //! The implementation is opinionated in the sense that it choses a secret key strategey,
 //! SDM settings, and general tag settings. The chosen approach puts focus on
@@ -58,12 +59,14 @@
 use crate::key_diversification::diversify_aes128;
 
 mod provision;
+mod reset;
 mod verification;
 
 pub use provision::{
     ProvisioningError, create_app_verifier, derive_keys_for_uid, provision, provision_with_fn,
     provision_with_keys,
 };
+pub use reset::{ResetError, reset, reset_with_fn, reset_with_keys};
 pub use verification::{
     ApplicationVerifier, ReadCounterStorage, VerificationError, VerifiedTagReadout,
 };
