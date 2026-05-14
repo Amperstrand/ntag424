@@ -1,14 +1,13 @@
 use core::convert::Infallible;
-use core::fmt::Debug;
 use core::error::Error;
+use core::fmt::Debug;
 
 use rand::{CryptoRng, RngExt as _};
 
 use super::{derive_keys_for_uid, picc_key};
 use crate::{
     AuthenticatedSession as _, CommMode, EncryptedSession, File, FileSettingsView, KeyNumber,
-    NonMasterKeyNumber, Session, SessionError, Transport,
-    types::cc::CapabilityContainer,
+    NonMasterKeyNumber, Session, SessionError, Transport, types::cc::CapabilityContainer,
 };
 
 /// Error type for the `reset` family of functions.
@@ -50,9 +49,10 @@ pub enum ResetError<E: Error + Debug, K: Error + Debug = Infallible> {
 ///
 /// # Irreversible state
 ///
-/// LRP mode and random UID mode were enabled during provisioning and cannot
-/// be disabled.  After a successful reset the tag passes factory-state checks
-/// for keys and file settings, but those bits remain set permanently.
+/// LRP mode, random UID mode, and tag tamper protection (if it was enabled
+/// during provisioning) cannot be disabled.  After a successful reset the tag
+/// passes factory-state checks for keys and file settings, but those bits
+/// remain set permanently.
 /// Use [`Session::check_factory_state`](`crate::Session::check_factory_state`)
 /// to verify the result.
 ///
@@ -200,7 +200,9 @@ where
             .await?;
     }
 
-    session.change_master_key(transport, &[0u8; 16], 0x00).await?;
+    session
+        .change_master_key(transport, &[0u8; 16], 0x00)
+        .await?;
 
     Ok(())
 }
