@@ -289,9 +289,13 @@ async fn configure_ndef<T: Transport>(
     // Standard NFC readers consult the CC to determine whether they may read or
     // write the NDEF file; leaving it at factory defaults (write = open) after
     // provisioning would mislead them about the actual tag policy.
-    // Read stays Open; write becomes Denied to reflect write = NoAccess.
+    // Read stays Open; write becomes ProprietaryKey(Key0) to reflect that
+    // authenticated writes via Key0 are possible (read_write = Key0) while
+    // unauthenticated writes are not (write = NoAccess).
     let cc_bytes = crate::types::cc::CapabilityContainer::default()
-        .with_ndef_write_access(crate::types::cc::AccessCondition::Denied)
+        .with_ndef_write_access(crate::types::cc::AccessCondition::ProprietaryKey(
+            KeyNumber::Key0,
+        ))
         .to_bytes();
     session = session
         .write_file_with_mode(
