@@ -5,6 +5,9 @@
 
 //! A transport-agnostic crate for communicating with NTAG 424 DNA NFC tags.
 //!
+//! **This crate is an independent, unofficial implementation and is not
+//! affiliated with or endorsed by NXP. NTAG® is a trademark of NXP Semiconductors.**
+//!
 //! An opinionated use case is provided through the [`high_level`] module.
 //! This provides a convenient abstraction for tag provisioning
 //! and SDM verification, without needing to work with low-level commands directly.
