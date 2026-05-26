@@ -25,13 +25,16 @@ steps:
       - test -s RELEASE_NOTES.md || { echo "annotated tag message is required for releases" >&2; exit 1; }
 
   create-codeberg-release:
-    image: codeberg.org/cyborus/forgejo-cli:latest
+    image: debian:bookworm-slim
     depends_on:
       - verify-release
     environment:
       CODEBERG_TOKEN:
         from_secret: codeberg_token
+      FJ_VERSION: "0.5.0"
     commands:
+      - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+      - curl -fsSL "https://codeberg.org/forgejo-contrib/forgejo-cli/releases/download/v${FJ_VERSION}/forgejo-cli-x86_64-linux.tar.gz" | tar xz -C /usr/local/bin
       - |
         forge_host="$CI_FORGE_URL"
         fj -H "$forge_host" auth add-key "$CI_REPO_OWNER" "$CODEBERG_TOKEN"
