@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.1.1] - 2026-05-26
+
+### Documentation
+
+- Add legal disclaimer
+
 ## [v0.1.0] - 2026-05-04
 
 ### Added
@@ -26,7 +32,7 @@ All notable changes to this project will be documented in this file.
 - High level provisioning now updates the capability container
 - Add runtime alignment check for AES-CBC buffers
 - Add zeroize to securely erase sensitive data from memory
-- Add `#[non_exhaustive]` to error enums
+- Add #[non_exhaustive] to error enums
 
 ### Changed
 
