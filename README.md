@@ -6,6 +6,9 @@
 A transport-agnostic Rust crate for communicating with
 [NTAG 424 DNA](https://www.nxp.com/products/NTAG424DNA) NFC tags.
 
+**This crate is an independent, unofficial implementation and is not
+affiliated with or endorsed by NXP. NTAG® is a trademark of NXP Semiconductors.**
+
 The crate is `no_std` compatible (with optional `alloc`) and
 targets both embedded readers and host-side provisioning and verification.
 
