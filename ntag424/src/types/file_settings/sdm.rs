@@ -409,6 +409,22 @@ pub struct Sdm {
 }
 
 impl Sdm {
+    /// SDM fully disabled: no PICC data mirroring, no file-read MAC, no tamper status.
+    ///
+    /// Use with [`FileSettingsUpdate::with_sdm`] to clear SDM when wiping a card:
+    ///
+    /// ```ignore
+    /// let update = settings.into_update().with_sdm(Sdm::disabled());
+    /// session.change_file_settings(transport, file, &update).await?;
+    /// ```
+    pub const fn disabled() -> Self {
+        Self {
+            picc_data: PiccData::None,
+            file_read: None,
+            tamper_status: None,
+        }
+    }
+
     /// Returns the tag identity data (PICCData) mirror configuration.
     pub const fn picc_data(self) -> PiccData {
         self.picc_data
