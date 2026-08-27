@@ -277,7 +277,15 @@ mod tests {
     fn ref_mact(mac: [u8; 16], ti: [u8; 4], ctr: u16) -> [u8; 8] {
         // verify_response_mac_and_advance with rc=0x00 and empty RespData.
         let next = ctr.wrapping_add(1);
-        let input = [0x00u8, next as u8, (next >> 8) as u8, ti[0], ti[1], ti[2], ti[3]];
+        let input = [
+            0x00u8,
+            next as u8,
+            (next >> 8) as u8,
+            ti[0],
+            ti[1],
+            ti[2],
+            ti[3],
+        ];
         AesSuite::from_keys([0u8; 16], mac).mac(&input)
     }
 
@@ -289,10 +297,30 @@ mod tests {
         let zeros = [0u8; 16];
 
         let vectors: [(NonMasterKeyNumber, u16, [u8; 16], &str); 4] = [
-            (NonMasterKeyNumber::Key1, 4, [0x11; 16], "90C400002901b7a4406e4b51e939dcf27c307fc2cf18432f62b7fb9e30003ef6daae5f6c4dc684d49060a28cdbdd00"),
-            (NonMasterKeyNumber::Key2, 5, [0x22; 16], "90C400002902d1a53e1f93825b1e8d6d5e0a90c213847d52b2e9ee54e62bd5c290ee28d8c4f003c4d7617ba23cae00"),
-            (NonMasterKeyNumber::Key3, 6, [0x33; 16], "90C400002903ab57d46bc81862236fa2234099363a7f58b208d761c25af1bf97c53e8c40d956f71e19b3e37d9ebc00"),
-            (NonMasterKeyNumber::Key4, 7, [0x44; 16], "90C40000290434111e92114dd9730e82c726154cfda8a26a81d175678ac34ddf7685dcfb351902e71eef89540d7700"),
+            (
+                NonMasterKeyNumber::Key1,
+                4,
+                [0x11; 16],
+                "90C400002901b7a4406e4b51e939dcf27c307fc2cf18432f62b7fb9e30003ef6daae5f6c4dc684d49060a28cdbdd00",
+            ),
+            (
+                NonMasterKeyNumber::Key2,
+                5,
+                [0x22; 16],
+                "90C400002902d1a53e1f93825b1e8d6d5e0a90c213847d52b2e9ee54e62bd5c290ee28d8c4f003c4d7617ba23cae00",
+            ),
+            (
+                NonMasterKeyNumber::Key3,
+                6,
+                [0x33; 16],
+                "90C400002903ab57d46bc81862236fa2234099363a7f58b208d761c25af1bf97c53e8c40d956f71e19b3e37d9ebc00",
+            ),
+            (
+                NonMasterKeyNumber::Key4,
+                7,
+                [0x44; 16],
+                "90C40000290434111e92114dd9730e82c726154cfda8a26a81d175678ac34ddf7685dcfb351902e71eef89540d7700",
+            ),
         ];
 
         for (key_no, ctr, old_key, expected_hex) in vectors {

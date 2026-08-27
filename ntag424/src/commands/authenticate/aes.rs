@@ -98,7 +98,19 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     // LenCap = 0x03 signals AES-128 key type and carries 3 zero bytes of PCDcap2
     // (NT4H2421Gx §10.4.1, Table 25). The NTAG 424 DNA rejects LenCap=0x00 for
     // AES-authenticated applications.
-    let part1_apdu = [0x90, 0x71, 0x00, 0x00, 0x05, key_no.as_byte(), 0x03, 0x00, 0x00, 0x00, 0x00];
+    let part1_apdu = [
+        0x90,
+        0x71,
+        0x00,
+        0x00,
+        0x05,
+        key_no.as_byte(),
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    ];
     let r1 = transport.transmit(&part1_apdu).await?;
     let code = ResponseCode::desfire(r1.sw1, r1.sw2);
     if !matches!(code.status(), ResponseStatus::AdditionalFrame) {
