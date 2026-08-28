@@ -201,7 +201,7 @@ fn authenticate_aes_an12196_key0_full_handshake() {
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         // Step 5 command / step 6–8 response.
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("A04C124213C186F22399D33AC2A30215"),
             0x91,
             0xAF,
@@ -247,7 +247,7 @@ fn authenticate_aes_surfaces_picc_auth_error() {
     let mut transport = TestTransport::new([
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("A04C124213C186F22399D33AC2A30215"),
             0x91,
             0xAF,
@@ -430,7 +430,7 @@ fn authenticate_aes_non_first_an12196_table23_full_handshake() {
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         // First Part 1 (§5.6 step 5 / step 6–8).
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("A04C124213C186F22399D33AC2A30215"),
             0x91,
             0xAF,
@@ -506,7 +506,7 @@ fn authenticate_aes_hw_key0_full_handshake() {
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         // Part 1: 90 71 00 00 02 00 00 00  →  E(K0,RndB) || 91 AF
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("457B8458856FA7D114513E5A65A37405"),
             0x91,
             0xAF,
@@ -691,7 +691,7 @@ fn authenticate_aes_hw_key0_full_handshake_b() {
     let mut transport = TestTransport::new([
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("7858A0B9DBC468F0FF1B2F773D6DF9FC"),
             0x91,
             0xAF,
@@ -733,7 +733,7 @@ fn authenticate_aes_non_first_hw_key3() {
         // Key0 first auth (ISOSelectFile + Part1 + Part2)
         Exchange::new(&hex_bytes("00A4040007D276000085010100"), &[], 0x90, 0x00),
         Exchange::new(
-            &hex_bytes("9071000002000000"),
+            &hex_bytes("9071000005000300000000"),
             &hex_bytes("7858A0B9DBC468F0FF1B2F773D6DF9FC"),
             0x91,
             0xAF,

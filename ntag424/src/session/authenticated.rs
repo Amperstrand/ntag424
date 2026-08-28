@@ -1048,7 +1048,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("040313D1647757509A5F3C4569EA913C");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("7CB5AD158827AF5DE233EE71DC818E85");
         let auth_part2_send = hex_bytes(
             "90AF000020B83C7073C1534C2DDE8332DE5C7B026D7D8B581282F46DDFDC04AD7886747107\
@@ -1105,7 +1105,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("0636412AC9A3F204063279F3925EA41D");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("EB757B98C848A60815F57A76CC9E9417");
         let auth_part2_send = hex_bytes(
             "90AF000020996C39A0A5278C1E99E9E4EC580FDC1BF76004238FCE41D0C7F8820299BEB50B\
@@ -1164,7 +1164,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("3B9EF436D1E3B0C61F0BF0A62B58ABFE");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("953BB4EFF9647E09610804B5181F937F");
         let auth_part2_send = hex_bytes(
             "90AF000020C9B3B3D5F73D6EDC1E63B1D69133D2E1C96C2DB567EA65D8F559505417890509\
@@ -1228,7 +1228,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("90EFB639E594F91F7C72ABE86AD72050");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("3241CE4F7E481A0C82C2F2C1C7415C25");
         let auth_part2_send = hex_bytes(
             "90AF000020F59D2408DD7DB93152EF29E9818DF337E287C1CC75DFF89ECC1DCD8DF59BA13F\
@@ -1289,7 +1289,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("330E8057AB33F30A6ED23C95CDAD08AF");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("0A2B841FD910F005B67723949021ABB3");
         let auth_part2_send = hex_bytes(
             "90AF000020A61C9513B6F4F43632A29FC6502F29F0CCAA37105110CFA72484A597472B9283\
@@ -1355,7 +1355,7 @@ mod tests {
         let key = [0u8; 16];
         let rnd_a = hex_array::<16>("EC2E171B026A8C1893175DFFF206A0D0");
 
-        let auth_part1_send = hex_bytes("9071000002000000");
+        let auth_part1_send = hex_bytes("9071000005000300000000");
         let auth_part1_resp = hex_bytes("C213EB5AE1237C03B38309DE66DB2FB1");
         let auth_part2_send = hex_bytes(
             "90AF0000203BD965D97D200D12E66EBD5BE1CA7CB328CEAB51523BA03C43A159A8761D9973\
