@@ -291,4 +291,58 @@ mod tests {
         assert_eq!(state.counter(), 4);
         assert_eq!(transport.remaining(), 0);
     }
+    /// Cross-implementation parity: byte-exact ChangeFileSettings (FS_RESET)
+    /// APDU against the bolt-card-programmer web app.
+    ///
+    /// Vector from `bolt-card-programmer/refchangekey.js` (FS_RESET line,
+    /// CmdCtr=3): the wipe-time NDEF file-settings reset — Plain comm,
+    /// rights 0xEEE0 (R/W/RW free, change Key0), SDM disabled. Same
+    /// synthetic session state as the ChangeKey parity tests (lesson B8).
+    #[test]
+    fn change_file_settings_bolt_card_programmer_parity_fs_reset() {
+        use crate::testing::hex_bytes;
+
+        let enc = hex_array("1234567890abcdef1234567890abcdef");
+        let mac = hex_array("fedcba0987654321fedcba0987654321");
+        let ti = hex_array("AABBCCDD");
+
+        let update = FileSettingsUpdate::new(
+            CommMode::Plain,
+            AccessRights {
+                read: Access::Free,
+                write: Access::Free,
+                read_write: Access::Free,
+                change: Access::Key(KeyNumber::Key0),
+            },
+        )
+        .with_sdm(Sdm::disabled());
+
+        // refchangekey.js FS_RESET: 90 5F 00 00 19 02 E(CmdData 16) MACt(8) 00
+        let expected = hex_bytes("905F00001902103f2395a25873b0635d930ad5776da7c96f2e0188d9fc9b00");
+
+        // Response is MACt(8) only (§10.7.1): rc=0x00, next CmdCtr, TI, empty data.
+        let next = 4u16;
+        let mact_input = [
+            0x00u8,
+            next as u8,
+            (next >> 8) as u8,
+            ti[0],
+            ti[1],
+            ti[2],
+            ti[3],
+        ];
+        let mact = AesSuite::from_keys([0u8; 16], mac).mac(&mact_input);
+
+        let mut transport = TestTransport::new([Exchange::new(&expected, &mact, 0x91, 0x00)]);
+        let mut state = Authenticated::new(AesSuite::from_keys(enc, mac), ti, KeyNumber::Key0);
+        for _ in 0..3 {
+            state.advance_counter();
+        }
+
+        block_on(async {
+            let mut ch = crate::commands::SecureChannel::new(&mut state);
+            change_file_settings(&mut transport, &mut ch, 0x02, &update).await
+        })
+        .expect("FS_RESET must match bolt-card-programmer byte-for-byte");
+    }
 }
