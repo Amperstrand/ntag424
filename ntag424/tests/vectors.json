@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "notes": "All hex strings are lowercase. Byte-exact cross-language test vectors for the NTAG424 DNA / boltcard crypto stack. See README.md for the schema and the consumer update flow. 'counter_bytes' is the 3-byte SDMReadCtr exactly as stored in PICCData[8..11] and SV2[13..16] (SV2 copies the PICC bytes verbatim); libraries differ on whether they interpret this field as little- or big-endian, so the vectors pin the BYTES, not an integer.",
+  "vectors": [
+    {
+      "id": "an12196-table1-sv1-session-enc-key",
+      "category": "an12196",
+      "input": {
+        "op": "aes_cmac",
+        "key": "5ace7e50ab65d5d51fd5bf5a16b8205b",
+        "message": "c33c0001008004c767f2066180010000"
+      },
+      "expected": {
+        "cmac": "66da61797e23deca5d8eca13bbadf7a9"
+      },
+      "origin": "NXP AN12196 §3.3 Table 1 (SV1 -> KSesSDMFileReadENC), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "an12196-table1-sv2-session-mac-key",
+      "category": "an12196",
+      "input": {
+        "op": "aes_cmac",
+        "key": "5ace7e50ab65d5d51fd5bf5a16b8205b",
+        "message": "3cc30001008004c767f2066180010000"
+      },
+      "expected": {
+        "cmac": "3a3e8110e05311f7a3fcf0d969bf2b48"
+      },
+      "origin": "NXP AN12196 §3.3 Table 1 (SV2 -> KSesSDMFileReadMAC), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "an12196-table2-picc-decrypt",
+      "category": "an12196",
+      "input": {
+        "op": "picc_decrypt",
+        "key": "00000000000000000000000000000000",
+        "picc_enc_data": "ef963ff7828658a599f3041510671e88"
+      },
+      "expected": {
+        "decrypted": "c704de5f1eacc0403d0000da5cf60941",
+        "uid": "04de5f1eacc040",
+        "counter_bytes": "3d0000"
+      },
+      "origin": "NXP AN12196 §3.4.2.1 Table 2 (PICCENCData decryption, K_SDMMetaRead = zero key), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "an12196-table4-sv2-build",
+      "category": "an12196",
+      "input": {
+        "op": "sv2_build",
+        "uid": "04de5f1eacc040",
+        "counter_bytes": "3d0000"
+      },
+      "expected": {
+        "sv2": "3cc30001008004de5f1eacc0403d0000"
+      },
+      "origin": "NXP AN12196 §3.4.4.2.1 Table 4 (SV2 construction), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "an12196-table4-session-key",
+      "category": "an12196",
+      "input": {
+        "op": "aes_cmac",
+        "key": "00000000000000000000000000000000",
+        "message": "3cc30001008004de5f1eacc0403d0000"
+      },
+      "expected": {
+        "cmac": "3fb5f6e3a807a03d5e3570ace393776f"
+      },
+      "origin": "NXP AN12196 §3.4.4.2.1 Table 4 (Ks = CMAC(K_SDMFileRead, SV2)), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "an12196-table4-sun-mact",
+      "category": "an12196",
+      "input": {
+        "op": "sun_mac",
+        "key": "00000000000000000000000000000000",
+        "uid": "04de5f1eacc040",
+        "counter_bytes": "3d0000"
+      },
+      "expected": {
+        "cmac_truncated": "94eed9ee65337086"
+      },
+      "origin": "NXP AN12196 §3.4.4.2.1 Table 4 (SUN MACt, odd bytes of CMAC(Ks, empty payload)), via Amperstrand/ntag424-crypto test/an12196-vectors.test.ts"
+    },
+    {
+      "id": "rfc4493-example3-len40",
+      "category": "an12196",
+      "input": {
+        "op": "aes_cmac",
+        "key": "2b7e151628aed2a6abf7158809cf4f3c",
+        "message": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411"
+      },
+      "expected": {
+        "cmac": "dfa66747de9ae63030ca32611497c827"
+      },
+      "origin": "RFC 4493 §4 Example 3 (AES-CMAC known-answer, len=40), via Amperstrand/ntag424-crypto test/aes-cmac.test.ts"
+    },
+    {
+      "id": "rfc4493-example4-len64",
+      "category": "an12196",
+      "input": {
+        "op": "aes_cmac",
+        "key": "2b7e151628aed2a6abf7158809cf4f3c",
+        "message": "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710"
+      },
+      "expected": {
+        "cmac": "51f0bebf7e3b9d92fc49741779363cfe"
+      },
+      "origin": "RFC 4493 §4 Example 4 (AES-CMAC known-answer, len=64), via Amperstrand/ntag424-crypto test/aes-cmac.test.ts"
+    },
+    {
+      "id": "derivation-bolty-cpp-vector1",
+      "category": "derivation",
+      "input": {
+        "op": "derive_keys",
+        "issuer_key": "00000000000000000000000000000000",
+        "uid": "041065fa967380",
+        "version": 1
+      },
+      "expected": {
+        "card_key": "1a3888508f11ba44942bda56b928cc4b",
+        "k0": "24d449c0c1d166827c05b8bb4a5798da",
+        "k1": "dfea2649f9ce19d0556d0c04cef56fa2",
+        "k2": "d41a0289deb7d573b700b135965cd1ea",
+        "k3": "fc5d413a564a0b415e3fd410fd19bc55",
+        "k4": "f4801a4d53d8784090aa44bbd7c89e95",
+        "card_id": "6110dea4c91ed081c43daad898a28548"
+      },
+      "origin": "bolty-rs tests/fixtures/derivation/boltcard_deterministic.toml Vector 1 (behavioral truth extracted from Bolty C++ KeyDerivation.h)"
+    },
+    {
+      "id": "derivation-bolty-cpp-vector2-hw-proven",
+      "category": "derivation",
+      "input": {
+        "op": "derive_keys",
+        "issuer_key": "00000000000000000000000000000001",
+        "uid": "0425607a8f6980",
+        "version": 1
+      },
+      "expected": {
+        "card_key": "6a4a300223fd4ef3cea6ce75b5d641f5",
+        "k0": "ba2574fb30759cba205a4fb42b980f62",
+        "k1": "55da174c9608993dc27bb3f30a4a7314",
+        "k2": "2ab74abc1273fb43cae97553a36d4d08",
+        "k3": "f39b252dcc04856181523d6b4fb189c3",
+        "k4": "12b9fcf24a9d14bc93d3d69c07551e2c",
+        "card_id": "fb6d820a31c4dc891b989444a7c3dad4"
+      },
+      "origin": "bolty-rs tests/fixtures/derivation/boltcard_deterministic.toml Vector 2 (hardware-proven recovered card UID, issuer key ...01 / version 1)"
+    },
+    {
+      "id": "derivation-worker-crossrepo",
+      "category": "derivation",
+      "input": {
+        "op": "derive_keys",
+        "issuer_key": "00000000000000000000000000000001",
+        "uid": "04a39493cc8680",
+        "version": 1
+      },
+      "expected": {
+        "card_key": "ebff5a4e6da5ee14cbfe720ae06fbed9",
+        "k0": "a29119fcb48e737d1591d3489557e49b",
+        "k1": "55da174c9608993dc27bb3f30a4a7314",
+        "k2": "f4b404be700ab285e333e32348fa3d3b",
+        "k3": "73610ba4afe45b55319691cb9489142f",
+        "k4": "addd03e52964369be7f2967736b7bdb5",
+        "card_id": "e07ce1279d980ecb892a81924b67bf18"
+      },
+      "origin": "bolty-rs tests/fixtures/derivation/boltcard_deterministic.toml Vector 3 (cross-repo validation vs boltcard-cloudflareworker keygenerator.test.ts 'Generate deterministic keys for known UID')"
+    },
+    {
+      "id": "derivation-agents-recovery-v1",
+      "category": "derivation",
+      "input": {
+        "op": "derive_keys",
+        "issuer_key": "00000000000000000000000000000001",
+        "uid": "043365fa967380",
+        "version": 1
+      },
+      "expected": {
+        "card_key": "b86751eaa2fc214bd3b746caf7db5e51",
+        "k0": "4057766867304a7610bbf7c31ed93ce1"
+      },
+      "origin": "bolty-rs AGENTS.md 'Card Recovery: UID 043365FA967380' worked example (derived K0 v1 computed from issuer key 0000...0001)"
+    },
+    {
+      "id": "derivation-agents-recovery-v0",
+      "category": "derivation",
+      "input": {
+        "op": "derive_keys",
+        "issuer_key": "00000000000000000000000000000001",
+        "uid": "043365fa967380",
+        "version": 0
+      },
+      "expected": {
+        "k0": "68c3abc1d72e8a4f49cf294a9a2813c3"
+      },
+      "origin": "bolty-rs AGENTS.md 'Card Recovery' key-candidate table (Derived K0 v0, same issuer key / UID, version 0)"
+    },
+    {
+      "id": "sdm-valid-picc-counter0",
+      "category": "sdm",
+      "input": {
+        "op": "sdm_full",
+        "k1": "55da174c9608993dc27bb3f30a4a7314",
+        "k2": "2ab74abc1273fb43cae97553a36d4d08",
+        "p": "e61cb056f52d34f9368f079d1814d2cf",
+        "c": "fcc9a22201ea2298"
+      },
+      "expected": {
+        "decrypted_p": "c70425607a8f69800000000000000000",
+        "uid": "0425607a8f6980",
+        "counter_bytes": "000000",
+        "sv2": "3cc3000100800425607a8f6980000000",
+        "derived_mac_key": "85f6155e3414e60874534940a44703a2",
+        "full_cmac": "90fc61c953a2c922e50129eae4221998"
+      },
+      "origin": "bolty-rs tests/fixtures/picc/valid_picc.toml fixture 'Recovered card synthetic SDM vector, read counter 0' (behavioral truth extracted from Bolty C++ PiccData.h)"
+    },
+    {
+      "id": "sdm-valid-picc-counter1",
+      "category": "sdm",
+      "input": {
+        "op": "sdm_full",
+        "k1": "55da174c9608993dc27bb3f30a4a7314",
+        "k2": "2ab74abc1273fb43cae97553a36d4d08",
+        "p": "d798d011fa0bf5bd5ece6f42265b02d5",
+        "c": "b49d12860da69e54"
+      },
+      "expected": {
+        "decrypted_p": "c70425607a8f69800100000000000000",
+        "uid": "0425607a8f6980",
+        "counter_bytes": "010000",
+        "sv2": "3cc3000100800425607a8f6980010000",
+        "derived_mac_key": "e201ced0a166872a8d1746305d979edb",
+        "full_cmac": "dcb46b9d83123f86420d63a69f9ed254"
+      },
+      "origin": "bolty-rs tests/fixtures/picc/valid_picc.toml fixture 'Recovered card synthetic SDM vector, read counter 1' (behavioral truth extracted from Bolty C++ PiccData.h)"
+    },
+    {
+      "id": "sdm-sv2-counter42",
+      "category": "sdm",
+      "input": {
+        "op": "sv2_build",
+        "uid": "041065fa967380",
+        "counter_bytes": "2a0000"
+      },
+      "expected": {
+        "sv2": "3cc300010080041065fa9673802a0000"
+      },
+      "origin": "bolty-rs crates/bolty-core/src/picc.rs tests (picc_valid_vectors: sdm_build_sv2 for UID 041065FA967380, counter 42)"
+    }
+  ]
+}
