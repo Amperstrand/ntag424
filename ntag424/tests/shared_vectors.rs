@@ -23,13 +23,15 @@
 //! - `aes_cmac` (5: RFC 4493 Examples 3+4, AN12196 Table 1 SV1/SV2
 //!   session keys, Table 4 session key) — no public raw AES-CMAC entry
 //!   point; `crypto::suite::cmac_aes` is `pub(crate)`.
-//! - `derive_keys` (5) — the crate ships AN10922 key diversification
+//! - `derive_keys` (26) — the crate ships AN10922 key diversification
 //!   (`key_diversification::diversify_ntag424`), not the boltcard
 //!   deterministic derivation (tags `2D003F75`..`2D003F7B`) the vectors
 //!   pin.
 //! - `sv2_build` (2) — SV2 construction is internal to the verifier; the
 //!   `sun_mac`/`sdm_full` vectors exercise the same SV2 bytes
 //!   cryptographically (a wrong SV2 cannot produce the pinned MAC).
+//! - negative `sdm_full` vectors (3) run through the same
+//!   `sdm_full_vectors` test, asserting that verification REJECTS.
 
 use ntag424::sdm::Verifier;
 use ntag424::types::KeyNumber;
@@ -43,17 +45,11 @@ const VECTORS_JSON: &str = include_str!("vectors.json");
 
 fn vectors() -> Vec<Value> {
     let parsed: Value = serde_json::from_str(VECTORS_JSON).expect("vendored vectors.json parses");
-    parsed["vectors"]
-        .as_array()
-        .expect("vectors array")
-        .clone()
+    parsed["vectors"].as_array().expect("vectors array").clone()
 }
 
 fn unhex(s: &str) -> Vec<u8> {
-    assert!(
-        s.len() % 2 == 0,
-        "hex string must have even length: {s}"
-    );
+    assert!(s.len() % 2 == 0, "hex string must have even length: {s}");
     let bytes = s.as_bytes();
     (0..bytes.len() / 2)
         .map(|i| {
@@ -144,18 +140,24 @@ fn suite_accounting() {
     let all = vectors();
     assert_eq!(
         all.len(),
-        16,
+        46,
         "vendored vectors.json changed size - re-vendor from the canonical repo"
     );
-    // Expressible via public API: 4 vectors (1 picc_decrypt, 1 sun_mac,
-    // 2 sdm_full). Skipped: 12 (5 aes_cmac, 5 derive_keys, 2 sv2_build),
-    // each skip-reason documented in the module docs above.
+    // Expressible via public API: 13 vectors (1 picc_decrypt, 1 sun_mac,
+    // 11 sdm_full incl. 3 negative). Skipped: 33 (5 aes_cmac, 26
+    // derive_keys, 2 sv2_build), each skip-reason documented in the module
+    // docs above.
     let skipped = ["aes_cmac", "derive_keys", "sv2_build"];
     let skipped_count = all
         .iter()
         .filter(|v| skipped.contains(&v["input"]["op"].as_str().unwrap()))
         .count();
-    assert_eq!(skipped_count, 12);
+    assert_eq!(skipped_count, 33);
+    let negative_count = all
+        .iter()
+        .filter(|v| v["negative"].as_bool() == Some(true))
+        .count();
+    assert_eq!(negative_count, 3);
 }
 
 #[test]
@@ -166,9 +168,7 @@ fn an12196_picc_decrypt() {
             continue;
         }
         let id = v["id"].as_str().unwrap();
-        let key: [u8; 16] = unhex(&hex_str(&v["input"], "key", id))
-            .try_into()
-            .unwrap();
+        let key: [u8; 16] = unhex(&hex_str(&v["input"], "key", id)).try_into().unwrap();
         let ndef = ascii_hex(&unhex(&hex_str(&v["input"], "picc_enc_data", id))) + &"0".repeat(16);
 
         let (uid, ctr) = verifier
@@ -197,9 +197,7 @@ fn an12196_sun_mac() {
             continue;
         }
         let id = v["id"].as_str().unwrap();
-        let key: [u8; 16] = unhex(&hex_str(&v["input"], "key", id))
-            .try_into()
-            .unwrap();
+        let key: [u8; 16] = unhex(&hex_str(&v["input"], "key", id)).try_into().unwrap();
         let uid = unhex(&hex_str(&v["input"], "uid", id));
         let counter_bytes = unhex(&hex_str(&v["input"], "counter_bytes", id));
         // Known-answer check: the placeholder carries the vector's
@@ -236,21 +234,28 @@ fn sdm_full_vectors() {
             continue;
         }
         let id = v["id"].as_str().unwrap();
-        let k1: [u8; 16] = unhex(&hex_str(&v["input"], "k1", id))
-            .try_into()
-            .unwrap();
-        let k2: [u8; 16] = unhex(&hex_str(&v["input"], "k2", id))
-            .try_into()
-            .unwrap();
-        let ndef = ascii_hex(&unhex(&hex_str(&v["input"], "p", id)))
-            + &hex_str(&v["input"], "c", id);
+        let k1: [u8; 16] = unhex(&hex_str(&v["input"], "k1", id)).try_into().unwrap();
+        let k2: [u8; 16] = unhex(&hex_str(&v["input"], "k2", id)).try_into().unwrap();
+        let ndef =
+            ascii_hex(&unhex(&hex_str(&v["input"], "p", id))) + &hex_str(&v["input"], "c", id);
 
         // Full chain: PICC decrypt with K1, SV2 build, session-key
         // derivation from K2, CMAC over the empty MAC window, truncation
         // compared against the c= placeholder.
-        let verified = verifier
-            .verify_with_meta_key(ndef.as_bytes(), &k2, &k1)
-            .unwrap_or_else(|e| panic!("vector {id}: verification failed: {e}"));
+        let verified = verifier.verify_with_meta_key(ndef.as_bytes(), &k2, &k1);
+
+        if v["negative"].as_bool() == Some(true) {
+            // Reject vectors: the chain must refuse the p/c pair — either
+            // the PICCDataTag parse fails (e.g. 0xC6 → uid length 6) or
+            // the SUN MAC does not match.
+            assert!(
+                verified.is_err(),
+                "negative vector {id}: verification must reject"
+            );
+            continue;
+        }
+
+        let verified = verified.unwrap_or_else(|e| panic!("vector {id}: verification failed: {e}"));
         assert_eq!(
             verified.uid.unwrap_or_default(),
             *unhex(&hex_str(&v["expected"], "uid", id)).as_slice(),
