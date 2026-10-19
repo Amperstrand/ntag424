@@ -42,10 +42,31 @@ use ntag424::types::file_settings::{
 use serde_json::Value;
 
 const VECTORS_JSON: &str = include_str!("vectors.json");
+const VECTORS_LOCK: &str = include_str!("LOCK");
+const VECTORS_SHA256: &str =
+    "522cab963c3f7db1ab9249c0d4e207b43abc0b4061323fd5c55755959a4ff65f";
 
 fn vectors() -> Vec<Value> {
     let parsed: Value = serde_json::from_str(VECTORS_JSON).expect("vendored vectors.json parses");
     parsed["vectors"].as_array().expect("vectors array").clone()
+}
+
+#[test]
+fn vendored_vectors_are_reference_locked() {
+    use sha2::{Digest, Sha256};
+    let digest = hex_upper(Sha256::digest(VECTORS_JSON.as_bytes()).as_slice());
+    assert_eq!(
+        digest, VECTORS_SHA256,
+        "vendored vectors.json drifted from the canonical generation (see tests/LOCK)"
+    );
+    assert!(
+        VECTORS_LOCK.contains(&format!("vectors.json sha256: {VECTORS_SHA256}")),
+        "tests/LOCK does not pin the vendored sha256"
+    );
+}
+
+fn hex_upper(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn unhex(s: &str) -> Vec<u8> {
