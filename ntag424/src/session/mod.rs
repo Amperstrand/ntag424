@@ -14,9 +14,12 @@ use crate::commands::{
     change_key, change_master_key, get_card_uid, get_file_counters, get_file_settings,
     get_file_settings_mac, get_key_version, get_tt_status, get_version, get_version_mac,
     iso_read_binary, iso_select_ef_by_fid, iso_update_binary, read_data_full, read_data_mac,
-    read_data_plain, read_sig, read_sig_mac, select_ndef_application, set_configuration,
-    write_data_full, write_data_mac, write_data_plain,
+    read_data_plain, select_ndef_application, set_configuration, write_data_full, write_data_mac,
+    write_data_plain,
 };
+#[cfg(feature = "originality")]
+use crate::commands::{read_sig, read_sig_mac};
+#[cfg(feature = "originality")]
 use crate::crypto::originality::{self, OriginalityError};
 use crate::crypto::suite::{AesSuite, LrpSuite, SessionSuite};
 use crate::types::{
@@ -30,7 +33,10 @@ mod unauthenticated;
 
 pub use authenticated::{Authenticated, EncryptedSession};
 pub use authenticated_session::AuthenticatedSession;
-pub use unauthenticated::{FactoryStateCheckResult, Unauthenticated};
+pub use unauthenticated::Unauthenticated;
+
+#[cfg(feature = "originality")]
+pub use unauthenticated::FactoryStateCheckResult;
 
 pub type UnauthenticatedSession = Session<Unauthenticated>;
 
@@ -56,6 +62,7 @@ pub enum SessionError<E: Error + core::fmt::Debug> {
     ApduBodyTooLarge { got: usize, max: usize },
     #[error(transparent)]
     FileSettings(FileSettingsError),
+    #[cfg(feature = "originality")]
     #[error("originality verification failed: {0:?}")]
     OriginalityVerificationFailed(OriginalityError),
     /// Authentication validation failed.

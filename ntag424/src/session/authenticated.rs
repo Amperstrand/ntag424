@@ -315,6 +315,7 @@ macro_rules! impl_authenticated_session {
                 Ok(self)
             }
 
+            #[cfg(feature = "originality")]
             async fn verify_originality<T: Transport>(
                 mut self,
                 transport: &mut T,
@@ -817,6 +818,7 @@ impl AuthenticatedSession for EncryptedSession {
         }
     }
 
+    #[cfg(feature = "originality")]
     async fn verify_originality<T: Transport>(
         self,
         transport: &mut T,

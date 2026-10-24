@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+#[cfg(feature = "originality")]
 use crate::{
     TagTamperStatus,
     types::{cc::CapabilityContainer, file_settings::CryptoMode},
@@ -251,6 +252,9 @@ impl Session<Unauthenticated> {
     /// caller can inspect or store the raw signature bytes.
     ///
     /// The provided UID must not be a randomized ID - use [`AuthenticatedSession::get_uid`] if needed.
+    ///
+    /// Requires the `originality` feature (default-on).
+    #[cfg(feature = "originality")]
     pub async fn verify_originality<T: Transport>(
         &self,
         transport: &mut T,
@@ -280,6 +284,10 @@ impl Session<Unauthenticated> {
     /// - whether the tag has tag-tamper mode enabled (can not be reversed, but might be
     ///   acceptable), and
     /// - the originality signature and UID of the tag.
+    ///
+    /// Requires the `originality` feature (default-on) — the factory-state
+    /// criteria include NXP originality-signature verification.
+    #[cfg(feature = "originality")]
     pub async fn check_factory_state<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -431,6 +439,9 @@ impl Session<Unauthenticated> {
 /// The fields below report their state so the caller can decide whether those
 /// conditions are acceptable for its use case. Use [`strictly`](`Self::strictly`)
 /// if all three must still be at their factory defaults.
+///
+/// Only available with the `originality` feature (default-on).
+#[cfg(feature = "originality")]
 pub struct FactoryStateCheckResult {
     /// Whether random ID mode is active.
     ///
@@ -448,6 +459,7 @@ pub struct FactoryStateCheckResult {
     pub uid: [u8; 7],
 }
 
+#[cfg(feature = "originality")]
 impl FactoryStateCheckResult {
     /// Returns `true` if no irreversible changes have been applied since manufacture.
     ///

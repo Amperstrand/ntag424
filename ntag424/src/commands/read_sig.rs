@@ -6,10 +6,9 @@
 use crate::{
     Transport,
     commands::SecureChannel,
-    crypto::originality::SIGNATURE_LEN,
     crypto::suite::SessionSuite,
     session::SessionError,
-    types::{ResponseCode, ResponseStatus},
+    types::{ResponseCode, ResponseStatus, SIGNATURE_LEN},
 };
 
 /// `Read_Sig` (INS `3C`, NT4H2421Gx §10.12) in `CommMode.Plain`.

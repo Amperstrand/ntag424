@@ -16,6 +16,11 @@
 use p224::ecdsa::signature::hazmat::PrehashVerifier;
 use p224::ecdsa::{Signature, VerifyingKey};
 
+// The wire length of a `Read_Sig` response lives in `crate::types` (the
+// command layer must compile without this module); re-exported here for
+// the historical `crypto::originality::SIGNATURE_LEN` path.
+pub use crate::types::SIGNATURE_LEN;
+
 /// NXP's NTAG 424 DNA originality public key.
 ///
 /// Stored in SEC1 uncompressed form (`0x04 ‖ xD ‖ yD`). Source:
@@ -26,9 +31,6 @@ pub const NXP_ORIGINALITY_PUBLIC_KEY_SEC1: [u8; 57] = [
     0x42, 0x2B, 0x81, 0xEC, 0x20, 0xB6, 0x5A, 0x66, 0xB5, 0x10, 0x2A, 0x61, 0x59, 0x6A, 0xF3, 0x37,
     0x92, 0x00, 0x59, 0x93, 0x16, 0xA0, 0x0A, 0x14, 0x10,
 ];
-
-/// Length in bytes of a raw originality signature (28-byte `r` ‖ 28-byte `s`).
-pub const SIGNATURE_LEN: usize = 56;
 
 /// P-224 scalar-field byte width - size of the zero-extended prehash.
 const FIELD_BYTES: usize = 28;
