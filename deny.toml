@@ -3,7 +3,15 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+    # crypto-bigint 0.5.5 constant-time branches (fixed >=0.7.6, needs the
+    # RustCrypto 0.14 line; p224 0.14 is still RC-only). Reached ONLY via
+    # p224 for NXP originality-signature VERIFICATION with the fixed public
+    # NXP key — no private-key operations on this path. Builds that disable
+    # the `originality` feature drop p224/crypto-bigint entirely. Drop this
+    # ignore when p224 0.14 stable lands.
+    "RUSTSEC-2026-0387",
+]
 
 [licenses]
 allow = [

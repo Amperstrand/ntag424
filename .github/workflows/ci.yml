@@ -1,0 +1,152 @@
+---
+# Workflow: host-tier checks for the ntag424 workspace.
+#
+# This repo had NO CI before this file — the vectors-as-oracle conformance
+# rule and the feature-gated build matrix (no_std contract, originality-off
+# consumers like bolty-rs) were verified only by whatever lane happened to
+# touch the crate. The jobs mirror the local Justfile plus the checks that
+# caught real bugs during the `originality` feature-gate work:
+#
+#   - feature-unification trap: a workspace-wide `cargo test` unifies
+#     features through ntag424-pcsc's default dependency, silently
+#     re-enabling gated code. The matrix therefore pins feature sets with
+#     `-p ntag424` isolation.
+#   - RUSTSEC-2026-0387 ignore rationale lives in deny.toml next to the
+#     entry (p224 verify-only path; originality-off builds drop the dep).
+
+name: ci
+
+on:
+  push:
+    branches: [ai-experiments]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  test-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every feature shape the crate promises. The `bolty-style` set is
+        # what downstream embedded readers use (sdm + key-diversification +
+        # alloc, NO originality) — it must stay p224-free, which the
+        # dependency assertion below proves on every run.
+        include:
+          - name: default
+            test: cargo test --workspace
+            deps: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+          - name: bolty-style
+            test: cargo test -p ntag424 --no-default-features --features sdm,key-diversification,alloc
+            deps: ""
+          - name: no_std-contract
+            test: cargo build -p ntag424 --no-default-features
+            deps: ""
+          - name: all-features
+            test: cargo test -p ntag424 --all-features
+            deps: ""
+    name: tests (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies (pcsc)
+        if: matrix.deps != ''
+        run: ${{ matrix.deps }}
+      - run: ${{ matrix.test }}
+      - name: bolty-style graph must not contain p224/crypto-bigint
+        if: matrix.name == 'bolty-style'
+        run: |
+          count="$(cargo tree -p ntag424 --no-default-features \
+            --features sdm,key-diversification,alloc -e normal \
+            | grep -c -E 'p224|crypto-bigint' || true)"
+          [ "$count" = "0" ] || {
+            echo "::error::bolty-style feature set pulled in p224/crypto-bigint ($count nodes)"
+            exit 1
+          }
+
+  clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies (pcsc)
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p ntag424 --no-default-features --features sdm,key-diversification,alloc -- -D warnings
+
+  doc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc -p ntag424 --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies (pcsc)
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+      # Mirrors the Justfile check: the examples workspace is a separate
+      # lockfile pinned to the local crates.
+      - run: cargo check --manifest-path examples/Cargo.toml --locked
+
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-deny
+      - run: cargo deny check
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit
+      # RUSTSEC-2026-0387 (crypto-bigint 0.5.5): verify-only P-224 path with
+      # the fixed public NXP key; rationale + drop condition in deny.toml.
+      # Mirrors that ignore until p224 0.14 stable lands.
+      - run: cargo audit --ignore RUSTSEC-2026-0387
