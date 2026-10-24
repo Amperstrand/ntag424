@@ -264,7 +264,7 @@ pub(crate) fn aes_cbc_encrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> 
     }
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
-    for chunk in buf.chunks_exact_mut(16) {
+    for chunk in buf.as_chunks_mut::<16>().0 {
         for (b, p) in chunk.iter_mut().zip(prev.iter()) {
             *b ^= *p;
         }
@@ -288,7 +288,7 @@ pub(crate) fn aes_cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], buf: &mut [u8]) -> 
     let cipher = Aes128::new(&Array::from(*key));
     let mut prev: [u8; 16] = *iv;
     let mut save = [0u8; 16];
-    for chunk in buf.chunks_exact_mut(16) {
+    for chunk in buf.as_chunks_mut::<16>().0 {
         save.copy_from_slice(chunk);
         let mut block = Block::default();
         block.copy_from_slice(chunk);

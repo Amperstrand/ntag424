@@ -411,7 +411,7 @@ pub struct Sdm {
 impl Sdm {
     /// SDM fully disabled: no PICC data mirroring, no file-read MAC, no tamper status.
     ///
-    /// Use with [`FileSettingsUpdate::with_sdm`] to clear SDM when wiping a card:
+    /// Use with [`crate::FileSettingsUpdate::with_sdm`] to clear SDM when wiping a card:
     ///
     /// ```ignore
     /// let update = settings.into_update().with_sdm(Sdm::disabled());

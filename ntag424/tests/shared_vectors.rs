@@ -43,8 +43,7 @@ use serde_json::Value;
 
 const VECTORS_JSON: &str = include_str!("vectors.json");
 const VECTORS_LOCK: &str = include_str!("LOCK");
-const VECTORS_SHA256: &str =
-    "522cab963c3f7db1ab9249c0d4e207b43abc0b4061323fd5c55755959a4ff65f";
+const VECTORS_SHA256: &str = "522cab963c3f7db1ab9249c0d4e207b43abc0b4061323fd5c55755959a4ff65f";
 
 fn vectors() -> Vec<Value> {
     let parsed: Value = serde_json::from_str(VECTORS_JSON).expect("vendored vectors.json parses");
@@ -54,7 +53,7 @@ fn vectors() -> Vec<Value> {
 #[test]
 fn vendored_vectors_are_reference_locked() {
     use sha2::{Digest, Sha256};
-    let digest = hex_upper(Sha256::digest(VECTORS_JSON.as_bytes()).as_slice());
+    let digest = hex_upper(&Sha256::digest(VECTORS_JSON.as_bytes()));
     assert_eq!(
         digest, VECTORS_SHA256,
         "vendored vectors.json drifted from the canonical generation (see tests/LOCK)"
@@ -70,7 +69,10 @@ fn hex_upper(bytes: &[u8]) -> String {
 }
 
 fn unhex(s: &str) -> Vec<u8> {
-    assert!(s.len() % 2 == 0, "hex string must have even length: {s}");
+    assert!(
+        s.len().is_multiple_of(2),
+        "hex string must have even length: {s}"
+    );
     let bytes = s.as_bytes();
     (0..bytes.len() / 2)
         .map(|i| {
