@@ -16,6 +16,7 @@ mod iso_read_binary;
 mod iso_select_file;
 mod iso_update_binary;
 mod read_data;
+#[cfg(feature = "originality")]
 mod read_sig;
 mod secure_channel;
 mod set_configuration;
@@ -37,6 +38,7 @@ pub(crate) use iso_read_binary::iso_read_binary;
 pub(crate) use iso_select_file::{iso_select_ef_by_fid, select_ndef_application};
 pub(crate) use iso_update_binary::iso_update_binary;
 pub(crate) use read_data::{read_data_full, read_data_mac, read_data_plain};
+#[cfg(feature = "originality")]
 pub(crate) use read_sig::{read_sig, read_sig_mac};
 pub(crate) use secure_channel::SecureChannel;
 pub(crate) use set_configuration::set_configuration;

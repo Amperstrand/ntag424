@@ -183,8 +183,8 @@ impl Lrp {
         let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
         let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
 
-        for chunk in buf.chunks_exact_mut(16) {
-            let pt_block = Block::try_from(&*chunk).unwrap();
+        for chunk in buf.as_chunks_mut::<16>().0 {
+            let pt_block = Block::from(*chunk);
             let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
             let mut ct_block = Block::default();
             Aes128::new(&y).encrypt_block_b2b(&pt_block, &mut ct_block);
@@ -207,8 +207,8 @@ impl Lrp {
         let mut nibbles_buf = [Nibble::from_masked(0); LRICB_COUNTER_MAX_BYTES * 2];
         let nibs = Self::load_counter(counter, &mut nibbles_buf)?;
 
-        for chunk in buf.chunks_exact_mut(16) {
-            let ct_block = Block::try_from(&*chunk).unwrap();
+        for chunk in buf.as_chunks_mut::<16>().0 {
+            let ct_block = Block::from(*chunk);
             let y = eval_lrp(&self.plaintexts, self.k_prime, nibs, true);
             let mut pt_block = Block::default();
             Aes128::new(&y).decrypt_block_b2b(&ct_block, &mut pt_block);
