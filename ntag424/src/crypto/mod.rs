@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: MIT
 
 pub mod lrp;
+#[cfg(feature = "originality")]
 pub mod originality;
 #[cfg(feature = "sdm")]
 pub mod sdm;

@@ -138,10 +138,12 @@
 //!
 //! Recommendations if binary size is a concern:
 //!
-//! 1. **Skip originality verification.** The [`Session::verify_originality`](`crate::Session::verify_originality`)
-//!    function pulls in `p224` + `crypto-bigint` + `sha2` (~150 KB pre-link).
-//!    If you do not need to verify originality,
-//!    simply do not call this function and the linker has a chance to remove the related code.
+//! 1. **Disable originality verification.** The `originality` feature
+//!    (default-on) pulls in `p224` + `crypto-bigint` (~150 KB pre-link).
+//!    If you do not need to verify NXP originality signatures, build with
+//!    `default-features = false` (plus the features you do need) and the
+//!    `p224` dependency disappears from the tree entirely — stronger than
+//!    relying on the linker to dead-strip an unconditional dependency.
 //!
 //! 2. **Enable LTO.** Add to your `.cargo/config.toml` or `Cargo.toml`:
 //!    ```toml
@@ -334,11 +336,13 @@ macro_rules! sdm_url_config {
 
 pub use transport::{Response, Transport};
 
+#[cfg(feature = "originality")]
 pub use crypto::originality::OriginalitySignature;
 pub use crypto::suite::SessionSuite;
+#[cfg(feature = "originality")]
+pub use session::FactoryStateCheckResult;
 pub use session::{
-    AuthenticatedSession, EncryptedSession, FactoryStateCheckResult, Session, SessionError,
-    UnauthenticatedSession,
+    AuthenticatedSession, EncryptedSession, Session, SessionError, UnauthenticatedSession,
 };
 
 pub use types::{

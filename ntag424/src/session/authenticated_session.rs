@@ -1,10 +1,12 @@
 use core::future::Future;
 
 use super::Unauthenticated;
+#[cfg(feature = "originality")]
+use crate::crypto::originality::OriginalitySignature;
 use crate::{
     CommMode, Configuration, File, FileSettingsUpdate, FileSettingsView, KeyNumber,
     NonMasterKeyNumber, Session, SessionError, TagTamperStatusReadout, Transport, Version,
-    crypto::originality::OriginalitySignature, types::file_settings::CryptoMode,
+    types::file_settings::CryptoMode,
 };
 
 /// # Value semantics and command-counter safety
@@ -172,6 +174,9 @@ pub trait AuthenticatedSession: Sized {
     /// manufactured by NXP. On success returns the session and the verified
     /// [`OriginalitySignature`] so the caller can inspect or store the raw
     /// signature bytes.
+    ///
+    /// Requires the `originality` feature (default-on).
+    #[cfg(feature = "originality")]
     fn verify_originality<T: Transport>(
         self,
         transport: &mut T,
