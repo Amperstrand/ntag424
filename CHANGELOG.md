@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `FileSettingsUpdate::without_sdm()` — the explicit SDM factory-clear:
+  encodes the FileOption SDM enable bit CLEAR with no SDM fields (the
+  §8.2.3 delivery shape), enabling wipe flows built on a decoded view to
+  actually clear SDM instead of silently keeping the enable bit set
+  (issue #11).
+
+### Fixed
+
+- `Sdm::disabled()` docstring no longer presents
+  `with_sdm(Sdm::disabled())` as the wipe-to-factory flow: that call
+  still sets the enable bit (bit set, all mirroring off — the exact wire
+  shape the bolt-card reference wipe sends, locked by the
+  `refchangekey.js` FS_RESET parity test). Wipe flows that need the bit
+  cleared use `without_sdm()`.
+
 ## [v0.1.0] - 2026-05-04
 
 ### Added
