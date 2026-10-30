@@ -95,9 +95,9 @@ pub(crate) async fn authenticate_ev2_first<T: Transport>(
     rnd_a: [u8; 16],
 ) -> Result<AuthResult<AesSuite>, SessionError<T::Error>> {
     // Part 1: CLA=90 CMD=71 P1=00 P2=00 Lc=05 [KeyNo LenCap=03 PCDcap2=000000] Le=00.
-    // LenCap = 0x03 signals AES-128 key type and carries 3 zero bytes of PCDcap2
-    // (NT4H2421Gx §10.4.1, Table 25). Both LenCap=0x00 and 0x03 work on real
-    // NTAG 424 DNA hardware; 0x03 is the spec-recommended encoding.
+    // LenCap=0x03 explicitly signals AES-128 and carries 3 zero PCDcap2 bytes
+    // (Table 25 encoding). Both encodings pass hardware A/B (issue #3) — and
+    // AN12196's worked examples use LenCap=0x00; explicit signaling, not a fix.
     let part1_apdu = [
         0x90,
         0x71,
