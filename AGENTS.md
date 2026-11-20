@@ -37,8 +37,16 @@ LenCap=0x03; 6: docs correction) ride the integration branch.
 ```bash
 cargo build
 cargo test
-cargo build --no-default-features   # no_std contract
+just ensure-no-std   # no_std contract — package-scoped
 ```
+
+The no_std check MUST stay package-scoped (`cargo build -p ntag424
+--no-default-features --target thumbv7em-none-eabihf`, per the
+Justfile's `ensure-no-std`): at the workspace root, `ntag424-pcsc`'s
+default-features dependency re-enables the core's `high-level-api`/
+`alloc` via Cargo feature unification, so the check would pass without
+exercising the intended featureless configuration (or fail on PC/SC
+host dependencies). Never document or run the workspace-root variant.
 
 The AES authenticate fixtures were regenerated for LenCap=0x03 (PR5) —
 fixture changes here are hardware-behavior statements, not test churn:
